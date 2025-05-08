@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "es2016", // 或者与后端一致
+    "module": "commonjs",
+    "outDir": "./dist", // 输出目录
+    "rootDir": ".", // 源文件根目录 (main.ts 就在 electron/ 下)
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "sourceMap": true
+  },
+  "include": ["main.ts"], // 只编译 main.ts
+  "exclude": ["node_modules"]
+}

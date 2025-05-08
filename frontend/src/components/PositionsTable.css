@@ -1,0 +1,108 @@
+/* PositionsTable.css - Synced with TransactionList style */
+
+.positions-table {
+  width: 100%;
+  font-size: 13px; /* Keep base font size */
+  background: #fff;
+  border-radius: 8px; /* Updated border-radius */
+  box-shadow: 0 1px 8px rgba(0,0,0,0.06); /* Updated shadow for card effect */
+  overflow: hidden; /* Needed for border-radius on table */
+  padding: 16px; /* Added padding for card effect */
+  /* Note: This padding might affect internal table layout, review if needed */
+}
+
+/* Use Antd default small table padding and hover */
+/* Remove custom .positions-table-row and .positions-table-row:hover */
+
+/* Zebra stripes for better readability */
+.positions-table .ant-table-tbody > tr:nth-child(even) > td {
+  background-color: #fafafa;
+}
+
+/* Row hover effect with shadow and lift */
+.positions-table .ant-table-tbody > tr.ant-table-row:hover { /* Target the row itself */
+  box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+  transform: translateY(-1px);
+  z-index: 1; /* Ensure hovered row is above others */
+  /* Remove background override if shadow is preferred */
+  /* background: #e6f7ff !important; */
+}
+/* We need to ensure TDs inherit background or set it explicitly if needed */
+.positions-table .ant-table-tbody > tr.ant-table-row:hover > td {
+  background: inherit; /* Inherit row background, might need adjustment */
+}
+
+/* Basic Tag styling - rely on TSX for colors */
+.positions-table .pnl-tag {
+  min-width: 70px; /* Slightly smaller min-width */
+  text-align: right; /* Align text inside tag right */
+  font-weight: 500;
+  font-size: 13px; /* Match table font size */
+  border-radius: 4px;
+  /* Remove custom background/color/shadow - let Antd handle it via color prop */
+  padding: 1px 6px; /* Adjust padding if needed */
+  margin: 0; /* Reset margin */
+  display: inline-block; /* Ensure tag behaves correctly */
+}
+
+/* Comment out specific right alignment - will be handled by global center rule */
+/*
+.positions-table .ant-table-cell[align="right"] {
+  text-align: right !important;
+  font-family: 'Consolas', 'Menlo', 'Monaco', 'monospace', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
+}
+*/
+.positions-table .ant-table-cell[align="center"] {
+  /* Override previous center alignment if any column still uses it accidentally */
+   /* text-align: center !important; */
+   /* Let default or TSX align handle it */
+}
+
+/* Global cell styling: Center alignment and font */
+.positions-table .ant-table-cell {
+   vertical-align: middle;
+   text-align: center !important; /* <<<< ADDED: Global center alignment */
+   font-family: 'Consolas', 'Menlo', 'Monaco', 'monospace', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
+   padding: 8px 8px; /* Adjust padding for small table */
+}
+
+
+/* Remove custom header style, use Antd default small/bordered header */
+/* .positions-table .ant-table-thead > tr > th { ... } */
+
+/* Keep responsive design rules, check selectors */
+/* These should still work as they target cells by index */
+@media (max-width: 900px) {
+  .positions-table .ant-table-thead > tr > th:nth-child(3), /* 成本价 */
+  .positions-table .ant-table-tbody > tr > td:nth-child(3),
+  .positions-table .ant-table-thead > tr > th:nth-child(4), /* 现价 */
+  .positions-table .ant-table-tbody > tr > td:nth-child(4),
+  .positions-table .ant-table-thead > tr > th:nth-child(5), /* 市值 */
+  .positions-table .ant-table-tbody > tr > td:nth-child(5),
+  .positions-table .ant-table-thead > tr > th:nth-child(10), /* 周期涨幅 */
+  .positions-table .ant-table-tbody > tr > td:nth-child(10) {
+    display: none;
+  }
+}
+
+@media (max-width: 600px) {
+  .positions-table .ant-table-thead > tr > th:nth-child(2), /* 数量 */
+  .positions-table .ant-table-tbody > tr > td:nth-child(2),
+  .positions-table .ant-table-thead > tr > th:nth-child(6), /* 当日盈亏 */
+  .positions-table .ant-table-tbody > tr > td:nth-child(6),
+  .positions-table .ant-table-thead > tr > th:nth-child(7), /* 当日盈亏% */
+  .positions-table .ant-table-tbody > tr > td:nth-child(7),
+  .positions-table .ant-table-thead > tr > th:nth-child(8), /* 总盈亏 */
+  .positions-table .ant-table-tbody > tr > td:nth-child(8),
+  .positions-table .ant-table-thead > tr > th:nth-child(9), /* 总盈亏% */
+  .positions-table .ant-table-tbody > tr > td:nth-child(9) {
+    display: none;
+  }
+}
+
+/* Ensure container border radius works */
+.positions-table .ant-table-container {
+  border-radius: 6px;
+  /* Remove shadow here, apply to parent .positions-table */
+  /* box-shadow: 0 2px 8px rgba(0,0,0,0.04); */
+}

@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "es2016", // 或更新版本如 "es2020"
+    "module": "commonjs",
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true, // 允许导入 JSON 文件
+    "sourceMap": true // 生成 source map 文件，便于调试
+  },
+  "include": ["src/**/*"], // 指定需要编译的文件目录
+  "exclude": ["node_modules", "**/*.spec.ts"] // 指定排除的文件/目录
+}

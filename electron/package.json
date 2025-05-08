@@ -1,0 +1,80 @@
+{
+  "build": {
+    "appId": "com.yourname.portfoliotool",
+    "productName": "Portfolio Management Tool",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/main.js",
+      "package.json",
+      {
+        "from": "../frontend/dist",
+        "to": "renderer",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../backend/dist",
+        "to": "backend",
+        "filter": [
+          "**/*"
+        ]
+      },
+      "!node_modules${/*}",
+      "!src${/*}",
+      "!*.ts",
+      "!*.map",
+      "!tsconfig.json",
+      "!release${/*}"
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "build/icon.icns"
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "build/icon.png"
+    }
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-forge make"
+  },
+  "name": "electron",
+  "version": "1.0.0",
+  "main": "dist/main.js",
+  "keywords": [],
+  "author": "Portfolio Tool Developer",
+  "license": "ISC",
+  "description": "A comprehensive portfolio management tool for tracking investments",
+  "devDependencies": {
+    "@electron-forge/cli": "^7.8.0",
+    "@electron-forge/maker-deb": "^7.8.0",
+    "@electron-forge/maker-rpm": "^7.8.0",
+    "@electron-forge/maker-squirrel": "^7.8.0",
+    "@electron-forge/maker-zip": "^7.8.0",
+    "@electron-forge/plugin-auto-unpack-natives": "^7.8.0",
+    "@electron-forge/plugin-fuses": "^7.8.0",
+    "@electron/fuses": "^1.8.0",
+    "@types/node": "^22.14.1",
+    "@types/node-fetch": "^2.6.12",
+    "@types/wait-on": "^5.3.4",
+    "concurrently": "^9.1.2",
+    "electron": "^35.1.5",
+    "typescript": "^5.8.3",
+    "wait-on": "^8.0.3"
+  },
+  "dependencies": {
+    "electron-squirrel-startup": "^1.0.1",
+    "node-fetch": "^2.6.7"
+  }
+}
