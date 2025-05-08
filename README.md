@@ -1,7 +1,9 @@
 # Unified Holdings Tracker - 桌面应用
 
 一个使用 Electron、React 和 Node.js 构建的桌面应用程序，用于跟踪和管理投资组合。
-
+![image](https://github.com/user-attachments/assets/db707842-b0b7-43b0-abce-ea84b506356d)
+![投资组合快照_20250508025358](https://github.com/user-attachments/assets/af5e6b92-470f-46d3-a463-6c39cd83e6f1)
+记录每年杠杆用了多少钱，刚按比例，分红多少钱，手续费花了多少钱。仓位的整体年化等等。
 ## 主要功能
 
 *   投资组合概览与统计
