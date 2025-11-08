@@ -1,0 +1,45 @@
+# Node
+node_modules/
+**/node_modules/
+
+# Build output
+**/dist/
+**/out/
+**/release/
+**/final-release/
+frontend/.vite/
+*.asar
+*.asar.unpacked
+electron/renderer/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+._*
+
+# IDE / Tooling specific
+.vscode/
+.idea/
+.cursor/
+.repomix/
+.specstory/
+
+# Others
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Electron Forge / Electron Builder 缓存或特定输出
+.electron/
+# Windows Installer files (if generated in root)
+*.exe
+*.msi
+
+# User-specific data
+# Ignore backend/data/ directory
+backend/data/
