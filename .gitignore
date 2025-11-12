@@ -43,3 +43,5 @@ Thumbs.db
 # User-specific data
 # Ignore backend/data/ directory
 backend/data/
+# SpecStory explanation file
+.specstory/.what-is-this.md
