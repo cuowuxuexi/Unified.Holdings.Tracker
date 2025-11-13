@@ -1,8 +1,9 @@
 import axios from 'axios';
 import { Quote, KlinePoint } from '../store/types'; // Adjust path if needed
 import { Portfolio, PortfolioDetail, Transaction, TransactionInput, PortfolioInput, PortfolioStats } from '../store/types'; // 添加 PortfolioStats 导入
+import { frontendEnv } from '../env';
 
-const API_BASE_URL = 'http://localhost:3001'; // Corrected: Removed trailing /api
+const API_BASE_URL = frontendEnv.apiBaseUrl.replace(/\/api\/?$/, ''); // Remove /api suffix if present
 
 const apiClient = {
   // Add the /api prefix back to specific routes that need it (assuming routes are defined with /api in server.ts)
@@ -142,6 +143,63 @@ const apiClient = {
       await axios.delete(`${API_BASE_URL}/api/portfolio/${portfolioId}`);
     } catch (error) {
       console.error(`Error deleting portfolio ${portfolioId} from API client:`, error);
+      throw error;
+    }
+  },
+
+  updateTransactionNotes: async (
+    portfolioId: string,
+    transactionId: string,
+    notes: string
+  ): Promise<Transaction> => {
+    try {
+      const response = await axios.patch<Transaction>(
+        `${API_BASE_URL}/api/portfolio/${portfolioId}/transactions/${transactionId}/notes`,
+        { notes }
+      );
+      return response.data;
+    } catch (error) {
+      console.error(
+        `Error updating notes for transaction ${transactionId} in portfolio ${portfolioId} from API client:`,
+        error
+      );
+      throw error;
+    }
+  },
+
+  updatePortfolioAttention: async (
+    portfolioId: string,
+    attentionInfo: string
+  ): Promise<{ id: string; attentionInfo?: string }> => {
+    try {
+      const response = await axios.patch<{ id: string; attentionInfo?: string }>(
+        `${API_BASE_URL}/api/portfolio/${portfolioId}/attention`,
+        { attentionInfo }
+      );
+      return response.data;
+    } catch (error) {
+      console.error(
+        `Error updating attention info for portfolio ${portfolioId} from API client:`,
+        error
+      );
+      throw error;
+    }
+  },
+
+  exportPortfolioMarkdown: async (portfolioId: string): Promise<Blob> => {
+    try {
+      const response = await axios.get<Blob>(
+        `${API_BASE_URL}/api/portfolio/${portfolioId}/export/markdown`,
+        {
+          responseType: 'blob',
+        }
+      );
+      return response.data;
+    } catch (error) {
+      console.error(
+        `Error exporting markdown report for portfolio ${portfolioId} from API client:`,
+        error
+      );
       throw error;
     }
   }

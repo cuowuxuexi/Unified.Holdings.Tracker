@@ -55,7 +55,7 @@ export interface Transaction {
   date: string;
   currency: string;
   exchangeRate: number;
-  note?: string;
+  notes?: string;  // 统一使用 notes 字段
   quantity?: number;  // 添加可选的数量字段，用于买入/卖出交易
   commission?: number;  // 添加可选的手续费字段
 }
@@ -85,12 +85,28 @@ export interface LeverageInfo {
   interestRate: number; // 年利率 (%)
 }
 
+// 单条注意信息
+export interface AttentionItem {
+  id: string;          // 唯一标识
+  icon: string;        // emoji 图标
+  title: string;       // 标题
+  content: string;     // 内容描述
+  createdAt: string;   // 创建时间
+  updatedAt: string;   // 更新时间
+}
+
+// 注意信息列表
+export interface AttentionInfo {
+  items: AttentionItem[];
+}
+
 // Basic portfolio info (for lists)
 export interface Portfolio {
   id: string;
   name: string;
   cash: number;
   leverageInfo?: LeverageInfo;
+  attentionInfo?: string;
 }
 
 // Interface for positions with calculated stats from the /stats endpoint
@@ -114,6 +130,8 @@ export interface PortfolioStats {
   netAssets: number; // 净资产 (总资产 - 负债/已用杠杆) - Assuming leverage is handled
   dailyPnl: number; // 当日盈亏金额
   totalPnl: number; // 累计盈亏金额
+  realizedPnl?: number; // 已实现盈亏
+  unrealizedPnl?: number; // 未实现盈亏（浮动盈亏）
   periodReturnPercent?: number; // 期间收益率 (%) - Optional as it depends on 'period' param
   positions: PositionWithStats[]; // Updated positions list with stats
   // Add other potential fields from backend if necessary
@@ -139,12 +157,30 @@ export interface PortfolioDetail extends Portfolio {
   netDepositedCash: number;
 }
 
+// 指数分类栏目类型
+export interface IndexCategory {
+  id: string;           // 唯一标识
+  label: string;        // 可自定义的显示名称（如"A股指数"）
+  order: number;        // 排序
+  visible: boolean;     // 是否显示
+}
+
 // 新增已选指数对象类型
 export interface SelectedIndexItem {
   code: string;
   name: string;
   visible: boolean;
-  type: 'market' | 'stock'; // 新增字段，区分大盘和个股
+  categoryId: string;   // 所属栏目ID（替代原来的 type）
+}
+
+// 新增市场配置类型
+export interface MarketConfig {
+  key: string; // 唯一标识
+  label: string; // 显示名称
+  currency: string; // 货币类型
+  symbol: string; // 货币符号
+  codePrefix: string[]; // 代码前缀数组，用于匹配持仓
+  visible: boolean; // 是否显示
 }
 
 // --- Update AppState ---
@@ -159,6 +195,18 @@ export interface AppState {
   isLoadingMarketIndices: boolean;
   marketIndicesError: string | null;
   selectedIndices: SelectedIndexItem[]; // Default indices to show
+  
+  // Index Categories State
+  indexCategories: IndexCategory[]; // 指数分类栏目列表
+  setIndexCategories: (categories: IndexCategory[]) => void; // 设置分类栏目
+  addIndexCategory: (category: Omit<IndexCategory, 'id' | 'order'>) => void; // 添加分类
+  updateIndexCategory: (id: string, updates: Partial<IndexCategory>) => void; // 更新分类
+  deleteIndexCategory: (id: string) => void; // 删除分类
+  reorderIndexCategories: (categories: IndexCategory[]) => void; // 重新排序
+
+  // Market Configuration State
+  marketConfigs: MarketConfig[]; // 市场配置列表
+  setMarketConfigs: (configs: MarketConfig[]) => void; // 设置市场配置
 
   // Portfolio State
   portfolios: Portfolio[];
@@ -183,4 +231,6 @@ export interface AppState {
   deleteTransaction: (portfolioId: string, transactionId: string) => Promise<void>;
   fetchCurrentPortfolioStats: (portfolioId: string, period?: string, startDate?: string, endDate?: string) => Promise<void>; // 更新函数签名，添加日期参数
   setSelectedIndices: (indices: SelectedIndexItem[]) => void; // Action to set selected indices
+  updateTransactionNotes: (portfolioId: string, transactionId: string, notes: string) => Promise<void>;
+  updateAttentionInfo: (portfolioId: string, attentionInfo: string) => Promise<void>;
 }

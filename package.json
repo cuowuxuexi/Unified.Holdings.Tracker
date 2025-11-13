@@ -4,20 +4,38 @@
   "version": "1.0.0",
   "main": "index.js",
   "workspaces": [
-    "backend",
+    "apps/backend",
     "frontend",
-    "electron"
+    "electron",
+    "packages/*"
   ],
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev:frontend": "npm run dev -w frontend",
-    "dev:backend": "npm run dev -w backend",
+    "test:backend": "npm test -w backend",
+    "dev": "concurrently \"npm:dev:backend\" \"npm:dev:frontend\" --names \"后端,前端\" --prefix-colors \"bgBlue,bgGreen\"",
+    "dev:frontend": "cross-env NODE_ENV=development npm run dev -w frontend",
+    "dev:backend": "cross-env NODE_ENV=development npm run dev -w backend",
+    "start:backend": "npm run build -w backend && npm run start -w backend",
     "build:electron": "npm run build -w electron",
     "watch:electron": "npm run watch -w electron",
     "start:electron": "npm run start:dist -w electron",
-    "electron-dev": "concurrently \"npm:dev:backend\" \"npm:dev:frontend\" \"npm:watch:electron\" \"wait-on http://localhost:5173 http://localhost:3001 && npm run start:electron\"",
+    "electron-dev": "concurrently \"npm:dev:backend\" \"npm:dev:frontend\" \"npm:watch:electron\" \"wait-on http://localhost:5173 http://localhost:3001 && cross-env NODE_ENV=development npm run start:electron\"",
+    "clean": "rimraf frontend/node_modules/.vite apps/backend/dist packages/*/dist electron/dist electron/renderer **/*.tsbuildinfo",
+    "clean:cache": "rimraf frontend/node_modules/.vite",
     "lint": "eslint . --ext .ts,.tsx --report-unused-disable-directives --max-warnings 0",
-    "format": "prettier --write ."
+    "lint:fix": "eslint . --ext .ts,.tsx --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md}": [
+      "prettier --write"
+    ]
   },
   "keywords": [],
   "author": "",
@@ -28,12 +46,16 @@
     "@typescript-eslint/eslint-plugin": "^8.30.1",
     "@typescript-eslint/parser": "^8.30.1",
     "concurrently": "^9.1.2",
+    "cross-env": "^10.1.0",
     "eslint": "^9.24.0",
     "eslint-config-prettier": "^10.1.2",
     "eslint-plugin-prettier": "^5.2.6",
     "eslint-plugin-react": "^7.37.5",
     "eslint-plugin-react-hooks": "^5.2.0",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.6",
     "prettier": "^3.5.3",
+    "rimraf": "^6.1.0",
     "wait-on": "^8.0.3"
   }
 }

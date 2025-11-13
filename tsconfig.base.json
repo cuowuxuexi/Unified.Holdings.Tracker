@@ -4,6 +4,15 @@
     "target": "ES2020",
     "module": "commonjs",
     "moduleResolution": "node",
+    "baseUrl": ".",
+    "paths": {
+      "@uht/domain": ["packages/domain/src"],
+      "@uht/domain/*": ["packages/domain/src/*"],
+      "@uht/application": ["packages/application/src"],
+      "@uht/application/*": ["packages/application/src/*"],
+      "@uht/infra": ["packages/infra/src"],
+      "@uht/infra/*": ["packages/infra/src/*"]
+    },
     "strict": true,
     "esModuleInterop": true,
     "skipLibCheck": true,

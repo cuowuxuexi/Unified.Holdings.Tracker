@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "baseUrl": "../../",
+    "paths": {
+      "@uht/domain": ["packages/domain/src"],
+      "@uht/domain/*": ["packages/domain/src/*"],
+      "@uht/application": ["packages/application/src"],
+      "@uht/application/*": ["packages/application/src/*"],
+      "@uht/infra": ["packages/infra/src"],
+      "@uht/infra/*": ["packages/infra/src/*"]
+    },
+    "types": ["node", "jest"]
+  },
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "**/*.spec.ts", "dist"]
+}

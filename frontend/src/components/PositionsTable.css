@@ -35,13 +35,13 @@
 /* Basic Tag styling - rely on TSX for colors */
 .positions-table .pnl-tag {
   min-width: 70px; /* Slightly smaller min-width */
-  text-align: right; /* Align text inside tag right */
+  text-align: center !important; /* Center align text inside tag */
   font-weight: 500;
   font-size: 13px; /* Match table font size */
   border-radius: 4px;
   /* Remove custom background/color/shadow - let Antd handle it via color prop */
   padding: 1px 6px; /* Adjust padding if needed */
-  margin: 0; /* Reset margin */
+  margin: 0 auto !important; /* Center the tag itself */
   display: inline-block; /* Ensure tag behaves correctly */
 }
 
@@ -60,12 +60,41 @@
 
 /* Global cell styling: Center alignment and font */
 .positions-table .ant-table-cell {
-   vertical-align: middle;
+   vertical-align: middle !important;
    text-align: center !important; /* <<<< ADDED: Global center alignment */
    font-family: 'Consolas', 'Menlo', 'Monaco', 'monospace', 'PingFang SC', 'Microsoft YaHei', Arial, sans-serif;
    padding: 8px 8px; /* Adjust padding for small table */
 }
 
+/* Table header center alignment */
+.positions-table .ant-table-thead > tr > th {
+   text-align: center !important;
+   font-weight: 600;
+   vertical-align: middle !important;
+}
+
+/* Force center all content in table cells */
+.positions-table .ant-table-tbody > tr > td {
+   text-align: center !important;
+   vertical-align: middle !important;
+}
+
+/* 周期涨幅容器样式 - 确保完全居中 */
+.positions-table .period-change-container {
+  display: inline-flex !important;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* 周期涨幅列单元格样式 */
+.positions-table .ant-table-cell:has(.period-change-container) {
+  text-align: center !important;
+  padding: 4px 8px !important;
+  vertical-align: middle !important;
+}
 
 /* Remove custom header style, use Antd default small/bordered header */
 /* .positions-table .ant-table-thead > tr > th { ... } */

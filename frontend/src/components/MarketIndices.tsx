@@ -1,14 +1,32 @@
-import React, { useEffect, useState } from 'react';
-import { Card, Typography, Spin, Divider, Alert, Button, Modal, Input, Space, Tag, message } from 'antd'; // Removed Col, Row, Checkbox, Form
-import { SettingOutlined, PlusOutlined } from '@ant-design/icons';
-import useAppStore from '../store'; // Import the Zustand store
+import React, { useEffect, useMemo, useState } from 'react';
+import { Card, Typography, Spin, Divider, Alert, Button, Modal, Input, Space, Tag } from 'antd';
+import { SettingOutlined, PlusOutlined, EditOutlined, DeleteOutlined } from '@ant-design/icons';
+import useAppStore from '../store';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
-import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
+import { arrayMove, SortableContext, sortableKeyboardCoordinates, horizontalListSortingStrategy, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import type { SelectedIndexItem } from '../store/types';
+import type { SelectedIndexItem, IndexCategory } from '../store/types';
 import { formatPercent } from './utils/format';
+import useMessageApi from '../hooks/useMessageApi';
 
 const { Title, Text } = Typography;
+
+const PERIOD_UP_COLOR = '#fa541c';
+const PERIOD_DOWN_COLOR = '#52c41a';
+const PERIOD_FLAT_COLOR = '#999';
+
+const renderPeriodChangeTag = (label: string, value?: number | null) => {
+  if (value === undefined || value === null) return null;
+  const color = value > 0 ? PERIOD_UP_COLOR : value < 0 ? PERIOD_DOWN_COLOR : PERIOD_FLAT_COLOR;
+
+  return (
+    <span style={{ color, fontWeight: 600 }}>
+      {label}
+      {/* 后端返回的周期涨幅已经是百分比数值，不需要再乘以100 */}
+      {Math.abs(value).toFixed(2)}%
+    </span>
+  );
+};
 
 // 验证指数代码格式
 const validateIndexCode = (code: string): boolean => {
@@ -19,7 +37,7 @@ const validateIndexCode = (code: string): boolean => {
 // SortableItem组件，包裹Tag
 const SortableItem: React.FC<{ item: SelectedIndexItem; children: React.ReactNode }> = ({ item, children }) => {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: `${item.type}-${item.code}`
+    id: `${item.categoryId}-${item.code}`
   });
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -36,99 +54,357 @@ const SortableItem: React.FC<{ item: SelectedIndexItem; children: React.ReactNod
   );
 };
 
+// 可排序的分类标签组件
+const SortableCategoryTab: React.FC<{ category: IndexCategory; isActive: boolean; onClick: () => void }> = ({ category, isActive, onClick }) => {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: category.id
+  });
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    display: 'inline-block',
+    marginRight: 12,
+  };
+  
+  // 处理点击事件，确保点击能够触发
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onClick();
+  };
+  
+  return (
+    <div ref={setNodeRef} style={style} {...attributes}>
+      <span
+        style={{
+          fontWeight: 700,
+          fontSize: 18,
+          color: isActive ? '#222' : '#888',
+          cursor: 'pointer',
+          borderBottom: isActive ? '2px solid #1890ff' : 'none',
+          paddingBottom: 2,
+          transition: 'color 0.2s',
+          display: 'inline-block',
+        }}
+        onClick={handleClick}
+      >
+        {category.label}
+      </span>
+      {/* 拖拽手柄，使用单独的元素 */}
+      <span {...listeners} style={{ display: 'inline-block', width: 0, height: 0, position: 'absolute' }} />
+    </div>
+  );
+};
+
 const MarketIndices: React.FC = () => {
-  // MODIFIED: Select state and actions individually to prevent infinite loops
+  // Store state
   const marketIndicesData = useAppStore((state) => state.marketIndicesData);
   const isLoadingMarketIndices = useAppStore((state) => state.isLoadingMarketIndices);
   const marketIndicesError = useAppStore((state) => state.marketIndicesError);
   const fetchMarketIndices = useAppStore((state) => state.fetchMarketIndices);
   const selectedIndices = useAppStore((state) => state.selectedIndices);
   const setSelectedIndices = useAppStore((state) => state.setSelectedIndices);
+  const indexCategories = useAppStore((state) => state.indexCategories);
+  const setIndexCategories = useAppStore((state) => state.setIndexCategories);
+  const addIndexCategory = useAppStore((state) => state.addIndexCategory);
+  const updateIndexCategory = useAppStore((state) => state.updateIndexCategory);
+  const deleteIndexCategory = useAppStore((state) => state.deleteIndexCategory);
+  const reorderIndexCategories = useAppStore((state) => state.reorderIndexCategories);
 
-  // State for modal visibility
-  const [isModalVisible, setIsModalVisible] = useState(false);
-  // 新增状态用于自定义指数输入
+  // Local state
+  const [isSettingsModalVisible, setIsSettingsModalVisible] = useState(false);
+  const [isAddCategoryModalVisible, setIsAddCategoryModalVisible] = useState(false);
+  const [isEditCategoryModalVisible, setIsEditCategoryModalVisible] = useState(false);
   const [customIndexCode, setCustomIndexCode] = useState('');
   const [customCodeError, setCustomCodeError] = useState('');
-  // 1. 新增 activeTab 状态
-  const [activeTab, setActiveTab] = useState<'market' | 'stock'>('market');
+  const [newCategoryName, setNewCategoryName] = useState('');
+  const [editingCategory, setEditingCategory] = useState<IndexCategory | null>(null);
+  const [editCategoryName, setEditCategoryName] = useState('');
+  const [draftCategories, setDraftCategories] = useState<IndexCategory[]>([]);
+  const [draftIndices, setDraftIndices] = useState<SelectedIndexItem[]>([]);
+  const [isDraftDirty, setIsDraftDirty] = useState(false);
+  const [isEditingDraftCategory, setIsEditingDraftCategory] = useState(false);
+  
+  // 获取可见的分类，并按 order 排序
+  const visibleCategories = indexCategories
+    .filter(cat => cat.visible)
+    .sort((a, b) => a.order - b.order);
+  
+  // 当前激活的分类 ID
+  const [activeCategoryId, setActiveCategoryId] = useState<string>(
+    visibleCategories.length > 0 ? visibleCategories[0].id : ''
+  );
 
-  const showModal = () => {
-    setIsModalVisible(true);
+  const messageApi = useMessageApi();
+
+  // 同步草稿状态到最新 store 数据
+  useEffect(() => {
+    if (isSettingsModalVisible) {
+      setDraftCategories(indexCategories.map(cat => ({ ...cat })));
+      setDraftIndices(selectedIndices.map(item => ({ ...item })));
+      setIsDraftDirty(false);
+    }
+  }, [isSettingsModalVisible, indexCategories, selectedIndices]);
+
+  // 当分类列表变化时，确保 activeCategoryId 仍然有效
+  useEffect(() => {
+    if (!visibleCategories.find(cat => cat.id === activeCategoryId)) {
+      if (visibleCategories.length > 0) {
+        setActiveCategoryId(visibleCategories[0].id);
+      }
+    }
+  }, [visibleCategories, activeCategoryId]);
+
+  const activeCategoryIndices = useMemo(
+    () => selectedIndices.filter((item) => item.categoryId === activeCategoryId),
+    [selectedIndices, activeCategoryId]
+  );
+
+  const modalCategoryIndices = useMemo(
+    () =>
+      (isSettingsModalVisible ? draftIndices : selectedIndices).filter(
+        (item) => item.categoryId === activeCategoryId
+      ),
+    [isSettingsModalVisible, draftIndices, selectedIndices, activeCategoryId]
+  );
+
+  const settingsCategories = isSettingsModalVisible ? draftCategories : indexCategories;
+  const activeCategoryLabel = settingsCategories.find(cat => cat.id === activeCategoryId)?.label || '';
+
+  // Fetch data when selectedIndices change
+  useEffect(() => {
+    if (isSettingsModalVisible || selectedIndices.length === 0) return;
+    const timer = setTimeout(() => {
+      fetchMarketIndices();
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [selectedIndices, fetchMarketIndices, isSettingsModalVisible]);
+
+  const showSettingsModal = () => {
+    setIsSettingsModalVisible(true);
   };
 
-  const handleOk = () => {
-    setIsModalVisible(false);
-    // Data is refetched by the useEffect hook below based on selectedIndices change
+  const closeSettingsModal = () => {
+    setIsSettingsModalVisible(false);
+    setDraftCategories([]);
+    setDraftIndices([]);
+    setIsDraftDirty(false);
   };
 
-  const handleCancel = () => {
-    setIsModalVisible(false);
+  const handleSettingsSave = () => {
+    if (isDraftDirty) {
+      const normalizedCategories = draftCategories.map((cat, index) => ({ ...cat, order: index }));
+      setIndexCategories(normalizedCategories);
+      setSelectedIndices(draftIndices);
+    }
+    closeSettingsModal();
   };
 
-  // handleCheckboxChange is removed as Checkbox group is replaced by Tags
+  const handleSettingsCancel = () => {
+    if (!isDraftDirty) {
+      closeSettingsModal();
+      return;
+    }
+    Modal.confirm({
+      title: '放弃未保存的修改？',
+      okText: '放弃',
+      cancelText: '继续编辑',
+      onOk: closeSettingsModal,
+    });
+  };
 
-  // 添加自定义指数的处理函数
+  // 添加新分类
+  const handleAddCategory = () => {
+    const trimmedName = newCategoryName.trim();
+    if (!trimmedName) {
+      messageApi.warning('请输入栏目名称');
+      return;
+    }
+
+    if (isSettingsModalVisible) {
+      setDraftCategories((prev) => {
+        const nextOrder = prev.length > 0 ? Math.max(...prev.map((c) => c.order)) + 1 : 0;
+        setIsDraftDirty(true);
+        return [
+          ...prev,
+          {
+            id: `category_${Date.now()}`,
+            label: trimmedName,
+            visible: true,
+            order: nextOrder,
+          },
+        ];
+      });
+    } else {
+      addIndexCategory({ label: trimmedName, visible: true });
+    }
+
+    setNewCategoryName('');
+    setIsAddCategoryModalVisible(false);
+  };
+
+  // 编辑分类
+  const handleEditCategory = (category: IndexCategory) => {
+    setEditingCategory(category);
+    setEditCategoryName(category.label);
+    setIsEditingDraftCategory(isSettingsModalVisible);
+    setIsEditCategoryModalVisible(true);
+  };
+
+  const handleSaveEditCategory = () => {
+    if (!editCategoryName.trim() || !editingCategory) {
+      messageApi.warning('请输入栏目名称');
+      return;
+    }
+    const updatedLabel = editCategoryName.trim();
+    if (isSettingsModalVisible || isEditingDraftCategory) {
+      setDraftCategories((prev) => {
+        setIsDraftDirty(true);
+        return prev.map((cat) =>
+          cat.id === editingCategory.id ? { ...cat, label: updatedLabel } : cat
+        );
+      });
+    } else {
+      updateIndexCategory(editingCategory.id, { label: updatedLabel });
+    }
+    setIsEditCategoryModalVisible(false);
+    setEditingCategory(null);
+    setIsEditingDraftCategory(false);
+  };
+
+  // 删除分类
+  const handleDeleteCategory = (categoryId: string) => {
+    Modal.confirm({
+      title: '确认删除',
+      content: '删除该栏目将同时删除该栏目下的所有指数，是否继续？',
+      okText: '确认',
+      cancelText: '取消',
+      onOk: () => {
+        if (isSettingsModalVisible) {
+          setDraftCategories((prev) => {
+            setIsDraftDirty(true);
+            const filtered = prev.filter((cat) => cat.id !== categoryId);
+            return filtered.map((cat, index) => ({ ...cat, order: index }));
+          });
+          setDraftIndices((prev) => {
+            setIsDraftDirty(true);
+            return prev.filter((item) => item.categoryId !== categoryId);
+          });
+        } else {
+          deleteIndexCategory(categoryId);
+        }
+      },
+    });
+  };
+
+  // 添加自定义指数
   const handleAddCustomIndex = () => {
     setCustomCodeError('');
-    if (!customIndexCode.trim()) {
+    const trimmedCode = customIndexCode.trim();
+    if (!trimmedCode) {
       setCustomCodeError('请输入指数代码');
       return;
     }
-    if (!validateIndexCode(customIndexCode)) {
+    if (!validateIndexCode(trimmedCode)) {
       setCustomCodeError('格式无效，请使用正确的指数代码格式（如 sh000001, hkHSI, usNDAQ）');
       return;
     }
-    if (selectedIndices.some(item => item.code === customIndexCode && item.type === activeTab)) {
-      setCustomCodeError('该指数已在当前区块列表中');
+    if (!activeCategoryId) {
+      setCustomCodeError('请先选择栏目');
       return;
     }
-    setSelectedIndices([...selectedIndices, { code: customIndexCode, name: '', visible: true, type: activeTab }]);
+    const workingIndices = isSettingsModalVisible ? draftIndices : selectedIndices;
+    if (workingIndices.some(item => item.code === trimmedCode && item.categoryId === activeCategoryId)) {
+      setCustomCodeError('该指数已在当前栏目列表中');
+      return;
+    }
+    const updated = [...workingIndices, { code: trimmedCode, name: '', visible: true, categoryId: activeCategoryId }];
+    if (isSettingsModalVisible) {
+      setDraftIndices(updated);
+      setIsDraftDirty(true);
+    } else {
+      setSelectedIndices(updated);
+    }
     setCustomIndexCode('');
-    message.success('成功添加指数');
   };
 
-  // 删除指数的处理函数
+  // 删除指数
   const handleRemoveIndex = (indexCode: string) => {
-    setSelectedIndices(selectedIndices.filter(item => !(item.code === indexCode && item.type === activeTab)));
+    const workingIndices = isSettingsModalVisible ? draftIndices : selectedIndices;
+    const updated = workingIndices.filter(item => !(item.code === indexCode && item.categoryId === activeCategoryId));
+    if (isSettingsModalVisible) {
+      setDraftIndices(updated);
+      setIsDraftDirty(true);
+    } else {
+      setSelectedIndices(updated);
+    }
   };
 
   // Tag点击切换visible
   const handleToggleVisible = (indexCode: string) => {
-    setSelectedIndices(selectedIndices.map(item =>
-      item.code === indexCode && item.type === activeTab ? { ...item, visible: !item.visible } : item
-    ));
+    const workingIndices = isSettingsModalVisible ? draftIndices : selectedIndices;
+    const updated = workingIndices.map(item =>
+      (item.code === indexCode && item.categoryId === activeCategoryId)
+        ? { ...item, visible: !item.visible }
+        : item
+    );
+    if (isSettingsModalVisible) {
+      setDraftIndices(updated);
+      setIsDraftDirty(true);
+    } else {
+      setSelectedIndices(updated);
+    }
   };
 
-  // 拖拽排序
-  const handleDragEnd = (event: DragEndEvent) => {
+  // 拖拽排序处理 - 指数标签
+  const handleDragEndIndices = (event: DragEndEvent) => {
     const { active, over } = event;
-    if (over && active.id !== over.id) {
-      // 只对当前区块的type进行排序
-      const filtered = selectedIndices.filter(item => item.type === activeTab);
-      const other = selectedIndices.filter(item => item.type !== activeTab);
-      // 新的唯一id
-      const getId = (item: typeof filtered[0]) => `${item.type}-${item.code}`;
-      const oldIndex = filtered.findIndex(item => getId(item) === active.id);
-      const newIndex = filtered.findIndex(item => getId(item) === over.id);
-      if (oldIndex !== -1 && newIndex !== -1) {
-        const newOrder = arrayMove(filtered, oldIndex, newIndex);
-        setSelectedIndices([...other, ...newOrder]);
+    if (!over || active.id === over.id) return;
+
+    const activeId = String(active.id);
+    const overId = String(over.id);
+
+    // 提取 code
+    const activeCode = activeId.split('-').slice(1).join('-');
+    const overCode = overId.split('-').slice(1).join('-');
+
+    const sourceIndices = isSettingsModalVisible ? draftIndices : selectedIndices;
+    // 只对当前分类下的指数进行排序
+    const currentCategoryIndices = sourceIndices.filter(item => item.categoryId === activeCategoryId);
+    const otherIndices = sourceIndices.filter(item => item.categoryId !== activeCategoryId);
+
+    const oldIndex = currentCategoryIndices.findIndex(item => item.code === activeCode);
+    const newIndex = currentCategoryIndices.findIndex(item => item.code === overCode);
+
+    if (oldIndex !== -1 && newIndex !== -1) {
+      const reorderedCurrent = arrayMove(currentCategoryIndices, oldIndex, newIndex);
+      const next = [...otherIndices, ...reorderedCurrent];
+      if (isSettingsModalVisible) {
+        setDraftIndices(next);
+        setIsDraftDirty(true);
       } else {
-        console.error('Could not find dragged item indices in selectedIndices array.');
+        setSelectedIndices(next);
       }
     }
   };
 
-  // Fetch data when the component mounts or selectedIndices change
-  useEffect(() => {
-    // Check if selectedIndices is actually defined and has changed if needed,
-    // though Zustand handles shallow equality checks for primitives/arrays now.
-    // The dependency array correctly triggers fetch when selectedIndices changes.
-    fetchMarketIndices();
-  }, [fetchMarketIndices, selectedIndices]); // Keep dependencies
+  // 拖拽排序处理 - 分类标签
+  const handleDragEndCategories = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
 
-  // dnd-kit sensors
+    const activeId = String(active.id);
+    const overId = String(over.id);
+
+    const oldIndex = indexCategories.findIndex(cat => cat.id === activeId);
+    const newIndex = indexCategories.findIndex(cat => cat.id === overId);
+
+    if (oldIndex !== -1 && newIndex !== -1) {
+      const reorderedCategories = arrayMove(indexCategories, oldIndex, newIndex);
+      reorderIndexCategories(reorderedCategories);
+    }
+  };
+
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, {
@@ -136,45 +412,43 @@ const MarketIndices: React.FC = () => {
     })
   );
 
+  // 当前分类下的指数（用于主卡片区域）
+  const currentCategoryIndices = activeCategoryIndices;
+
   return (
     <div style={{ marginBottom: '24px' }}>
-      {/* 顶部切换标签 */}
+      {/* 顶部分类标签栏 */}
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <span
-            style={{
-              fontWeight: 700,
-              fontSize: 18,
-              color: activeTab === 'market' ? '#222' : '#888',
-              cursor: activeTab === 'market' ? 'default' : 'pointer',
-              marginRight: 12,
-              borderBottom: activeTab === 'market' ? '2px solid #1890ff' : 'none',
-              paddingBottom: 2,
-              transition: 'color 0.2s'
-            }}
-            onClick={() => setActiveTab('market')}
+        <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEndCategories}>
+            <SortableContext items={visibleCategories.map(cat => cat.id)} strategy={horizontalListSortingStrategy}>
+              {visibleCategories.map(category => (
+                <SortableCategoryTab
+                  key={category.id}
+                  category={category}
+                  isActive={activeCategoryId === category.id}
+                  onClick={() => setActiveCategoryId(category.id)}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
+          
+          <Button
+            type="text"
+            size="small"
+            icon={<PlusOutlined />}
+            onClick={() => setIsAddCategoryModalVisible(true)}
+            style={{ marginLeft: 4 }}
           >
-            大盘
-          </span>
-          <span
-            style={{
-              fontWeight: 700,
-              fontSize: 18,
-              color: activeTab === 'stock' ? '#222' : '#888',
-              cursor: activeTab === 'stock' ? 'default' : 'pointer',
-              marginLeft: 0,
-              borderBottom: activeTab === 'stock' ? '2px solid #1890ff' : 'none',
-              paddingBottom: 2,
-              transition: 'color 0.2s'
-            }}
-            onClick={() => setActiveTab('stock')}
-          >
-            ➡️个股
-          </span>
+            添加栏目
+          </Button>
         </div>
-        <Button type="text" shape="circle" icon={<SettingOutlined />} onClick={showModal} />
+        
+        <Button type="text" shape="circle" icon={<SettingOutlined />} onClick={showSettingsModal} />
       </div>
+      
       <Divider />
+      
       {isLoadingMarketIndices ? (
         <div style={{ textAlign: 'center', padding: '50px 0' }}>
           <Spin size="large" />
@@ -190,7 +464,7 @@ const MarketIndices: React.FC = () => {
           margin: '0 auto',
           maxWidth: '98%'
         }}>
-          {selectedIndices.filter(item => item.visible && item.type === activeTab).map((item) => {
+          {currentCategoryIndices.filter(item => item.visible).map((item) => {
             const index = marketIndicesData.find(idx => idx.code === item.code);
             if (!index) return null;
             return (
@@ -229,69 +503,63 @@ const MarketIndices: React.FC = () => {
                   bottom: 0,
                   width: '3px',
                   borderRadius: '2px',
-                  background: index.changePercent >= 0 ? '#f5222d' : '#52c41a'
+                  background: index.changePercent >= 0 ? PERIOD_UP_COLOR : PERIOD_DOWN_COLOR
                 }} />
-                <div style={{ width: '100%', minWidth: 0 }}>
+
+                <div style={{ 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  height: '100%',
+                  justifyContent: 'space-around'
+                }}>
                   {/* 指数名称 */}
                   <div style={{
-                    fontWeight: 600,
-                    fontSize: '13px',
-                    marginBottom: '2px',
+                    fontWeight: 700,
+                    fontSize: '14px',
+                    color: '#222',
                     whiteSpace: 'nowrap',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
-                    color: '#222'
-                  }}>{index.name || item.code}</div>
-                  {/* 价格单独一行 */}
+                    lineHeight: '1.2',
+                  }}>
+                    {index.name}
+                  </div>
+
+                  {/* 当前价格 */}
                   <div style={{
                     fontWeight: 700,
-                    fontSize: '16px',
+                    fontSize: '20px',
                     color: '#111',
-                    marginBottom: '2px',
-                    lineHeight: 1.1,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    minWidth: 0
+                    lineHeight: '1.2',
                   }}>
-                    {typeof index.currentPrice === 'number' ? index.currentPrice.toFixed(2) : 'N/A'}
+                    {index.currentPrice.toFixed(2)}
                   </div>
-                  {/* 日涨跌单独一行 */}
-                  <div style={{
-                    color: index.changePercent >= 0 ? '#f5222d' : '#52c41a',
-                    fontWeight: 500,
-                    display: 'flex',
-                    alignItems: 'center',
-                    fontSize: '13px',
-                    marginBottom: '2px',
-                    minWidth: 0
-                  }}>
-                    {typeof index.changeAmount === 'number' ? Math.abs(index.changeAmount).toFixed(2) : 'N/A'}
-                    &nbsp;({typeof index.changePercent === 'number' ? Math.abs(index.changePercent).toFixed(2) + '%' : 'N/A'})
-                    <span style={{ fontSize: '11px', marginLeft: 2 }}>
-                      {typeof index.changePercent === 'number' ? (index.changePercent >= 0 ? '▲' : '▼') : ''}
-                    </span>
+
+                  {/* 涨跌幅和涨跌额 */}
+                  <div>
+                    <Text
+                      style={{
+                        color: index.changePercent >= 0 ? PERIOD_UP_COLOR : PERIOD_DOWN_COLOR,
+                        fontWeight: 600,
+                        fontSize: '13px',
+                        lineHeight: '1.2',
+                      }}
+                    >
+                      {index.changeAmount >= 0 ? '+' : ''}{index.changeAmount.toFixed(2)} ({formatPercent(index.changePercent)})
+                    </Text>
                   </div>
-                  {/* 分隔线 */}
-                  <div style={{ borderTop: '1px dashed #eee', margin: '2px 0 3px 0' }} />
-                  {/* W/M/Y+数字一行展示 */}
-                  <div style={{
+
+                  {/* 周期涨跌幅 */}
+                  <div style={{ 
+                    display: 'flex', 
+                    justifyContent: 'flex-start', 
+                    gap: '6px', 
                     fontSize: '11px',
-                    color: '#999',
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    gap: '0 16px',
-                    letterSpacing: 0,
-                    minWidth: 0
+                    lineHeight: '1.2',
                   }}>
-                    <span style={{ color: typeof index.weekChangePercent !== 'number' ? '#ccc' : (index.weekChangePercent >= 0 ? '#f5222d' : '#52c41a'), minWidth: 0 }}>
-                      W{typeof index.weekChangePercent === 'number' ? formatPercent(Math.abs(index.weekChangePercent), 2) : 'N/A'}
-                    </span>
-                    <span style={{ color: typeof index.monthChangePercent !== 'number' ? '#ccc' : (index.monthChangePercent >= 0 ? '#f5222d' : '#52c41a'), minWidth: 0 }}>
-                      M{typeof index.monthChangePercent === 'number' ? formatPercent(Math.abs(index.monthChangePercent), 2) : 'N/A'}
-                    </span>
-                    <span style={{ color: typeof index.yearChangePercent !== 'number' ? '#ccc' : (index.yearChangePercent >= 0 ? '#f5222d' : '#52c41a'), minWidth: 0 }}>
-                      Y{typeof index.yearChangePercent === 'number' ? formatPercent(Math.abs(index.yearChangePercent), 2) : 'N/A'}
-                    </span>
+                    {renderPeriodChangeTag('W', index.weekChangePercent)}
+                    {renderPeriodChangeTag('M', index.monthChangePercent)}
+                    {renderPeriodChangeTag('Y', index.yearChangePercent)}
                   </div>
                 </div>
               </Card>
@@ -299,98 +567,146 @@ const MarketIndices: React.FC = () => {
           })}
         </div>
       )}
+
+      {/* 设置模态框 - 管理当前分类下的指数 */}
       <Modal
-        title={`管理和排序${activeTab === 'market' ? '大盘' : '个股'}`}
-        open={isModalVisible}
-        onOk={handleOk}
-        onCancel={handleCancel}
+        title={`管理 ${activeCategoryLabel} 指数`}
+        open={isSettingsModalVisible}
+        onCancel={handleSettingsCancel}
+        width={700}
         footer={[
-          <Button key="back" onClick={handleCancel}>
-            关闭
+          <Button key="cancel" onClick={handleSettingsCancel}>
+            取消
           </Button>,
+          <Button key="save" type="primary" onClick={handleSettingsSave} disabled={!isDraftDirty}>
+            保存
+          </Button>
         ]}
-        width={600}
       >
-        {/* 仅保留已选指数管理区 */}
-        <div>
-          <Title level={5}>已选{activeTab === 'market' ? '大盘' : '个股'}（拖拽排序）</Title>
-          <div style={{ marginTop: '16px', padding: '10px', border: '1px dashed #d9d9d9', borderRadius: '4px', minHeight: '100px' }}>
-            {selectedIndices.filter(item => item.type === activeTab).length > 0 ? (
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                onDragEnd={handleDragEnd}
-              >
-                <SortableContext
-                  items={selectedIndices.filter(item => item.type === activeTab).map(item => `${item.type}-${item.code}`)}
-                  strategy={verticalListSortingStrategy}
-                >
-                  {selectedIndices.filter(item => item.type === activeTab).map(item => {
-                    const index = marketIndicesData.find(idx => idx.code === item.code);
-                    return (
-                      <SortableItem key={`${item.type}-${item.code}`} item={item}>
-                        <Tag
-                          color={item.visible ? 'blue' : undefined}
-                          style={{
-                            cursor: 'pointer',
-                            background: item.visible ? undefined : '#f5f5f5',
-                            color: item.visible ? undefined : '#aaa',
-                            borderColor: item.visible ? undefined : '#d9d9d9',
-                            userSelect: 'none',
-                          }}
-                          closable
-                          onClose={e => {
-                            e.stopPropagation();
-                            handleRemoveIndex(item.code);
-                          }}
-                          onClick={() => handleToggleVisible(item.code)}
-                        >
-                          {index?.name || item.code}
-                        </Tag>
-                      </SortableItem>
-                    );
-                  })}
-                </SortableContext>
-              </DndContext>
-            ) : (
-              <Text type="secondary">暂未选择任何{activeTab === 'market' ? '大盘' : '个股'}。请添加。</Text>
-            )}
-          </div>
+        {/* 栏目管理区 */}
+        <div style={{ marginBottom: 24 }}>
+          <Title level={5}>栏目管理</Title>
+          <Space direction="vertical" style={{ width: '100%' }}>
+            {settingsCategories.map(category => (
+              <div key={category.id} style={{ 
+                display: 'flex', 
+                justifyContent: 'space-between', 
+                alignItems: 'center',
+                padding: '8px 12px',
+                background: '#f5f5f5',
+                borderRadius: '4px'
+              }}>
+                <span style={{ fontWeight: 600 }}>{category.label}</span>
+                <Space>
+                  <Button 
+                    type="text" 
+                    size="small" 
+                    icon={<EditOutlined />}
+                    onClick={() => handleEditCategory(category)}
+                  >
+                    编辑
+                  </Button>
+                  {settingsCategories.length > 1 && (
+                    <Button 
+                      type="text" 
+                      size="small" 
+                      danger
+                      icon={<DeleteOutlined />}
+                      onClick={() => handleDeleteCategory(category.id)}
+                    >
+                      删除
+                    </Button>
+                  )}
+                </Space>
+              </div>
+            ))}
+          </Space>
         </div>
-        {/* 添加新指数入口可根据 activeTab 区分 */}
-        <div style={{ marginTop: 24 }}>
-          <Title level={5}>添加{activeTab === 'market' ? '大盘' : '个股'}</Title>
-          <Space.Compact style={{ width: '100%', marginTop: '8px' }}>
+
+        <Divider />
+
+        {/* 添加自定义指数 */}
+        <div style={{ marginBottom: 16 }}>
+          <Title level={5}>添加指数到当前栏目</Title>
+          <Space.Compact style={{ width: '100%' }}>
             <Input
-              placeholder={`输入${activeTab === 'market' ? '大盘' : '个股'}代码 (如 sh000001)`}
+              placeholder="输入指数代码 (如 sh000001, hkHSI, usNDAQ)"
               value={customIndexCode}
-              onChange={e => {
-                setCustomIndexCode(e.target.value);
-                setCustomCodeError('');
-              }}
-              status={customCodeError ? 'error' : ''}
+              onChange={e => setCustomIndexCode(e.target.value)}
               onPressEnter={handleAddCustomIndex}
+              status={customCodeError ? 'error' : ''}
             />
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={handleAddCustomIndex}
-            >
+            <Button type="primary" icon={<PlusOutlined />} onClick={handleAddCustomIndex}>
               添加
             </Button>
           </Space.Compact>
-          {customCodeError && (
-            <div style={{ color: '#ff4d4f', fontSize: '12px', marginTop: '4px' }}>
-              {customCodeError}
-            </div>
-          )}
-          <div style={{ fontSize: '12px', color: '#999', marginTop: '8px' }}>
-            格式指南：上证/深证指数使用 sh/sz 前缀 (如 sh000001)，港股用 hk 前缀，美股用 us 前缀
-          </div>
+          {customCodeError && <Text type="danger" style={{ fontSize: 12 }}>{customCodeError}</Text>}
         </div>
+
+        {/* 当前栏目指数列表 */}
+        <Title level={5}>当前栏目指数列表（拖拽排序，点击隐藏/显示）</Title>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEndIndices}>
+          <SortableContext items={modalCategoryIndices.map(item => `${item.categoryId}-${item.code}`)} strategy={verticalListSortingStrategy}>
+            <div>
+              {modalCategoryIndices.map(item => (
+                <SortableItem key={`${item.categoryId}-${item.code}`} item={item}>
+                  <Tag
+                    closable
+                    onClose={() => handleRemoveIndex(item.code)}
+                    onClick={() => handleToggleVisible(item.code)}
+                    color={item.visible ? 'blue' : 'default'}
+                    style={{ cursor: 'move', marginBottom: 8 }}
+                  >
+                    {item.name || item.code} {!item.visible && '(已隐藏)'}
+                  </Tag>
+                </SortableItem>
+              ))}
+            </div>
+          </SortableContext>
+        </DndContext>
+      </Modal>
+
+      {/* 添加栏目模态框 */}
+      <Modal
+        title="添加新栏目"
+        open={isAddCategoryModalVisible}
+        onOk={handleAddCategory}
+        onCancel={() => {
+          setIsAddCategoryModalVisible(false);
+          setNewCategoryName('');
+        }}
+        okText="添加"
+        cancelText="取消"
+      >
+        <Input
+          placeholder="输入栏目名称（如：港股自选、美股科技）"
+          value={newCategoryName}
+          onChange={e => setNewCategoryName(e.target.value)}
+          onPressEnter={handleAddCategory}
+        />
+      </Modal>
+
+      {/* 编辑栏目模态框 */}
+      <Modal
+        title="编辑栏目"
+        open={isEditCategoryModalVisible}
+        onOk={handleSaveEditCategory}
+        onCancel={() => {
+          setIsEditCategoryModalVisible(false);
+          setEditingCategory(null);
+        }}
+        okText="保存"
+        cancelText="取消"
+      >
+        <Input
+          placeholder="输入栏目名称"
+          value={editCategoryName}
+          onChange={e => setEditCategoryName(e.target.value)}
+          onPressEnter={handleSaveEditCategory}
+        />
       </Modal>
     </div>
   );
 };
 
-export { MarketIndices as default };
+export default MarketIndices;

@@ -3,22 +3,22 @@ import { ThemeConfig } from 'antd';
 
 export const theme: ThemeConfig = {
   token: {
-    // 品牌色系 - 优化与金融投资相关的色彩
-    colorPrimary: '#1890ff', // 调整主色调
+    // 品牌色系 - Claude 风格暖橙棕色
+    colorPrimary: '#CC7A4F',
 
-    // 功能色系 - 增强红绿对比度
+    // 功能色系
     colorSuccess: '#52c41a',
     colorWarning: '#faad14',
-    colorError: '#ff4d4f',   // 略微调整红色
+    colorError: '#ff4d4f',
 
-    // 中性色系 - 更精细的层次
-    colorTextBase: '#262626',    // 主文本色
-    colorBgBase: '#ffffff',      // 基础背景色
-    colorBorder: '#f0f0f0',      // 边框色
+    // 中性色系 - Claude 风格
+    colorTextBase: '#2C2C2C',    // 主文本色
+    colorBgBase: '#FFFFFF',      // 基础背景色（卡片）
+    colorBorder: '#E8E5E0',      // 边框色
 
     // 尺寸和圆角
-    borderRadius: 4,            // 基础圆角
-    borderRadiusLG: 8,          // 大型元素圆角
+    borderRadius: 8,             // 基础圆角（加大）
+    borderRadiusLG: 12,          // 大型元素圆角（加大）
 
     // 字体系统
     fontSize: 14,
@@ -28,11 +28,18 @@ export const theme: ThemeConfig = {
   },
 
   components: {
-    // 卡片组件样式优化
+    // 卡片组件样式优化 - Claude 风格
     Card: {
-      colorBorderSecondary: '#f0f0f0',
-      paddingLG: 16,
-      boxShadowTertiary: '0 1px 10px rgba(0,0,0,0.05)',
+      colorBorderSecondary: '#E8E5E0',
+      paddingLG: 24,
+      boxShadowTertiary: '0 2px 16px rgba(0,0,0,0.06)',
+    },
+
+    // 按钮组件样式
+    Button: {
+      colorPrimary: '#CC7A4F',
+      colorPrimaryHover: '#B36A42',
+      colorPrimaryActive: '#9A5835',
     },
 
     // 表格组件样式优化
@@ -45,22 +52,41 @@ export const theme: ThemeConfig = {
       rowHoverBg: '#e6f7ff',
     },
 
-    // 布局组件样式优化
+    // 布局组件样式优化 - Claude 风格米白色背景
     Layout: {
-      headerBg: '#001529',
-      bodyBg: '#f5f7fa',
+      headerBg: '#FFFFFF',
+      bodyBg: '#F5F3EF',           // Claude 风格米白色
       siderBg: '#ffffff',
     }
   }
 };
 
-// 添加自定义变量，方便全局使用
+// Claude 风格配色变量
 export const customVars = {
+  // 背景色系
+  bgPrimary: '#F5F3EF',          // 主背景（米白色）
+  bgCard: '#FFFFFF',             // 卡片背景
+  
+  // 品牌色系
+  brandPrimary: '#CC7A4F',       // 主色调（暖橙棕）
+  brandHover: '#B36A42',         // 悬停态
+  brandActive: '#9A5835',        // 激活态
+  
+  // 文本色系
+  textPrimary: '#2C2C2C',        // 主文本
+  textSecondary: '#6B6B6B',      // 次文本
+  textTertiary: '#999999',       // 辅助文本
+  
   // 金融应用特定变量
   profitColor: '#52c41a',
   lossColor: '#ff4d4f',
   numberFontFamily: '"SF Mono", Consolas, Menlo, monospace',
-  cardShadow: '0 2px 12px rgba(0, 0, 0, 0.06)',
+  
+  // 边框和阴影
+  borderColor: '#E8E5E0',
+  dividerColor: '#D6D3CE',
+  cardShadow: '0 2px 16px rgba(0, 0, 0, 0.06)',
+  cardShadowHover: '0 4px 24px rgba(0, 0, 0, 0.12)',
 
   // 响应式断点
   breakpoints: {

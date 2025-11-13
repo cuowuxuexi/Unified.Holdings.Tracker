@@ -7,6 +7,7 @@ node_modules/
 **/out/
 **/release/
 **/final-release/
+**/*.tsbuildinfo
 frontend/.vite/
 *.asar
 *.asar.unpacked
@@ -41,7 +42,84 @@ Thumbs.db
 *.msi
 
 # User-specific data
-# Ignore backend/data/ directory
-backend/data/
+# Ignore backend/data/ directory (moved under apps/)
+apps/backend/data/
+
+# Legacy code (archived for reference)
+docs/legacy-backend/
+
 # SpecStory explanation file
 .specstory/.what-is-this.md
+
+# ============================================
+# 新增：防止临时文件被提交
+# ============================================
+
+# 备份文件
+.backups/
+*.backup
+*.bak
+
+# 临时调试脚本
+test-*.js
+verify-*.js
+check-*.js
+debug-*.js
+analyze-*.js
+trace-*.js
+fix-*.js
+clear-*.js
+*.bat
+*.ps1
+!apps/backend/jest.config.js
+
+# 临时文档（优化记录）
+*_FIX*.md
+*_COMPLETE*.md
+*_INSTRUCTIONS.md
+*_QUICKSTART.md
+*_SUMMARY.md
+URGENT_*.md
+STAGE_*.md
+CHANGELOG_*.md
+TROUBLESHOOTING.md
+HOW_TO_USE_NOW.md
+开发模式使用指南.md
+优化完成报告.md
+
+# 编译产物（packages 下的 JS 文件）
+packages/**/src/**/*.js
+packages/**/src/**/*.js.map
+packages/**/src/**/*.d.ts
+packages/**/src/**/*.d.ts.map
+
+# 数据库文件
+*.db
+*.db-*
+*.db.backup*
+apps/backend/prisma/dev.db
+apps/backend/prisma/data/*.db*
+apps/backend/prisma/apps/
+
+# 临时图片和日志
+Generated*.png
+localhost-*.log
+
+# IDE 临时文件
+.claude/*.html
+.claude/settings.local.json
+.playwright-mcp/*.png
+.serena/
+
+# OpenSpec 临时文件
+openspec/changes/**/README.md
+openspec/changes/**/SUMMARY.md
+openspec/changes/**/FINAL_REPORT.md
+openspec/changes/**/IMPLEMENTATION_COMPLETE.md
+openspec/changes/**/QUICK_START.md
+openspec/changes/**/NEXT_STEPS.md
+
+# 其他临时文件
+agents.md
+batch_import_template.xlsx
+check-backend-logs.md

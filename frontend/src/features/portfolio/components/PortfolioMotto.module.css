@@ -1,0 +1,70 @@
+/* 座右铭容器 */
+.mottoContainer {
+  padding: 20px;
+  background: transparent;
+  max-width: 600px;
+  width: auto;
+  transition: all 0.3s ease;
+  cursor: default;
+  margin-top: 0;
+}
+
+/* hover 浮动效果 */
+.mottoContainer:hover {
+  transform: translateY(-4px);
+}
+
+.mottoContainer:hover .mainTitle,
+.mottoContainer:hover .subTitle,
+.mottoContainer:hover .keywords {
+  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+/* 主标题 - 天晴修屋顶 */
+.mainTitle {
+  font-family: 'STXingkai', '华文行楷', 'LiSu', '隶书', cursive;
+  font-size: 60px;
+  font-weight: 600;
+  color: #1a1a1a;
+  margin-bottom: 24px;
+  text-align: center;
+  line-height: 1.4;
+}
+
+/* 副标题 */
+.subTitle {
+  font-size: 24px;
+  color: #666;
+  margin-bottom: 20px;
+  text-align: center;
+  line-height: 1.6;
+  letter-spacing: 2px;
+}
+
+/* 关键词 */
+.keywords {
+  font-size: 18px;
+  color: #999;
+  text-align: center;
+  letter-spacing: 6px;
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  .mottoContainer {
+    padding: 24px;
+  }
+
+  .mainTitle {
+    font-size: 40px;
+  }
+
+  .subTitle {
+    font-size: 18px;
+  }
+
+  .keywords {
+    font-size: 14px;
+    letter-spacing: 4px;
+  }
+}

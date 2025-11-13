@@ -1,8 +1,14 @@
-import React from 'react';
-import { Typography, Card, Input } from 'antd'; // 引入 Card 组件和 Input 组件
-import { PortfolioDetail, PortfolioStats } from '../store/types'; // Adjust path if needed
+import React, { useState, useCallback, useEffect } from 'react';
+import { Typography, Card, Input, Button } from 'antd'; // 引入 Card 组件和 Input 组件
+import { PortfolioDetail, PortfolioStats, AttentionItem } from '../store/types'; // Adjust path if needed
 import { formatPercent } from './utils/format';
 import LeverageCostCard from './LeverageCostCard';
+import useAppStore from '../store';
+import useMessageApi from '../hooks/useMessageApi';
+import { debounce } from 'lodash';
+import { AttentionCard } from './AttentionCard';
+import { AttentionFormModal } from './AttentionFormModal';
+import { parseAttentionInfo, serializeAttentionInfo, generateId } from '../utils/attentionParser';
 
 const { Text } = Typography;
 const { TextArea } = Input;
@@ -54,6 +60,21 @@ const cardBodyStyle: React.CSSProperties = {
 };
 
 const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({ portfolio, stats }) => {
+  const updateAttentionInfo = useAppStore((state) => state.updateAttentionInfo);
+  const messageApi = useMessageApi();
+  
+  // 注意信息列表状态
+  const [attentionItems, setAttentionItems] = useState<AttentionItem[]>([]);
+  const [modalVisible, setModalVisible] = useState(false);
+  const [editingItem, setEditingItem] = useState<AttentionItem | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
+
+  // 初始化注意信息列表
+  useEffect(() => {
+    const items = parseAttentionInfo(portfolio.attentionInfo);
+    setAttentionItems(items);
+  }, [portfolio.attentionInfo]);
+
   const formatNumber = (value: number | undefined | null, decimals = 2) => {
     if (value === undefined || value === null) return 'N/A';
     return value.toFixed(decimals);
@@ -63,6 +84,80 @@ const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({ portfolio, stats })
   const formatNumberNoSymbol = (value: number | undefined | null, decimals = 2) => {
     if (value === undefined || value === null) return 'N/A';
     return value.toFixed(decimals);
+  };
+
+  // 添加注意事项
+  const handleAdd = () => {
+    setEditingItem(null);
+    setModalVisible(true);
+  };
+
+  // 编辑注意事项
+  const handleEdit = (id: string) => {
+    const item = attentionItems.find((i) => i.id === id);
+    if (item) {
+      setEditingItem(item);
+      setModalVisible(true);
+    }
+  };
+
+  // 删除注意事项
+  const handleDelete = async (id: string) => {
+    const newItems = attentionItems.filter((i) => i.id !== id);
+    setAttentionItems(newItems);
+    const serialized = serializeAttentionInfo(newItems);
+    
+    setIsSaving(true);
+    try {
+      await updateAttentionInfo(portfolio.id, serialized);
+      messageApi.success('删除成功');
+    } catch (error) {
+      console.error('Failed to delete attention item:', error);
+      messageApi.error('删除失败');
+      // 回滚
+      setAttentionItems(attentionItems);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  // 保存（添加或编辑）
+  const handleSave = async (formData: Omit<AttentionItem, 'id' | 'createdAt'>) => {
+    let newItems: AttentionItem[];
+    
+    if (editingItem) {
+      // 编辑模式
+      newItems = attentionItems.map((item) =>
+        item.id === editingItem.id
+          ? { ...item, ...formData, updatedAt: new Date().toISOString() }
+          : item
+      );
+    } else {
+      // 添加模式
+      const newItem: AttentionItem = {
+        id: generateId(),
+        ...formData,
+        createdAt: new Date().toISOString(),
+      };
+      newItems = [...attentionItems, newItem];
+    }
+    
+    setAttentionItems(newItems);
+    setModalVisible(false);
+    const serialized = serializeAttentionInfo(newItems);
+    
+    setIsSaving(true);
+    try {
+      await updateAttentionInfo(portfolio.id, serialized);
+      messageApi.success(editingItem ? '更新成功' : '添加成功');
+    } catch (error) {
+      console.error('Failed to save attention item:', error);
+      messageApi.error('保存失败');
+      // 回滚
+      setAttentionItems(attentionItems);
+    } finally {
+      setIsSaving(false);
+    }
   };
 
   // 现金相关展示直接使用API返回字段
@@ -259,7 +354,7 @@ const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({ portfolio, stats })
             bottom: 0,
             width: '3px',
             borderRadius: '2px',
-            background: dailyPnlValue >= 0 ? '#f5222d' : '#52c41a'
+            background: totalPnlValue >= 0 ? '#f5222d' : '#52c41a'
           }} />
           <div style={{ width: '100%', minWidth: 0 }}>
             <div style={{
@@ -274,16 +369,24 @@ const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({ portfolio, stats })
             }}>盈亏信息</div>
             {/* 主数据与小字备注同一行 */}
             <div style={{ display: 'flex', alignItems: 'baseline', marginBottom: '2px' }}>
-              <span style={{ fontWeight: 700, fontSize: '18px', color: getColor(dailyPnlValue) }}>{dailyPnl}</span>
-              <span style={{ fontSize: '12px', color: '#888', marginLeft: 8 }}>当日盈亏</span>
+              <span style={{ fontWeight: 700, fontSize: '18px', color: getColor(totalPnlValue) }}>{totalPnl}</span>
+              <span style={{ fontSize: '12px', color: '#888', marginLeft: 8 }}>总盈亏</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-              <Text type="secondary">总盈亏:</Text>
-              <Text strong style={{ color: getColor(totalPnlValue) }}>{totalPnl}</Text>
+              <Text type="secondary">已实现:</Text>
+              <Text strong style={{ color: getColor(stats?.realizedPnl || 0) }}>
+                {stats?.realizedPnl !== undefined ? formatNumber(stats.realizedPnl) : 'N/A'}
+              </Text>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
-              <Text type="secondary">收益率:</Text>
-              <Text strong style={{ color: getColor(periodReturnValue) }}>{periodReturn}</Text>
+              <Text type="secondary">未实现:</Text>
+              <Text strong style={{ color: getColor(stats?.unrealizedPnl || 0) }}>
+                {stats?.unrealizedPnl !== undefined ? formatNumber(stats.unrealizedPnl) : 'N/A'}
+              </Text>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+              <Text type="secondary">当日盈亏:</Text>
+              <Text strong style={{ color: getColor(dailyPnlValue) }}>{dailyPnl}</Text>
             </div>
           </div>
         </Card>
@@ -324,19 +427,13 @@ const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({ portfolio, stats })
       
       {/* 注意信息卡片单独一行，宽度撑满 */}
       <div style={{ marginTop: 16, display: 'flex' }}>
-        <Card
-          style={{ 
-            ...cardStyle, 
-            flex: 1, 
-            minWidth: 300, 
-            maxWidth: 'none',
-            height: 'auto',
-            boxShadow: '0 1px 4px rgba(0,0,0,0.04)'
-          }}
-          styles={{ body: { ...cardBodyStyle, width: '100%', padding: '16px 20px' } }}
-          onMouseEnter={e => { e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.10)'; }}
-          onMouseLeave={e => { e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.04)'; }}
-        >
+        <div style={{ 
+          ...coreCardStyle, 
+          flex: 1, 
+          minHeight: '180px',
+          height: 'auto',
+          padding: '16px 20px'
+        }}>
           <div style={{
             position: 'absolute',
             left: 0,
@@ -344,26 +441,50 @@ const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({ portfolio, stats })
             bottom: 0,
             width: '3px',
             borderRadius: '2px',
-            background: '#faad14'
+            background: '#1890ff'
           }} />
-          <div style={{ width: '100%', minWidth: 0 }}>
-            <div style={{
-              fontWeight: 700,
-              fontSize: '16px',
-              marginBottom: '15px',
-              color: '#222',
-              position: 'relative',
-              paddingBottom: '10px',
-              borderBottom: '1px dashed #d9d9d9',
-              width: '100%'
-            }}>注意信息</div>
-            <TextArea
-              placeholder="请输入注意事项..."
-              autoSize={{ minRows: 3, maxRows: 6 }}
-              style={{ width: '100%', resize: 'vertical' }}
-            />
+          
+          <div style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontWeight: 700,
+            fontSize: '16px',
+            marginBottom: '15px',
+            color: '#222',
+            paddingBottom: '10px',
+            borderBottom: '1px dashed #d9d9d9',
+          }}>
+            <span>📌 重要提醒</span>
+            <Button type="primary" size="small" onClick={handleAdd} loading={isSaving}>
+              + 添加
+            </Button>
           </div>
-        </Card>
+          
+          <div>
+            {attentionItems.length === 0 ? (
+              <div style={{ textAlign: 'center', color: '#999', padding: '20px 0' }}>
+                暂无注意事项，点击"添加"按钮创建
+              </div>
+            ) : (
+              attentionItems.map((item) => (
+                <AttentionCard
+                  key={item.id}
+                  item={item}
+                  onEdit={handleEdit}
+                  onDelete={handleDelete}
+                />
+              ))
+            )}
+          </div>
+          
+          <AttentionFormModal
+            visible={modalVisible}
+            editingItem={editingItem}
+            onSave={handleSave}
+            onCancel={() => setModalVisible(false)}
+          />
+        </div>
       </div>
       
       {/* 核心投资指标卡片 - 放置在注意信息下面 */}

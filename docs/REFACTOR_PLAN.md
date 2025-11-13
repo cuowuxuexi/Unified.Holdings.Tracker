@@ -4,10 +4,10 @@
 
 ---
 
-## 第 0 阶段：打基础（进行中）
-- 清理仓库：剔除旧产物、示例文档，完善 `.gitignore`。
-- 建立可运行基线：确保 `backend`、`frontend`、`electron` 均可 `npm run build`/`npm start`。
-- 梳理需求与约束：离线/单机定位、功能诉求、数据安全等。
+## 第 0 阶段：打基础 ✅
+- ✅ 清理仓库：旧产物已移至 `docs/legacy-backend/`，完善了 `.gitignore`。
+- ✅ 建立可运行基线：已验证 `backend`、`frontend`、`electron` 均可 `npm run build` 成功。
+- ✅ 梳理需求与约束：离线/单机定位、功能诉求、数据安全等已明确。
 
 ### 基础需求梳理（结合当前讨论）
 - **使用场景**：单人离线工具，仅在 Windows 桌面运行；投资组合按“年度”划分，每年一个独立组合。
@@ -22,17 +22,25 @@
   - 继续使用 Electron Forge + Inno Setup 打包。
   - 计划增加统一的构建/发布脚本（例如 `scripts/release.ps1`）来完成“清理 → 安装依赖 → 构建前后端 → Electron 打包 → 生成 changelog”的流水线，方便未来快速发布。
 
-## 第 1 阶段：统一工具链与仓库结构
-- 引入 workspace（pnpm/npm workspaces），集中管理各子应用。
-- 统一 ESLint/Prettier/TSConfig，提供根级脚本（`dev`/`build`/`test`/`lint`）。
-- 建立 `.env` 体系与 Zod 校验，规范环境变量。
+## 第 1 阶段：统一工具链与仓库结构 ✅
+- ✅ 引入 workspace（npm workspaces），集中管理 `backend` / `frontend` / `electron`。
+- ✅ 统一 TSConfig（`tsconfig.base.json`）、环境变量解析（Zod），并新增 `.env.example` & `frontend/.env.example`。
+- ✅ 在 README 中补充根级脚本、环境配置方法，形成可运行基线。
+- ✅ 集中 ESLint/Prettier config，已配置 commit hook（Husky）和 lint-staged。
 
-## 第 2 阶段：后端分层与数据迁移
-- 新目录划分：`apps/backend` 与 `packages/{domain,application,infra}`。
-- 设计领域模型（Portfolio/Transaction/Quote…），替换 JSON 文件存储为 SQLite + Prisma（或等价方案）。
+## 第 2 阶段：后端分层与数据迁移 ✅
+- ✅ 新目录划分：`apps/backend` 与 `packages/{domain,application,infra}`。
+- ✅ 确立领域模型（Portfolio / Transaction / Asset / QuoteSnapshot），并通过 Prisma + SQLite schema 落地，新增相关环境变量与脚本。
+- ✅ Prisma 存储层重构已完成并投入使用，详见 `docs/PRISMA_MIGRATION_COMPLETE.md`。
 - 编写迁移脚本，把 `backend/data/*.json` 导入数据库并备份。
-- 拆分业务逻辑：Controller、Use Case、Repository、外部适配器（行情、汇率）。
-- 增加 Jest + Supertest 测试、日志、错误处理、健康检查；生成 OpenAPI。
+- ✅ 拆分业务逻辑：Controller、Use Case、Repository、外部适配器（行情、汇率）。
+  - [x] `packages/domain`：落地 Portfolio / Transaction / Asset 等实体与值对象。
+  - [x] `packages/domain/src/repositories`：定义 `PortfolioRepository`、`MarketDataProvider`、`FxRateProvider` 等接口。
+  - [x] `packages/application/src/use-cases`：实现组合查询、交易写入、现金重算等 Use Case，并通过依赖注入绑定接口。
+  - [x] `packages/infra`：提供 Prisma Repository、腾讯行情/汇率适配器、JSON 备份适配器等具体实现。
+  - [x] `apps/backend/src`：新增依赖注入容器（`container.ts`），路由层重构为调用 Use Case，去除对旧 services 的直接依赖。
+  - [x] 测试保障：创建测试脚本（`apps/backend/test-use-cases.ts`）验证关键 Use Case 行为，确保重构后行为与原实现一致。
+- ✅ 增加 Jest + Supertest 测试、日志、错误处理、健康检查；生成 OpenAPI。
 
 ## 第 3 阶段：前端架构重塑
 - 目录重排为 `src/app`, `src/features`, `src/shared`，`App.tsx` 只保留壳与路由。

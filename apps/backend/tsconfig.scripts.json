@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": ".",
+    "outDir": "./dist-scripts",
+    "types": ["node"],
+    "esModuleInterop": true
+  },
+  "include": [
+    "scripts/**/*.ts",
+    "src/**/*.ts"
+  ]
+}
