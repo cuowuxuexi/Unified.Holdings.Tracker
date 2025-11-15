@@ -107,13 +107,13 @@ export class ReportService {
         const changePercent = quote.changePercent?.toFixed(2) || '0.00';
         const changeArrow = parseFloat(changePercent) >= 0 ? '▲' : '▼';
         const weekChange = quote.weekChangePercent
-          ? `W${quote.weekChangePercent.toFixed(2)}%`
+          ? `W${this.formatPercentWithSign(quote.weekChangePercent)}`
           : 'N/A';
         const monthChange = quote.monthChangePercent
-          ? `M${quote.monthChangePercent.toFixed(2)}%`
+          ? `M${this.formatPercentWithSign(quote.monthChangePercent)}`
           : 'N/A';
         const yearChange = quote.yearChangePercent
-          ? `Y${quote.yearChangePercent.toFixed(2)}%`
+          ? `Y${this.formatPercentWithSign(quote.yearChangePercent)}`
           : 'N/A';
 
         section += `| ${indexName} | ${currentValue} | ${changeAmount} | ${changePercent}% ${changeArrow} | ${weekChange} | ${monthChange} | ${yearChange} |\n`;
@@ -138,8 +138,11 @@ export class ReportService {
   ): string {
     const leverage = detail.leverage;
 
-    // 计算净入金
-    const netDeposit = this.calculateNetDeposit(detail.transactions);
+    // 计算净入金：优先使用后端已计算好的 netDepositedCash，确保与前端/统计接口一致
+    const netDeposit =
+      typeof detail.netDepositedCash === 'number'
+        ? detail.netDepositedCash
+        : this.calculateNetDeposit(detail.transactions);
     const usedCash = detail.initialCash - detail.cash;
     const leverageRatio =
       leverage.totalAmount > 0
@@ -164,8 +167,15 @@ export class ReportService {
     section += `| 净资产 | ${detail.netAssets.toFixed(2)} |  |\n\n`;
 
     // 2.2 盈亏与成本
-    const totalCommission = this.calculateTotalCommission(detail.transactions);
-    const leverageCost = this.calculateLeverageCost(detail.transactions);
+    // 手续费与融资成本优先使用后端统一计算结果，保证与统计接口一致
+    const totalCommission =
+      typeof detail.totalCommission === 'number'
+        ? detail.totalCommission
+        : this.calculateTotalCommission(detail.transactions);
+    const leverageCost =
+      typeof detail.leverageCost === 'number'
+        ? detail.leverageCost
+        : this.calculateLeverageCost(detail.transactions);
     const leverageCostPeriod = this.getLeverageCostPeriod(detail.transactions);
     const totalDividend = this.calculateTotalDividend(detail.transactions);
 
@@ -173,9 +183,9 @@ export class ReportService {
     section += `| 项目 | 金额/比例 | 备注 |\n`;
     section += `| :--- | :-------- | :--- |\n`;
     section += `| **盈亏信息** |  |  |\n`;
-    section += `| 当日盈亏 | ${(detail.dailyPnl || 0).toFixed(2)} |  |\n`;
-    section += `| 总盈亏 | ${(detail.totalPnl || 0).toFixed(2)} |  |\n`;
-    section += `| 收益率 | ${(detail.totalPnlPercent || 0).toFixed(2)}% |  |\n`;
+    section += `| 当日盈亏 | ${this.formatNumberWithSign(detail.dailyPnl || 0)} |  |\n`;
+    section += `| 总盈亏 | ${this.formatNumberWithSign(detail.totalPnl || 0)} |  |\n`;
+    section += `| 收益率 | ${this.formatPercentWithSign(detail.totalPnlPercent || 0)} |  |\n`;
     section += `| **成本与费用** |  |  |\n`;
     section += `| 融资成本 | ${leverageCost.toFixed(2)} | 融资成本 |\n`;
     section += `| 融资成本区间 | ${leverageCostPeriod} |  |\n`;
@@ -205,11 +215,30 @@ export class ReportService {
     const usdRate = 7.2886; // 默认汇率，实际应从 API 获取
     const hkdRate = 0.9394; // 默认汇率，实际应从 API 获取
 
+    // 计算总市值较昨日变化百分比
+    const marketValueChange =
+      detail.totalMarketValue > 0
+        ? ((detail.dailyPnl || 0) / detail.totalMarketValue) * 100
+        : 0;
+    const marketValueChangeStr = this.formatPercentWithSign(
+      marketValueChange,
+      1
+    );
+    const marketValueArrow = marketValueChange >= 0 ? '↑' : '↓';
+
+    // 计算总盈亏较昨日变化百分比
+    const totalPnlChange =
+      (detail.totalPnl || 0) !== 0
+        ? ((detail.dailyPnl || 0) / Math.abs(detail.totalPnl || 1)) * 100
+        : 0;
+    const totalPnlChangeStr = this.formatPercentWithSign(totalPnlChange, 1);
+    const totalPnlArrow = totalPnlChange >= 0 ? '↑' : '↓';
+
     let section = '## **3. 核心投资指标**\n\n';
     section += '| 指标 | 金额/比例 | 备注 |\n';
     section += '| :--- | :-------- | :--- |\n';
-    section += `| 总市值 (CNY) | ¥${detail.totalMarketValue.toFixed(2)} | +${(((detail.dailyPnl || 0) / detail.totalMarketValue) * 100).toFixed(1)}% ↑ 较昨日变化 |\n`;
-    section += `| 总盈亏 (CNY) | ¥${(detail.totalPnl || 0).toFixed(2)} | +${(((detail.dailyPnl || 0) / (detail.totalPnl || 1)) * 100).toFixed(1)}% ↑ 较昨日变化 |\n`;
+    section += `| 总市值 (CNY) | ¥${detail.totalMarketValue.toFixed(2)} | ${marketValueChangeStr} ${marketValueArrow} 较昨日变化 |\n`;
+    section += `| 总盈亏 (CNY) | ¥${this.formatNumberWithSign(detail.totalPnl || 0)} | ${totalPnlChangeStr} ${totalPnlArrow} 较昨日变化 |\n`;
     section += `| 当前股息收入 (CNY) | ¥${totalDividend.toFixed(2)} | 累计获得 |\n`;
     section += `| **资金状况** |  |  |\n`;
     section += `| 可用现金 | ${detail.cash.toFixed(2)} |  |\n`;
@@ -302,17 +331,19 @@ export class ReportService {
       '| :--- | :--- | :----- | :--- | :--- | :------- | :-------- | :----- | :------ | :------- |\n';
 
     for (const pos of positions) {
-      const name = this.sanitizeMarkdownText(
-        pos.asset.name || pos.asset.code
-      );
+      const name = this.sanitizeMarkdownText(pos.asset.name || pos.asset.code);
       const quantity = pos.quantity.toFixed(0);
       const avgCost = pos.costPrice?.toFixed(2) || '0.00';
       const currentPrice = pos.currentPrice?.toFixed(2) || '0.00';
       const marketValue = (pos.marketValue || 0).toFixed(2);
-      const dailyPnl = (pos.dailyChange || 0).toFixed(2);
-      const dailyPnlPercent = (pos.dailyChangePercent || 0).toFixed(2);
-      const totalPnl = (pos.totalPnl || 0).toFixed(2);
-      const totalPnlPercent = (pos.totalPnlPercent || 0).toFixed(2);
+      const dailyPnl = this.formatNumberWithSign(pos.dailyChange || 0);
+      const dailyPnlPercent = this.formatPercentWithSign(
+        pos.dailyChangePercent || 0
+      );
+      const totalPnl = this.formatNumberWithSign(pos.totalPnl || 0);
+      const totalPnlPercent = this.formatPercentWithSign(
+        pos.totalPnlPercent || 0
+      );
 
       const periodLines = [
         this.formatPeriodChange('W', pos.weeklyChangePercent),
@@ -323,7 +354,7 @@ export class ReportService {
       const periodic =
         periodLines.length > 0 ? periodLines.join('<br />') : '--';
 
-      section += `| ${name} | ${quantity} | ${avgCost} | ${currentPrice} | ${marketValue} | ${dailyPnl} | ${dailyPnlPercent}% | ${totalPnl} | ${totalPnlPercent}% | ${periodic} |\n`;
+      section += `| ${name} | ${quantity} | ${avgCost} | ${currentPrice} | ${marketValue} | ${dailyPnl} | ${dailyPnlPercent} | ${totalPnl} | ${totalPnlPercent} | ${periodic} |\n`;
     }
 
     return section;
@@ -353,9 +384,7 @@ export class ReportService {
       const qtyStr = tx.quantity?.toString() || '-';
       const priceStr = tx.price?.toFixed(2) || '-';
       const amountStr = tx.amount?.toFixed(2) || '-';
-      const notesStr = tx.notes
-        ? this.sanitizeMarkdownText(tx.notes)
-        : '-';
+      const notesStr = tx.notes ? this.sanitizeMarkdownText(tx.notes) : '-';
 
       section += `| ${dateStr} | ${typeStr}  | ${assetStr}       | ${qtyStr}      | ${priceStr}          | ${amountStr}   | ${notesStr}            |\n`;
     }
@@ -405,9 +434,7 @@ export class ReportService {
         for (const item of parsed.items) {
           const icon = this.sanitizeMarkdownText(item.icon || '🔔');
           const title = this.sanitizeMarkdownText(item.title || '(未命名)');
-          const content = this.sanitizeMarkdownText(
-            item.content || '(空白)'
-          );
+          const content = this.sanitizeMarkdownText(item.content || '(空白)');
           const timestamp = this.formatAttentionTimestamp(
             item.updatedAt || item.createdAt
           );
@@ -436,7 +463,29 @@ export class ReportService {
     if (value === undefined || value === null || Number.isNaN(value)) {
       return null;
     }
-    return `${label}: ${value.toFixed(2)}%`;
+    return `${label}: ${this.formatPercentWithSign(value)}`;
+  }
+
+  /**
+   * 格式化带符号的数字（涨跌幅用）
+   * @param value 数值
+   * @param decimals 小数位数，默认2位
+   * @returns 带+/-号的格式化字符串
+   */
+  private formatNumberWithSign(value: number, decimals: number = 2): string {
+    const sign = value >= 0 ? '+' : '';
+    return `${sign}${value.toFixed(decimals)}`;
+  }
+
+  /**
+   * 格式化带符号的百分比（涨跌幅用）
+   * @param value 数值
+   * @param decimals 小数位数，默认2位
+   * @returns 带+/-号和%的格式化字符串
+   */
+  private formatPercentWithSign(value: number, decimals: number = 2): string {
+    const sign = value >= 0 ? '+' : '';
+    return `${sign}${value.toFixed(decimals)}%`;
   }
 
   private formatAttentionTimestamp(date?: string): string {

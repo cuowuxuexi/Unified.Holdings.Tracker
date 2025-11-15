@@ -18,60 +18,9 @@ import {
 import type { UploadFile } from 'antd/es/upload/interface';
 import { API_BASE_URL } from '../../../config';
 import apiClient from '../../../services/api';
+import type { ImportPreview, ImportResult } from '../../../services/api';
 
 const { Title, Text } = Typography;
-
-/**
- * 导入行数据接口
- */
-interface ImportRow {
-  rowNumber: number;
-  date: string;
-  type: string;
-  assetCode?: string;
-  quantity?: number;
-  price?: number;
-  amount?: number;
-  commission?: number;
-  leverageUsed?: number;
-  currency?: string;
-  exchangeRate?: number;
-  notes?: string;
-}
-
-/**
- * 验证错误接口
- */
-interface ValidationError {
-  rowNumber: number;
-  field: string;
-  message: string;
-  value?: any;
-}
-
-/**
- * 导入预览接口
- */
-interface ImportPreview {
-  rows: ImportRow[];
-  validationErrors: ValidationError[];
-  summary: {
-    totalRows: number;
-    validRows: number;
-    invalidRows: number;
-    byType: Record<string, number>;
-  };
-}
-
-/**
- * 导入结果接口
- */
-interface ImportResult {
-  totalRows: number;
-  successCount: number;
-  errorCount: number;
-  errors: ValidationError[];
-}
 
 interface BatchImportProps {
   portfolioId: string;
@@ -106,28 +55,34 @@ export const BatchImport: React.FC<BatchImportProps> = ({
   const handlePreview = async () => {
     // 多重方式获取文件
     const file = fileRef.current || currentFile || fileList[0]?.originFileObj;
-    
+
     if (!file) {
       message.warning('请先选择文件（支持 CSV 或 XLSX 格式）');
       return;
     }
 
     console.log('[BatchImport] 预览使用文件:', file.name);
-    
+
     // 保存文件内容和文件名，防止文件引用丢失
     try {
       const blob = await file.slice(0, file.size).arrayBuffer();
       const ext = file.name.split('.').pop()?.toLowerCase();
-      const mimeType = ext === 'xlsx' || ext === 'xls' 
-        ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' 
-        : 'text/csv';
+      const mimeType =
+        ext === 'xlsx' || ext === 'xls'
+          ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+          : 'text/csv';
       fileContentRef.current = new Blob([blob], { type: mimeType });
       fileNameRef.current = file.name;
-      console.log('[BatchImport] 文件内容已保存到Blob:', fileNameRef.current, blob.byteLength, 'bytes');
+      console.log(
+        '[BatchImport] 文件内容已保存到Blob:',
+        fileNameRef.current,
+        blob.byteLength,
+        'bytes'
+      );
     } catch (e) {
       console.error('[BatchImport] 保存文件内容失败:', e);
     }
-    
+
     const formData = new FormData();
     formData.append('file', file);
 
@@ -156,7 +111,7 @@ export const BatchImport: React.FC<BatchImportProps> = ({
   const handleImport = async () => {
     console.log('[BatchImport] 开始导入检查');
     console.log('[BatchImport] preview:', preview);
-    
+
     if (!preview || preview.summary.invalidRows > 0) {
       message.error('请先预览并确保所有数据验证通过');
       return;
@@ -164,22 +119,27 @@ export const BatchImport: React.FC<BatchImportProps> = ({
 
     // 优先使用保存的文件内容（Blob），如果文件引用都丢失了
     let fileToUpload: File | Blob | null = null;
-    
+
     // 方案1: 尝试从各种来源获取原始文件
     fileToUpload = fileRef.current || fileList[0]?.originFileObj || currentFile;
-    
+
     // 方案2: 如果文件引用都丢失了，使用保存的Blob创建新File对象
     if (!fileToUpload && fileContentRef.current && fileNameRef.current) {
       console.log('[BatchImport] 文件引用丢失，使用保存的Blob创建新File对象');
-      fileToUpload = new File([fileContentRef.current], fileNameRef.current, { type: 'text/csv' });
+      fileToUpload = new File([fileContentRef.current], fileNameRef.current, {
+        type: 'text/csv',
+      });
     }
-    
+
     console.log('[BatchImport] 获取文件 - fileRef:', fileRef.current);
-    console.log('[BatchImport] 获取文件 - originFileObj:', fileList[0]?.originFileObj);
+    console.log(
+      '[BatchImport] 获取文件 - originFileObj:',
+      fileList[0]?.originFileObj
+    );
     console.log('[BatchImport] 获取文件 - currentFile:', currentFile);
     console.log('[BatchImport] 获取文件 - Blob:', fileContentRef.current);
     console.log('[BatchImport] 最终使用文件:', fileToUpload);
-    
+
     if (!fileToUpload) {
       console.error('[BatchImport] 无法获取文件！所有来源都是空的');
       message.error('无法获取文件，请重新选择文件并预览');
@@ -187,12 +147,12 @@ export const BatchImport: React.FC<BatchImportProps> = ({
     }
 
     console.log('[BatchImport] 准备弹出确认对话框');
-    
+
     // 使用原生confirm对话框（避免Modal context问题）
     const confirmed = window.confirm(
       `确认导入\n\n将导入 ${preview.summary.validRows} 条交易记录到当前投资组合，是否继续？`
     );
-    
+
     if (confirmed) {
       console.log('[BatchImport] 用户确认导入，准备发送请求');
       const formData = new FormData();
@@ -201,7 +161,7 @@ export const BatchImport: React.FC<BatchImportProps> = ({
       setImporting(true);
       try {
         const data = await apiClient.executeBatchImport(portfolioId, formData);
-        
+
         setResult(data);
 
         if (data.errorCount > 0) {
@@ -359,7 +319,7 @@ export const BatchImport: React.FC<BatchImportProps> = ({
         >
           下载 CSV 模板
         </Button>
-        
+
         <Button
           icon={<DownloadOutlined />}
           onClick={() => handleDownloadTemplate('xlsx')}
@@ -378,14 +338,14 @@ export const BatchImport: React.FC<BatchImportProps> = ({
               return false;
             }
             // 三重保存文件引用（确保不丢失）
-            fileRef.current = file;  // ref保存（最可靠）
-            setCurrentFile(file);     // state保存
+            fileRef.current = file; // ref保存（最可靠）
+            setCurrentFile(file); // state保存
             // 正确构造UploadFile对象，保留originFileObj
             const uploadFile: UploadFile = {
               uid: file.uid || `-${Date.now()}`,
               name: file.name,
               status: 'done',
-              originFileObj: file,  // Upload组件保存
+              originFileObj: file, // Upload组件保存
             };
             setFileList([uploadFile]);
             setPreview(null);
@@ -395,9 +355,9 @@ export const BatchImport: React.FC<BatchImportProps> = ({
           }}
           fileList={fileList}
           onRemove={() => {
-            fileRef.current = null;  // 清空ref
-            fileContentRef.current = null;  // 清空Blob
-            fileNameRef.current = '';  // 清空文件名
+            fileRef.current = null; // 清空ref
+            fileContentRef.current = null; // 清空Blob
+            fileNameRef.current = ''; // 清空文件名
             setCurrentFile(null);
             setFileList([]);
             setPreview(null);
@@ -541,5 +501,3 @@ export const BatchImport: React.FC<BatchImportProps> = ({
     </div>
   );
 };
-
-

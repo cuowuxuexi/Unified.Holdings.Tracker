@@ -54,12 +54,12 @@ const getMarketFromCode = (code: string): Market | null => {
 const calculateBasePositions = (transactions: Transaction[]): Position[] => {
   console.log('[calculateBasePositions] ========== 函数被调用 ==========');
   console.log(`[calculateBasePositions] 交易记录数量: ${transactions.length}`);
-  
+
   // 按日期升序排序，确保先买后卖的顺序正确
-  const sortedTransactions = [...transactions].sort((a, b) => 
-    new Date(a.date).getTime() - new Date(b.date).getTime()
+  const sortedTransactions = [...transactions].sort(
+    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
   );
-  
+
   const positionsMap: Map<
     string,
     {
@@ -105,7 +105,7 @@ const calculateBasePositions = (transactions: Transaction[]): Position[] => {
           'tx.quantity typeof': typeof tx.quantity,
           'quantity (Number后)': quantity,
           'quantity typeof': typeof quantity,
-          '当前持仓': pos.quantity,
+          当前持仓: pos.quantity,
         });
       }
 
@@ -421,11 +421,9 @@ router.post(
 
     // 基本验证
     if (!type || !date) {
-      return res
-        .status(400)
-        .json({
-          message: 'Invalid transaction data. Required fields: type, date.',
-        });
+      return res.status(400).json({
+        message: 'Invalid transaction data. Required fields: type, date.',
+      });
     }
     if (isNaN(Date.parse(date))) {
       return res
@@ -575,11 +573,12 @@ router.patch(
     }
 
     try {
-      const updatedTransaction = await container.updateTransactionNotesUseCase.execute({
-        portfolioId,
-        transactionId: txId,
-        notes: notes || '', // 允许空字符串
-      });
+      const updatedTransaction =
+        await container.updateTransactionNotesUseCase.execute({
+          portfolioId,
+          transactionId: txId,
+          notes: notes || '', // 允许空字符串
+        });
 
       if (!updatedTransaction) {
         return res.status(404).json({
@@ -615,10 +614,11 @@ router.patch(
     }
 
     try {
-      const updatedPortfolio = await container.updatePortfolioAttentionUseCase.execute({
-        portfolioId,
-        attentionInfo: attentionInfo || '', // 允许空字符串
-      });
+      const updatedPortfolio =
+        await container.updatePortfolioAttentionUseCase.execute({
+          portfolioId,
+          attentionInfo: attentionInfo || '', // 允许空字符串
+        });
 
       if (!updatedPortfolio) {
         return res.status(404).json({
@@ -905,54 +905,74 @@ router.get(
         );
       }
 
-      // 计算持仓
+      // 计算持仓（含实时盈亏）
       const basePositions = calculateBasePositions(portfolio.transactions);
       const positions = calculateRealtimePnl(basePositions, quotes);
 
-      // 计算统计数据
+      // 使用与统计接口一致的逻辑计算关键指标，确保导出报表与前端展示一致
       const netDeposit = calculateNetDepositedCash(portfolio);
       const totalCommission = await calculateTotalCommission(portfolio);
-      const startOfYearDate = startOfYear(new Date());
-      const leverageCost = calculateLeverageCostByDay(
-        portfolio,
-        startOfYearDate,
-        new Date()
-      );
-      const totalDividend = calculateTotalDividendIncome(portfolio);
 
-      const totalMarketValue = positions.reduce(
-        (sum, pos) => sum + (pos.marketValue || 0),
-        0
-      );
-      const totalPnl = positions.reduce(
-        (sum, pos) => sum + (pos.totalPnl || 0),
-        0
-      );
-      const totalAssets =
-        Number(portfolio.cash) +
-        totalMarketValue +
-        Number(portfolio.leverage.usedAmount || 0);
+      // 计算整个生命周期融资成本（与 /stats、详情接口保持一致）
+      let leverageCost = 0;
+      if (portfolio.transactions && portfolio.transactions.length > 0) {
+        const firstTxDate = portfolio.transactions.reduce(
+          (earliest, current) => {
+            const currentTs = new Date(current.date);
+            return currentTs < earliest ? currentTs : earliest;
+          },
+          new Date(portfolio.transactions[0].date)
+        );
+        leverageCost = calculateLeverageCostByDay(
+          portfolio,
+          firstTxDate,
+          new Date()
+        );
+      }
+
+      // 计算总市值和当日盈亏（统一折算为 CNY）
+      let totalMarketValue = 0;
+      let dailyPnl = 0;
+      for (const pos of positions) {
+        let exchangeRate = 1;
+        if (pos.asset.market !== Market.CN) {
+          try {
+            exchangeRate = await getExchangeRateForAssetToCNY(pos.asset.code);
+          } catch (rateError) {
+            console.error(
+              `[Markdown Export] Failed to get exchange rate for ${pos.asset.code}, using 1. Error:`,
+              rateError
+            );
+          }
+        }
+        totalMarketValue += (pos.marketValue || 0) * exchangeRate;
+        dailyPnl += (pos.dailyChange || 0) * exchangeRate;
+      }
+
+      const totalAssets = Number(portfolio.cash) + totalMarketValue;
       const netAssets =
-        Number(portfolio.cash) +
-        totalMarketValue -
-        Number(portfolio.leverage.usedAmount || 0);
+        totalAssets - Number(portfolio.leverage.usedAmount || 0);
 
+      // 使用统一的盈亏计算方法（已实现 + 未实现），保持与前端统计卡片一致
+      const pnlV2 = await calculateTotalPnlV2(portfolio, positions);
       const totalReturnPercent =
-        netDeposit > 0 ? (totalPnl / netDeposit) * 100 : 0;
+        netDeposit > 0 ? (pnlV2.totalPnl / netDeposit) * 100 : 0;
 
-      // 构建 PortfolioDetail
+      // 构建 PortfolioDetail（字段含义与 /portfolio/:id、/portfolio/:id/stats 对齐）
       const portfolioDetail: PortfolioDetail = {
         ...portfolio,
         positions,
         totalMarketValue,
-        totalPnl,
+        totalPnl: pnlV2.totalPnl,
         totalAssets,
         netAssets,
         netDepositedCash: netDeposit,
         totalCommission,
         leverageCost,
-        dailyPnl: 0, // 简化处理，报表中可能不需要精确值
+        dailyPnl,
         totalPnlPercent: totalReturnPercent,
+        realizedPnl: pnlV2.realizedPnl,
+        unrealizedPnl: pnlV2.unrealizedPnl,
       };
 
       // 导入 reportService

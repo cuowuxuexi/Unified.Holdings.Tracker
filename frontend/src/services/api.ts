@@ -1,7 +1,57 @@
 import axios from 'axios';
 import { Quote, KlinePoint } from '../store/types'; // Adjust path if needed
-import { Portfolio, PortfolioDetail, Transaction, TransactionInput, PortfolioInput, PortfolioStats } from '../store/types'; // 添加 PortfolioStats 导入
+import {
+  Portfolio,
+  PortfolioDetail,
+  Transaction,
+  TransactionInput,
+  PortfolioInput,
+  PortfolioStats,
+} from '../store/types'; // 添加 PortfolioStats 导入
 import { frontendEnv } from '../env';
+
+/**
+ * 批量导入相关类型定义
+ */
+export interface ImportRow {
+  rowNumber: number;
+  date: string;
+  type: string;
+  assetCode?: string;
+  quantity?: number;
+  price?: number;
+  amount?: number;
+  commission?: number;
+  leverageUsed?: number;
+  currency?: string;
+  exchangeRate?: number;
+  notes?: string;
+}
+
+export interface ValidationError {
+  rowNumber: number;
+  field: string;
+  message: string;
+  value?: any;
+}
+
+export interface ImportPreview {
+  rows: ImportRow[];
+  validationErrors: ValidationError[];
+  summary: {
+    totalRows: number;
+    validRows: number;
+    invalidRows: number;
+    byType: Record<string, number>;
+  };
+}
+
+export interface ImportResult {
+  totalRows: number;
+  successCount: number;
+  errorCount: number;
+  errors: ValidationError[];
+}
 
 const API_BASE_URL = frontendEnv.apiBaseUrl.replace(/\/api\/?$/, ''); // Remove /api suffix if present
 
@@ -13,9 +63,12 @@ const apiClient = {
     }
     try {
       // Use the correct path including /api/market
-      const response = await axios.get<Quote[]>(`${API_BASE_URL}/api/market/quote`, {
-        params: { codes: codes.join(',') },
-      });
+      const response = await axios.get<Quote[]>(
+        `${API_BASE_URL}/api/market/quote`,
+        {
+          params: { codes: codes.join(',') },
+        }
+      );
       return response.data;
     } catch (error) {
       console.error('Error fetching quotes from API client:', error);
@@ -37,7 +90,10 @@ const apiClient = {
       if (endDate) params.endDate = endDate;
 
       // Use the correct path including /api/market
-      const response = await axios.get<KlinePoint[]>(`${API_BASE_URL}/api/market/kline`, { params });
+      const response = await axios.get<KlinePoint[]>(
+        `${API_BASE_URL}/api/market/kline`,
+        { params }
+      );
       return response.data;
     } catch (error) {
       console.error(`Error fetching kline for ${code} from API client:`, error);
@@ -49,7 +105,9 @@ const apiClient = {
   fetchPortfolios: async (): Promise<Portfolio[]> => {
     try {
       // Use the correct path including /api/portfolio
-      const response = await axios.get<Portfolio[]>(`${API_BASE_URL}/api/portfolio`);
+      const response = await axios.get<Portfolio[]>(
+        `${API_BASE_URL}/api/portfolio`
+      );
       return response.data;
     } catch (error) {
       console.error('Error fetching portfolios from API client:', error);
@@ -58,10 +116,15 @@ const apiClient = {
     }
   },
 
-  createPortfolio: async (portfolioData: PortfolioInput): Promise<Portfolio> => {
+  createPortfolio: async (
+    portfolioData: PortfolioInput
+  ): Promise<Portfolio> => {
     try {
       // Use the correct path including /api/portfolio
-      const response = await axios.post<Portfolio>(`${API_BASE_URL}/api/portfolio`, portfolioData);
+      const response = await axios.post<Portfolio>(
+        `${API_BASE_URL}/api/portfolio`,
+        portfolioData
+      );
       return response.data;
     } catch (error) {
       console.error('Error creating portfolio from API client:', error);
@@ -69,54 +132,83 @@ const apiClient = {
     }
   },
 
-
   fetchPortfolioDetail: async (id: string): Promise<PortfolioDetail | null> => {
     try {
       // Use the correct path including /api/portfolio
-      const response = await axios.get<PortfolioDetail>(`${API_BASE_URL}/api/portfolio/${id}`);
+      const response = await axios.get<PortfolioDetail>(
+        `${API_BASE_URL}/api/portfolio/${id}`
+      );
       return response.data;
     } catch (error) {
-      console.error(`Error fetching portfolio detail for ${id} from API client:`, error);
+      console.error(
+        `Error fetching portfolio detail for ${id} from API client:`,
+        error
+      );
       // Keep returning null for detail view robustness
       return null;
     }
   },
 
-  addTransaction: async (portfolioId: string, transactionData: TransactionInput & { leverageUsed?: number }): Promise<Transaction> => {
+  addTransaction: async (
+    portfolioId: string,
+    transactionData: TransactionInput & { leverageUsed?: number }
+  ): Promise<Transaction> => {
     try {
       // 重构数据结构：将 asset.code 转换为顶层 assetCode
       const restructuredData = {
-        assetCode: transactionData.asset?.code,  // 使用可选链操作符，当 asset 不存在时返回 undefined
+        assetCode: transactionData.asset?.code, // 使用可选链操作符，当 asset 不存在时返回 undefined
         date: transactionData.date,
         type: transactionData.type,
         quantity: transactionData.quantity,
         price: transactionData.price,
         amount: transactionData.amount,
         commission: transactionData.commission,
-        leverageUsed: transactionData.leverageUsed
+        leverageUsed: transactionData.leverageUsed,
       };
 
       // Log the data being sent to the backend
-      console.log(`[API Client] Sending transaction data to portfolio ${portfolioId}:`, JSON.stringify(restructuredData, null, 2));
+      console.log(
+        `[API Client] Sending transaction data to portfolio ${portfolioId}:`,
+        JSON.stringify(restructuredData, null, 2)
+      );
       // Use the correct path including /api/portfolio
-      const response = await axios.post<Transaction>(`${API_BASE_URL}/api/portfolio/${portfolioId}/transactions`, restructuredData);
+      const response = await axios.post<Transaction>(
+        `${API_BASE_URL}/api/portfolio/${portfolioId}/transactions`,
+        restructuredData
+      );
       return response.data;
     } catch (error) {
-      console.error(`Error adding transaction to portfolio ${portfolioId} from API client:`, error);
+      console.error(
+        `Error adding transaction to portfolio ${portfolioId} from API client:`,
+        error
+      );
       throw error; // Re-throw for store to handle
     }
   },
 
-  deleteTransaction: async (portfolioId: string, transactionId: string): Promise<void> => {
+  deleteTransaction: async (
+    portfolioId: string,
+    transactionId: string
+  ): Promise<void> => {
     try {
       // Use the correct path including /api/portfolio
-      await axios.delete(`${API_BASE_URL}/api/portfolio/${portfolioId}/transactions/${transactionId}`);
+      await axios.delete(
+        `${API_BASE_URL}/api/portfolio/${portfolioId}/transactions/${transactionId}`
+      );
     } catch (error) {
-      console.error(`Error deleting transaction ${transactionId} from portfolio ${portfolioId} from API client:`, error);
+      console.error(
+        `Error deleting transaction ${transactionId} from portfolio ${portfolioId} from API client:`,
+        error
+      );
       throw error; // Re-throw for store to handle
     }
   },
-  fetchPortfolioStats: async (portfolioId: string, period?: string, startDate?: string, endDate?: string): Promise<PortfolioStats> => {
+  fetchPortfolioStats: async (
+    portfolioId: string,
+    period?: string,
+    startDate?: string,
+    endDate?: string
+  ): Promise<PortfolioStats> => {
     try {
       const params: Record<string, string> = {};
       if (period) {
@@ -129,11 +221,20 @@ const apiClient = {
         params.endDate = endDate;
       }
       // Use the correct path including /api/portfolio
-      const response = await axios.get<PortfolioStats>(`${API_BASE_URL}/api/portfolio/${portfolioId}/stats`, { params });
-      console.log(`[API Debug] Portfolio stats response for ${portfolioId}:`, response.data); // 添加调试日志
+      const response = await axios.get<PortfolioStats>(
+        `${API_BASE_URL}/api/portfolio/${portfolioId}/stats`,
+        { params }
+      );
+      console.log(
+        `[API Debug] Portfolio stats response for ${portfolioId}:`,
+        response.data
+      ); // 添加调试日志
       return response.data;
     } catch (error) {
-      console.error(`Error fetching portfolio stats for ${portfolioId} from API client:`, error);
+      console.error(
+        `Error fetching portfolio stats for ${portfolioId} from API client:`,
+        error
+      );
       throw error; // Re-throw error to be handled by the caller (e.g., store action)
     }
   },
@@ -142,7 +243,10 @@ const apiClient = {
       // Use the correct path including /api/portfolio
       await axios.delete(`${API_BASE_URL}/api/portfolio/${portfolioId}`);
     } catch (error) {
-      console.error(`Error deleting portfolio ${portfolioId} from API client:`, error);
+      console.error(
+        `Error deleting portfolio ${portfolioId} from API client:`,
+        error
+      );
       throw error;
     }
   },
@@ -172,10 +276,12 @@ const apiClient = {
     attentionInfo: string
   ): Promise<{ id: string; attentionInfo?: string }> => {
     try {
-      const response = await axios.patch<{ id: string; attentionInfo?: string }>(
-        `${API_BASE_URL}/api/portfolio/${portfolioId}/attention`,
-        { attentionInfo }
-      );
+      const response = await axios.patch<{
+        id: string;
+        attentionInfo?: string;
+      }>(`${API_BASE_URL}/api/portfolio/${portfolioId}/attention`, {
+        attentionInfo,
+      });
       return response.data;
     } catch (error) {
       console.error(
@@ -202,19 +308,76 @@ const apiClient = {
       );
       throw error;
     }
-  }
+  },
+
+  previewBatchImport: async (formData: FormData): Promise<ImportPreview> => {
+    try {
+      const response = await axios.post<ImportPreview>(
+        `${API_BASE_URL}/api/batch/preview`,
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        }
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error in previewBatchImport:', error);
+      throw error;
+    }
+  },
+
+  executeBatchImport: async (
+    portfolioId: string,
+    formData: FormData
+  ): Promise<ImportResult> => {
+    try {
+      const response = await axios.post<ImportResult>(
+        `${API_BASE_URL}/api/batch/import/${portfolioId}`,
+        formData,
+        {
+          headers: {
+            'Content-Type': 'multipart/form-data',
+          },
+        }
+      );
+      return response.data;
+    } catch (error) {
+      console.error(
+        `Error in executeBatchImport for portfolio ${portfolioId}:`,
+        error
+      );
+      throw error;
+    }
+  },
 };
 
 export default apiClient;
 
 // 获取实时汇率
-export const fetchExchangeRates = async (): Promise<{ USD: number; HKD: number; CNY: number; updatedAt: string; error?: boolean }> => {
+export const fetchExchangeRates = async (): Promise<{
+  USD: number;
+  HKD: number;
+  CNY: number;
+  updatedAt: string;
+  error?: boolean;
+}> => {
   try {
     // 使用 axios.get 并指定完整的 URL, including /api/portfolio
-    const response = await axios.get<{ USD: number; HKD: number; CNY: number; updatedAt: string }>(`${API_BASE_URL}/api/portfolio/exchange-rates`);
+    const response = await axios.get<{
+      USD: number;
+      HKD: number;
+      CNY: number;
+      updatedAt: string;
+    }>(`${API_BASE_URL}/api/portfolio/exchange-rates`);
     console.log('[API Service] Fetched exchange rates:', response.data);
     // 确保返回的数据包含必要的字段
-    if (response.data && typeof response.data.USD === 'number' && typeof response.data.HKD === 'number') {
+    if (
+      response.data &&
+      typeof response.data.USD === 'number' &&
+      typeof response.data.HKD === 'number'
+    ) {
       return {
         USD: response.data.USD,
         HKD: response.data.HKD,
@@ -222,7 +385,10 @@ export const fetchExchangeRates = async (): Promise<{ USD: number; HKD: number; 
         updatedAt: response.data.updatedAt || new Date().toISOString(), // Use server time or fallback
       };
     } else {
-      console.error('[API Service] Invalid exchange rate data received:', response.data);
+      console.error(
+        '[API Service] Invalid exchange rate data received:',
+        response.data
+      );
       throw new Error('Invalid exchange rate data received');
     }
   } catch (error) {
