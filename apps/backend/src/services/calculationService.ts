@@ -22,6 +22,15 @@ import {
   format,
 } from 'date-fns'; // Using date-fns for date manipulation, added parseISO back
 import { getExchangeRateForAssetToCNY } from './currencyService';
+import {
+  LotTracker,
+  LotPositionState,
+  getCommissionInCny,
+  getCurrencyForAsset,
+  resolveTransactionExchangeRate,
+  getBuyCashRequirementInCny,
+  getSellCashProceedsInCny,
+} from './portfolioReplay';
 
 /**
  * 格式化日期为 YYYY-MM-DD
@@ -50,7 +59,12 @@ export function calculateRealtimePnl(
 ): Position[] {
   return positions.map((position) => {
     const quote = quotes[position.asset.code];
-    const updatedPosition = { ...position }; // Create a copy to avoid modifying the original object directly
+    const currency =
+      position.currency || getCurrencyForAsset(position.asset.code);
+    const updatedPosition: Position = {
+      ...position,
+      currency,
+    }; // Create a copy to avoid modifying the original object directly
 
     if (quote && quote.currentPrice != null) {
       updatedPosition.currentPrice = quote.currentPrice;
@@ -59,9 +73,19 @@ export function calculateRealtimePnl(
         updatedPosition.asset = { ...updatedPosition.asset, name: quote.name };
       }
 
-      updatedPosition.marketValue = quote.currentPrice * position.quantity;
-      updatedPosition.totalPnl =
-        updatedPosition.marketValue - position.totalCost;
+      const exchangeRate = getExchangeRateForAssetToCNY(position.asset.code);
+      const marketValueLocal = quote.currentPrice * position.quantity;
+      const marketValueCny = marketValueLocal * exchangeRate;
+
+      updatedPosition.marketValueLocal = marketValueLocal;
+      updatedPosition.marketValue = marketValueCny;
+      updatedPosition.marketValueCNY = marketValueCny;
+
+      updatedPosition.totalPnl = marketValueCny - (position.totalCost || 0);
+      if (typeof position.totalCostLocal === 'number') {
+        updatedPosition.totalPnlLocal =
+          marketValueLocal - position.totalCostLocal;
+      }
 
       // 计算盈亏百分比（注意：当 totalCost 为负时，结果在数学上仍然有效，但可能需要特殊解读）
       updatedPosition.totalPnlPercent =
@@ -71,9 +95,12 @@ export function calculateRealtimePnl(
 
       // Calculate daily PnL based on changeAmount if available
       if (quote.changeAmount != null) {
-        updatedPosition.dailyChange = quote.changeAmount * position.quantity;
+        const dailyChangeLocal = quote.changeAmount * position.quantity;
+        updatedPosition.dailyChangeLocal = dailyChangeLocal;
+        updatedPosition.dailyChange = dailyChangeLocal * exchangeRate;
       } else {
         updatedPosition.dailyChange = undefined;
+        updatedPosition.dailyChangeLocal = undefined;
       }
       updatedPosition.dailyChangePercent = quote.changePercent ?? undefined;
       updatedPosition.weeklyChangePercent =
@@ -89,9 +116,12 @@ export function calculateRealtimePnl(
       );
       updatedPosition.currentPrice = undefined; // Or position.costPrice? or null?
       updatedPosition.marketValue = 0; // Or based on cost?
+      updatedPosition.marketValueCNY = 0;
+      updatedPosition.marketValueLocal = 0;
       updatedPosition.totalPnl = undefined;
       updatedPosition.totalPnlPercent = undefined;
       updatedPosition.dailyChange = undefined;
+      updatedPosition.dailyChangeLocal = undefined;
       updatedPosition.dailyChangePercent = undefined;
     }
     return updatedPosition;
@@ -119,6 +149,22 @@ export async function calculatePeriodStats(
       return { periodReturnPercent: 0, periodPnl: 0 };
     }
 
+    const sortedTransactions = [...transactions].sort(
+      (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
+    );
+
+    type RateSample = { timestamp: number; rate: number };
+    const rateHistory: Record<string, RateSample[]> = {};
+    sortedTransactions.forEach((tx) => {
+      if (!tx.assetCode) return;
+      const rate = resolveTransactionExchangeRate(tx);
+      const timestamp = new Date(tx.date).getTime();
+      if (!rateHistory[tx.assetCode]) {
+        rateHistory[tx.assetCode] = [];
+      }
+      rateHistory[tx.assetCode].push({ timestamp, rate });
+    });
+
     // 1. Determine Start and End Dates (using date-fns)
     const endDate = startOfDay(new Date()); // Use start of today for consistency
     let startDate: Date;
@@ -127,10 +173,10 @@ export async function calculatePeriodStats(
       if (transactions.length === 0)
         return { periodReturnPercent: 0, periodPnl: 0 }; // Or null? If no transactions ever.
       // Find the earliest transaction date
-      startDate = transactions.reduce((earliest, current) => {
+      startDate = sortedTransactions.reduce((earliest, current) => {
         const currentTs = new Date(current.date);
         return currentTs < earliest ? currentTs : earliest;
-      }, new Date(transactions[0].date));
+      }, new Date(sortedTransactions[0].date));
       startDate = startOfDay(startDate);
     } else {
       switch (period) {
@@ -162,7 +208,7 @@ export async function calculatePeriodStats(
     // Transactions *on* startDate are considered part of the period's cash flow.
     // Transactions *before* exclusiveEndDate are included.
     let cashFlows = 0;
-    const periodTransactions = transactions.filter((tx) => {
+    const periodTransactions = sortedTransactions.filter((tx) => {
       const txTimestamp = getUnixTime(new Date(tx.date));
       // Include transactions from the start of startDate up to (but not including) the start of the day AFTER endDate
       return (
@@ -179,52 +225,39 @@ export async function calculatePeriodStats(
       // BUY/SELL affect cash balance but are part of investment value changes, not external cash flow here.
     });
 
-    // 3. Calculate Start Value and End Value (实现期间收益率核心逻辑)
-    // --- 1. 重建期初/期末持仓和现金 ---
-    // 辅助函数：重建某一时点的持仓和现金
-    async function reconstructPortfolioState(atDate: Date) {
-      const positions: Record<string, { quantity: number; cost: number }> = {};
+    function reconstructPortfolioState(atDate: Date) {
+      const tracker = new LotTracker();
       let cash = portfolio.initialCash || 0;
-      for (const tx of transactions) {
-        const txTime = getUnixTime(new Date(tx.date));
-        if (txTime > getUnixTime(atDate)) continue;
-        if (tx.type === TransactionType.DEPOSIT) {
-          cash += Number(tx.amount || 0);
-        } else if (tx.type === TransactionType.WITHDRAW) {
-          cash -= Number(tx.amount || 0);
-        } else if (tx.type === TransactionType.BUY) {
-          if (!tx.assetCode || !tx.quantity || !tx.price) continue;
-          if (!positions[tx.assetCode])
-            positions[tx.assetCode] = { quantity: 0, cost: 0 };
-          const quantity = Number(tx.quantity);
-          const price = Number(tx.price);
-          const commission = Number(tx.commission || 0);
-          positions[tx.assetCode].quantity += quantity;
-          positions[tx.assetCode].cost += quantity * price + commission;
-          cash -= quantity * price + commission;
-        } else if (tx.type === TransactionType.SELL) {
-          if (!tx.assetCode || !tx.quantity || !tx.price) continue;
-          if (!positions[tx.assetCode])
-            positions[tx.assetCode] = { quantity: 0, cost: 0 };
-          const quantity = Number(tx.quantity);
-          const price = Number(tx.price);
-          const commission = Number(tx.commission || 0);
-          // 简化：卖出时按比例减少成本
-          const avgCost =
-            positions[tx.assetCode].quantity + quantity > 0
-              ? positions[tx.assetCode].cost /
-                (positions[tx.assetCode].quantity + quantity)
-              : 0;
-          positions[tx.assetCode].quantity -= quantity;
-          positions[tx.assetCode].cost -= avgCost * quantity;
-          cash += quantity * price - commission;
+      const targetTimestamp = getUnixTime(atDate);
+      for (const tx of sortedTransactions) {
+        const txTimestamp = getUnixTime(new Date(tx.date));
+        if (txTimestamp > targetTimestamp) break;
+        switch (tx.type) {
+          case TransactionType.DEPOSIT:
+            cash += Number(tx.amount || 0);
+            break;
+          case TransactionType.WITHDRAW:
+            cash -= Number(tx.amount || 0);
+            break;
+          case TransactionType.DIVIDEND:
+            cash += Number(tx.amount || 0);
+            break;
+          case TransactionType.LEVERAGE_COST:
+            cash -= Number(tx.amount || 0);
+            break;
+          case TransactionType.BUY:
+            tracker.applyBuy(tx);
+            cash -= getBuyCashRequirementInCny(tx);
+            break;
+          case TransactionType.SELL:
+            tracker.applySell(tx);
+            cash += getSellCashProceedsInCny(tx);
+            break;
+          default:
+            break;
         }
       }
-      // 移除数量为0的持仓
-      Object.keys(positions).forEach((code) => {
-        if (positions[code].quantity === 0) delete positions[code];
-      });
-      return { positions, cash };
+      return { positions: tracker.getPositionsSnapshot(), cash };
     }
 
     // --- 2. 获取所有相关股票的K线 ---
@@ -235,7 +268,9 @@ export async function calculatePeriodStats(
     // 收集期间涉及的股票代码
     const allAssetCodes = Array.from(
       new Set(
-        transactions.filter((tx) => tx.assetCode).map((tx) => tx.assetCode!)
+        sortedTransactions
+          .filter((tx) => tx.assetCode)
+          .map((tx) => tx.assetCode!)
       )
     );
 
@@ -265,37 +300,54 @@ export async function calculatePeriodStats(
     }
 
     // --- 3. 计算期初/期末市值 ---
+    function getHistoricalRate(code: string, timestamp: number): number {
+      const history = rateHistory[code];
+      if (!history || history.length === 0) {
+        return getExchangeRateForAssetToCNY(code);
+      }
+      for (let i = history.length - 1; i >= 0; i--) {
+        if (history[i].timestamp <= timestamp) {
+          return history[i].rate;
+        }
+      }
+      return history[0].rate;
+    }
+
+    function findPricePoint(
+      code: string,
+      priceDate: string
+    ): KlinePoint | undefined {
+      const klineArr = klineMap[code];
+      if (!klineArr || klineArr.length === 0) return undefined;
+      const exact = klineArr.find((k) => k.date === priceDate);
+      if (exact) return exact;
+      const fallback = [...klineArr]
+        .filter((k) => k.date < priceDate)
+        .sort((a, b) => b.date.localeCompare(a.date));
+      return fallback.length > 0 ? fallback[0] : undefined;
+    }
+
     async function calcValue(
-      state: {
-        positions: Record<string, { quantity: number; cost: number }>;
-        cash: number;
-      },
+      state: { positions: Map<string, LotPositionState>; cash: number },
       priceDate: string
     ) {
       let value = state.cash;
-      for (const code of Object.keys(state.positions)) {
-        const klineArr = klineMap[code];
-        if (!klineArr || klineArr.length === 0) continue;
-        // 找到对应日期的收盘价
-        const kline = klineArr.find((k) => k.date === priceDate);
-        if (kline) {
-          value += state.positions[code].quantity * kline.close;
-        } else {
-          // 如果没有该日K线，尝试用最近的前一日
-          const sorted = klineArr
-            .filter((k) => k.date < priceDate)
-            .sort((a, b) => b.date.localeCompare(a.date));
-          if (sorted.length > 0) {
-            value += state.positions[code].quantity * sorted[0].close;
-          }
-        }
+      for (const [code, posState] of state.positions.entries()) {
+        if (posState.quantity <= 0) continue;
+        const pricePoint = findPricePoint(code, priceDate);
+        if (!pricePoint || pricePoint.close == null) continue;
+        const priceTimestamp = new Date(
+          `${pricePoint.date}T23:59:59Z`
+        ).getTime();
+        const rate = getHistoricalRate(code, priceTimestamp);
+        value += posState.quantity * pricePoint.close * rate;
       }
       return value;
     }
 
     // 重建期初和期末状态
-    const startState = await reconstructPortfolioState(subDays(startDate, 1));
-    const endState = await reconstructPortfolioState(endDate);
+    const startState = reconstructPortfolioState(subDays(startDate, 1));
+    const endState = reconstructPortfolioState(endDate);
 
     // 计算期初和期末估值
     const startValue = await calcValue(startState, startKlineDate);
@@ -512,19 +564,13 @@ export async function calculateTotalCommission(
   let total = 0;
   for (const tx of portfolio.transactions) {
     if (tx.type === TransactionType.BUY || tx.type === TransactionType.SELL) {
-      // 仅统计 commission 字段
-      const commission = typeof tx.commission === 'number' ? tx.commission : 0;
+      const commissionCny = getCommissionInCny(tx);
       console.log(
-        `[calculateTotalCommission] 交易ID: ${tx.id}, 类型: ${tx.type}, 原始手续费: ${commission}, 资产代码: ${tx.assetCode || '无'}`
+        `[calculateTotalCommission] 交易ID: ${tx.id}, 类型: ${tx.type}, 手续费(折算CNY): ${commissionCny.toFixed(
+          2
+        )}`
       );
-
-      if (commission && tx.assetCode) {
-        const rate = getExchangeRateForAssetToCNY(tx.assetCode);
-        console.log(`[calculateTotalCommission] 使用汇率: ${rate} 折算`);
-        total += commission * rate;
-      } else {
-        total += commission;
-      }
+      total += commissionCny;
     }
   }
 
@@ -550,7 +596,7 @@ export function calculateLeverageCostByDay(
     (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
   );
   // 1. 构建每日融资余额表
-  let dailyBalance: Record<string, number> = {};
+  const dailyBalance: Record<string, number> = {};
   let currentBalance = 0;
   let txIndex = 0;
   const days = eachDayOfInterval({ start: startDate, end: endDate });
@@ -841,108 +887,80 @@ export async function calculateRealizedPnl(
     return cached;
   }
 
-  const { getExchangeRateForAssetToCNY } = await import('./currencyService');
-
-  // 按资产分组计算已实现盈亏
-  const assetPnl: Record<
-    string,
-    {
-      totalBuyCost: number; // 累计买入成本（CNY，含手续费）
-      totalBuyQuantity: number; // 累计买入数量
-      totalSellRevenue: number; // 累计卖出收入（CNY，扣除手续费）
-      totalSellQuantity: number; // 累计卖出数量
-      realizedPnl: number; // 已实现盈亏（包括股息）
-    }
-  > = {};
-
-  // 股息总收入（已换算为CNY）
+  const tracker = new LotTracker();
+  let tradingPnl = 0;
   let totalDividendIncome = 0;
 
-  // 按时间顺序处理交易
   const sortedTransactions = [...portfolio.transactions].sort(
     (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
   );
 
   for (const tx of sortedTransactions) {
-    // 处理股息收入
     if (tx.type === TransactionType.DIVIDEND) {
       const dividendAmount = Number(tx.amount || 0);
       totalDividendIncome += dividendAmount;
       console.log(
-        `[calculateRealizedPnl] 股息收入: ${dividendAmount} CNY (资产: ${tx.assetCode || '未知'})`
+        `[calculateRealizedPnl] 股息收入: ${dividendAmount.toFixed(2)} CNY (资产: ${tx.assetCode || '未知'})`
       );
       continue;
     }
 
-    // 处理买卖交易
-    if (tx.type !== TransactionType.BUY && tx.type !== TransactionType.SELL) {
-      continue;
-    }
-
-    if (!tx.assetCode || !tx.quantity || !tx.price) {
-      continue;
-    }
-
-    // 获取汇率
-    const exchangeRate = getExchangeRateForAssetToCNY(tx.assetCode);
-
-    if (!assetPnl[tx.assetCode]) {
-      assetPnl[tx.assetCode] = {
-        totalBuyCost: 0,
-        totalBuyQuantity: 0,
-        totalSellRevenue: 0,
-        totalSellQuantity: 0,
-        realizedPnl: 0,
-      };
-    }
-
-    const asset = assetPnl[tx.assetCode];
-    const quantity = Number(tx.quantity);
-    const price = Number(tx.price);
-    const commission = Number(tx.commission || 0) * exchangeRate;
-
     if (tx.type === TransactionType.BUY) {
-      // 买入：累加成本
-      const buyCost = quantity * price * exchangeRate + commission;
-      asset.totalBuyCost += buyCost;
-      asset.totalBuyQuantity += quantity;
-    } else if (tx.type === TransactionType.SELL) {
-      // 卖出：计算已实现盈亏
-      const sellRevenue = quantity * price * exchangeRate - commission;
-      asset.totalSellRevenue += sellRevenue;
-      asset.totalSellQuantity += quantity;
-
-      // 计算这部分卖出对应的平均成本
-      const avgCost =
-        asset.totalBuyQuantity > 0
-          ? asset.totalBuyCost / asset.totalBuyQuantity
-          : 0;
-      const costOfSold = avgCost * quantity;
-
-      // 已实现盈亏 = 卖出收入 - 对应成本
-      const realizedFromThisSell = sellRevenue - costOfSold;
-      asset.realizedPnl += realizedFromThisSell;
-
-      // 更新剩余成本和数量（按比例减少）
-      asset.totalBuyCost -= costOfSold;
-      asset.totalBuyQuantity -= quantity;
+      tracker.applyBuy(tx);
+      continue;
     }
+
+    if (tx.type !== TransactionType.SELL) {
+      continue;
+    }
+
+    const price = Number(tx.price ?? 0);
+    const quantity = Number(tx.quantity ?? 0);
+    if (!tx.assetCode || quantity <= 0 || price <= 0) {
+      console.warn(
+        `[calculateRealizedPnl] 忽略无效卖出交易 ${tx.id ?? tx.assetCode}`
+      );
+      continue;
+    }
+
+    const sellResult = tracker.applySell(tx);
+    if (sellResult.matchedQuantity <= 0) {
+      console.warn(
+        `[calculateRealizedPnl] 卖出 ${tx.assetCode} 时没有匹配到持仓，跳过成本计算`
+      );
+      continue;
+    }
+    if (sellResult.matchedQuantity < quantity) {
+      console.warn(
+        `[calculateRealizedPnl] 卖出 ${tx.assetCode} 仅匹配到 ${sellResult.matchedQuantity}/${quantity} 股`
+      );
+    }
+
+    const rate = resolveTransactionExchangeRate(tx);
+    const revenueQuantity = sellResult.matchedQuantity;
+    const grossRevenue = revenueQuantity * price * rate;
+    const commissionCny = getCommissionInCny(tx);
+    const effectiveCommission =
+      quantity > 0
+        ? (commissionCny * revenueQuantity) / quantity
+        : commissionCny;
+    const netRevenue = grossRevenue - effectiveCommission;
+    const costRemoved = sellResult.costRemovedCny;
+    const realizedFromSell = netRevenue - costRemoved;
+
+    tradingPnl += realizedFromSell;
   }
 
-  // 汇总所有资产的已实现盈亏（买卖价差）
-  const tradingPnl = Object.values(assetPnl).reduce(
-    (sum, asset) => sum + asset.realizedPnl,
-    0
-  );
-
-  // 总已实现盈亏 = 交易盈亏 + 股息收入
   const totalRealizedPnl = tradingPnl + totalDividendIncome;
 
   console.log(
-    `[calculateRealizedPnl] 交易盈亏: ${tradingPnl.toFixed(2)} CNY, 股息收入: ${totalDividendIncome.toFixed(2)} CNY, 总已实现盈亏: ${totalRealizedPnl.toFixed(2)} CNY`
+    `[calculateRealizedPnl] 交易盈亏: ${tradingPnl.toFixed(
+      2
+    )} CNY, 股息收入: ${totalDividendIncome.toFixed(
+      2
+    )} CNY, 总已实现盈亏: ${totalRealizedPnl.toFixed(2)} CNY`
   );
 
-  // 【性能优化】缓存计算结果（永久缓存，直到交易变化）
   cacheService.set(cacheKey, totalRealizedPnl, 0); // TTL=0 表示永久缓存
   console.log(`[calculateRealizedPnl] 缓存计算结果: ${cacheKey}`);
 
@@ -958,7 +976,7 @@ export async function calculateRealizedPnl(
  */
 export function calculateUnrealizedPnl(positions: Position[]): number {
   return positions.reduce((sum, pos) => {
-    const marketValue = pos.marketValue || 0;
+    const marketValue = pos.marketValueCNY ?? pos.marketValue ?? 0;
     const cost = pos.totalCost || 0;
     return sum + (marketValue - cost);
   }, 0);

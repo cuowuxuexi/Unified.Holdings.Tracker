@@ -47,10 +47,38 @@ export interface Position {
   costPrice: number; // 持仓成本价
   marketValue: number; // 当前市值 (需要实时价格)
   totalCost: number; // 总成本
+  /**
+   * 记录交易货币，便于前端展示原币种
+   */
+  currency?: string;
+  /**
+   * 原币种维度的成本价
+   */
+  costPriceLocal?: number;
+  /**
+   * 原币种维度的总成本
+   */
+  totalCostLocal?: number;
+  /**
+   * 原币种维度的市值
+   */
+  marketValueLocal?: number;
+  /**
+   * 人民币维度的市值，若未设置则默认和 marketValue 相同
+   */
+  marketValueCNY?: number;
   currentPrice?: number; // 当前价格 (来自实时行情)
   dailyChange?: number; // 当日盈亏额 (需要实时价格和昨日收盘价)
+  /**
+   * 原币种维度的当日盈亏额
+   */
+  dailyChangeLocal?: number;
   dailyChangePercent?: number; // 当日盈亏百分比
   totalPnl?: number; // 累计盈亏额
+  /**
+   * 原币种维度的累计盈亏额
+   */
+  totalPnlLocal?: number;
   totalPnlPercent?: number; // 累计盈亏百分比
   weeklyChangePercent?: number | null | undefined; // 周涨跌幅
   monthlyChangePercent?: number | null | undefined; // 月涨跌幅

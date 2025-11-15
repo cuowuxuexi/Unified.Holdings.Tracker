@@ -3,6 +3,8 @@ import {
   calculatePeriodStats,
   calculateIndexPeriodChanges,
   calculateRealizedPnl,
+  calculateTotalCommission,
+  calculateUnrealizedPnl,
   calculateTotalPnlV2,
 } from '../calculationService';
 import { fetchKline } from '../tencentApi';
@@ -183,6 +185,218 @@ describe('Calculation Service', () => {
 
       const stats = await calculatePeriodStats(portfolio, 'weekly');
       expect(stats).toEqual({ periodReturnPercent: null, periodPnl: null });
+    });
+
+    it('正确处理跨币种持仓的周期估值', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2024-04-15T00:00:00.000Z'));
+      const portfolio: Portfolio = {
+        id: 'fx-portfolio',
+        name: 'FX Stats',
+        cash: 100000,
+        initialCash: 100000,
+        leverage: {
+          totalAmount: 0,
+          usedAmount: 0,
+          availableAmount: 0,
+          costRate: 0,
+        },
+        transactions: [
+          {
+            id: 'fx1',
+            date: '2024-04-05T00:00:00.000Z',
+            type: TransactionType.BUY,
+            assetCode: 'hk00700',
+            quantity: 100,
+            price: 50,
+            commission: 10,
+            exchangeRate: 0.9,
+          },
+          {
+            id: 'fx2',
+            date: '2024-04-08T00:00:00.000Z',
+            type: TransactionType.BUY,
+            assetCode: 'sh600519',
+            quantity: 10,
+            price: 1000,
+            commission: 20,
+          },
+          {
+            id: 'fx3',
+            date: '2024-04-12T00:00:00.000Z',
+            type: TransactionType.SELL,
+            assetCode: 'hk00700',
+            quantity: 50,
+            price: 55,
+            commission: 10,
+            exchangeRate: 0.88,
+          },
+        ],
+      };
+
+      mockedFetchKline.mockImplementation(async (code: string) => {
+        if (code === 'hk00700') {
+          return [
+            {
+              date: '2024-04-07',
+              open: 50,
+              close: 50,
+              high: 51,
+              low: 49,
+              volume: 1000,
+            },
+            {
+              date: '2024-04-15',
+              open: 58,
+              close: 60,
+              high: 61,
+              low: 57,
+              volume: 1000,
+            },
+          ];
+        }
+        if (code === 'sh600519') {
+          return [
+            {
+              date: '2024-04-08',
+              open: 1000,
+              close: 1000,
+              high: 1005,
+              low: 995,
+              volume: 1000,
+            },
+            {
+              date: '2024-04-15',
+              open: 1090,
+              close: 1100,
+              high: 1110,
+              low: 1080,
+              volume: 1000,
+            },
+          ];
+        }
+        return [];
+      });
+
+      const stats = await calculatePeriodStats(portfolio, 'weekly');
+      expect(stats.periodPnl).toBeCloseTo(1531.2, 1);
+      expect(stats.periodReturnPercent).toBeCloseTo(1.53, 2);
+    });
+  });
+
+  describe('calculateRealizedPnl', () => {
+    it('使用交易汇率计算外币买卖的已实现盈亏', async () => {
+      const portfolio: Portfolio = {
+        id: 'p1',
+        name: 'FX',
+        cash: 0,
+        initialCash: 0,
+        leverage: {
+          totalAmount: 0,
+          usedAmount: 0,
+          availableAmount: 0,
+          costRate: 0,
+        },
+        transactions: [
+          {
+            id: 't1',
+            date: '2024-04-05T00:00:00.000Z',
+            type: TransactionType.BUY,
+            assetCode: 'hk00005',
+            quantity: 100,
+            price: 50,
+            commission: 10,
+            exchangeRate: 0.9,
+          },
+          {
+            id: 't2',
+            date: '2024-04-12T00:00:00.000Z',
+            type: TransactionType.SELL,
+            assetCode: 'hk00005',
+            quantity: 50,
+            price: 60,
+            commission: 8,
+            exchangeRate: 0.85,
+          },
+          {
+            id: 't3',
+            date: '2024-04-13T00:00:00.000Z',
+            type: TransactionType.DIVIDEND,
+            assetCode: 'hk00005',
+            amount: 120,
+          },
+        ],
+      };
+
+      const result = await calculateRealizedPnl(portfolio);
+      expect(result).toBeCloseTo(408.7, 1);
+    });
+  });
+
+  describe('calculateTotalCommission', () => {
+    it('优先使用交易记录中的汇率折算手续费', async () => {
+      const portfolio: Portfolio = {
+        id: 'p2',
+        name: 'Commission',
+        cash: 0,
+        initialCash: 0,
+        leverage: {
+          totalAmount: 0,
+          usedAmount: 0,
+          availableAmount: 0,
+          costRate: 0,
+        },
+        transactions: [
+          {
+            id: 'tc1',
+            date: '2024-04-01T00:00:00.000Z',
+            type: TransactionType.BUY,
+            assetCode: 'hk00005',
+            quantity: 10,
+            price: 40,
+            commission: 12,
+            exchangeRate: 0.9,
+          },
+          {
+            id: 'tc2',
+            date: '2024-04-02T00:00:00.000Z',
+            type: TransactionType.SELL,
+            assetCode: 'sh600519',
+            quantity: 1,
+            price: 1000,
+            commission: 20,
+          },
+        ],
+      };
+
+      const result = await calculateTotalCommission(portfolio);
+      expect(result).toBeCloseTo(30.8, 2);
+    });
+  });
+
+  describe('calculateUnrealizedPnl', () => {
+    it('使用 marketValueCNY 汇总浮盈亏', () => {
+      const positions: Position[] = [
+        {
+          asset: { code: 'hk00005', name: 'HSBC', market: Market.HK },
+          quantity: 100,
+          costPrice: 40,
+          totalCost: 4000,
+          costPriceLocal: 45,
+          totalCostLocal: 4500,
+          marketValue: 6000,
+          marketValueCNY: 5400,
+        },
+        {
+          asset: { code: 'sh600519', name: '贵州茅台', market: Market.CN },
+          quantity: 10,
+          costPrice: 1000,
+          totalCost: 10000,
+          marketValue: 12000,
+        },
+      ];
+
+      const result = calculateUnrealizedPnl(positions);
+      expect(result).toBeCloseTo(3400, 2);
     });
   });
 

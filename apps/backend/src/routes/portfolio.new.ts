@@ -9,10 +9,7 @@ import {
   calculateLeverageCostByDay,
   calculateTotalDividendIncome,
 } from '../services/calculationService';
-import {
-  getExchangeRateForAssetToCNY,
-  getExchangeRate,
-} from '../services/currencyService';
+import { getExchangeRate } from '../services/currencyService';
 import {
   Transaction,
   PortfolioDetail,
@@ -24,6 +21,7 @@ import {
 } from '../types';
 import { parseISO, startOfYear } from 'date-fns';
 import { correctHistoricalTransactionAmounts } from '../services/storage.prisma';
+import { buildPositionsUsingLots } from '../services/portfolioReplay';
 
 const router = Router();
 
@@ -49,95 +47,47 @@ const getMarketFromCode = (code: string): Market | null => {
 
 // Helper Function: Calculate Base Positions
 const calculateBasePositions = (transactions: Transaction[]): Position[] => {
-  // 按日期升序排序，确保先买后卖的顺序正确
-  const sortedTransactions = [...transactions].sort(
-    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-  );
-
-  const positionsMap: Map<
-    string,
-    {
-      quantity: number;
-      totalCost: number;
-      assetCode: string;
-      transactions: Transaction[];
-    }
-  > = new Map();
-
-  sortedTransactions.forEach((tx) => {
-    if (
-      (tx.type === TransactionType.BUY || tx.type === TransactionType.SELL) &&
-      tx.assetCode
-    ) {
-      const market = getMarketFromCode(tx.assetCode);
-      if (!market) {
-        console.warn(
-          `[calculateBasePositions] Skipping transaction with invalid asset code: ${tx.assetCode}`
-        );
-        return;
-      }
-
-      if (!positionsMap.has(tx.assetCode)) {
-        positionsMap.set(tx.assetCode, {
-          quantity: 0,
-          totalCost: 0,
-          assetCode: tx.assetCode,
-          transactions: [],
-        });
-      }
-      const pos = positionsMap.get(tx.assetCode)!;
-      pos.transactions.push(tx);
-
-      const quantity = tx.quantity ? Number(tx.quantity) : 0;
-      const price = tx.price ? Number(tx.price) : 0;
-      const transactionAmount = quantity * price;
-
-      if (tx.type === TransactionType.BUY) {
-        pos.quantity += quantity;
-        pos.totalCost += transactionAmount;
-      } else if (tx.type === TransactionType.SELL) {
-        pos.quantity -= quantity;
-        pos.totalCost -= transactionAmount;
-
-        if (pos.quantity < 0) {
-          console.warn(
-            `Overselling detected for ${tx.assetCode}. Quantity adjusted to 0.`
-          );
-          pos.quantity = 0;
-        }
-      }
-    }
-  });
-
+  const lotPositions = buildPositionsUsingLots(transactions);
   const positions: Position[] = [];
-  for (const data of positionsMap.values()) {
-    if (data.quantity <= 0) continue;
 
-    const market = getMarketFromCode(data.assetCode);
+  for (const state of lotPositions.values()) {
+    if (state.quantity <= 0) continue;
+
+    const market = getMarketFromCode(state.assetCode);
     if (!market) {
       console.error(
-        `[calculateBasePositions] Market became null unexpectedly for code: ${data.assetCode}`
+        `[calculateBasePositions] Market became null unexpectedly for code: ${state.assetCode}`
       );
       continue;
     }
 
     const asset: Asset = {
-      code: data.assetCode,
-      market: market,
-      name: data.assetCode,
+      code: state.assetCode,
+      market,
+      name: state.assetCode,
     };
 
-    const costPrice = data.quantity > 0 ? data.totalCost / data.quantity : 0;
+    const costPrice =
+      state.quantity > 0 ? state.totalCostCny / state.quantity : 0;
+    const costPriceLocal =
+      state.quantity > 0 ? state.totalCostLocal / state.quantity : 0;
 
     positions.push({
-      asset: asset,
-      quantity: data.quantity,
-      costPrice: costPrice,
-      totalCost: data.totalCost,
+      asset,
+      quantity: state.quantity,
+      costPrice,
+      costPriceLocal,
+      totalCost: state.totalCostCny,
+      totalCostLocal: state.totalCostLocal,
+      currency: state.currency,
       marketValue: 0,
+      marketValueLocal: 0,
+      marketValueCNY: 0,
       currentPrice: 0,
       dailyChange: 0,
+      dailyChangeLocal: 0,
       totalPnl: 0,
+      totalPnlLocal: 0,
     });
   }
   return positions;
@@ -524,9 +474,15 @@ router.get(
 
     // Note: start/end variables are defined but not currently used in the calculation
     // They may be needed for future period-based calculations
-    const start: Date = typeof startDate === 'string' ? parseISO(startDate) : startOfYear(new Date());
-    const end: Date = typeof endDate === 'string' ? parseISO(endDate) : new Date();
-    console.log(`[Stats] Period range (reserved for future use): ${start.toISOString()} to ${end.toISOString()}`);
+    const start: Date =
+      typeof startDate === 'string'
+        ? parseISO(startDate)
+        : startOfYear(new Date());
+    const end: Date =
+      typeof endDate === 'string' ? parseISO(endDate) : new Date();
+    console.log(
+      `[Stats] Period range (reserved for future use): ${start.toISOString()} to ${end.toISOString()}`
+    );
 
     const rawPeriod = req.query.period as string | undefined;
     const allowedPeriods = ['total', 'daily', 'weekly', 'monthly', 'yearly'];
@@ -595,19 +551,8 @@ router.get(
     let dailyPnlInCNY = 0;
 
     for (const pos of updatedPositions) {
-      let exchangeRate = 1;
-      if (pos.asset.market !== Market.CN) {
-        try {
-          exchangeRate = await getExchangeRateForAssetToCNY(pos.asset.code);
-        } catch (rateError) {
-          console.error(
-            `[Stats Calc] Failed to get exchange rate for ${pos.asset.code}, using 1. Error:`,
-            rateError
-          );
-        }
-      }
-      totalMarketValueInCNY += (pos.marketValue ?? 0) * exchangeRate;
-      dailyPnlInCNY += (pos.dailyChange ?? 0) * exchangeRate;
+      totalMarketValueInCNY += pos.marketValue ?? pos.marketValueCNY ?? 0;
+      dailyPnlInCNY += pos.dailyChange ?? 0;
     }
 
     const totalAssets = portfolio.cash + totalMarketValueInCNY;

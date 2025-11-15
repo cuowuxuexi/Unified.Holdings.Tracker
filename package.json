@@ -27,6 +27,7 @@
     "clean:dev:status": "node scripts/dev-cleanup.js --status",
     "clean:dev:ports": "node scripts/dev-cleanup.js --ports",
     "clean:dev:node": "node scripts/dev-cleanup.js --node",
+    "audit:pnl": "cross-env TS_NODE_PROJECT=tsconfig.base.json node -r ts-node/register scripts/audit-pnl.ts",
     "lint": "eslint . --ext .ts,.tsx --report-unused-disable-directives --max-warnings 0",
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
     "format": "prettier --write .",

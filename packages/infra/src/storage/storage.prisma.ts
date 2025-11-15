@@ -640,16 +640,13 @@ export async function addTransactionToPortfolio(
       });
 
       // 创建新交易记录
-      console.log(
-        `[storage.prisma DB Save] Transaction data:`,
-        {
-          type: newTransaction.type,
-          assetCode: newTransaction.assetCode,
-          currency: newTransaction.currency ?? 'CNY',
-          exchangeRate: newTransaction.exchangeRate,
-          amount: newTransaction.amount
-        }
-      );
+      console.log(`[storage.prisma DB Save] Transaction data:`, {
+        type: newTransaction.type,
+        assetCode: newTransaction.assetCode,
+        currency: newTransaction.currency ?? 'CNY',
+        exchangeRate: newTransaction.exchangeRate,
+        amount: newTransaction.amount,
+      });
       await tx.transaction.create({
         data: {
           id: newTransaction.id,
@@ -921,7 +918,72 @@ export async function cashRecalculateForPortfolioAsync(
   return legacyCashRecalculate(portfolio);
 }
 
+async function fixForeignTransactionsMissingRates(): Promise<void> {
+  const records = await prisma.transaction.findMany({
+    where: {
+      currency: { not: 'CNY' },
+      OR: [{ exchangeRate: null }, { exchangeRate: { lte: 0 } }],
+    },
+  });
+  if (records.length === 0) {
+    return;
+  }
+
+  const { getExchangeRateForAssetToCNY } = await import(
+    '../providers/currency-service'
+  );
+
+  for (const tx of records) {
+    if (!tx.assetCode) {
+      console.warn(
+        `[storage.prisma] 交易 ${tx.id} 缺少 assetCode，无法修复 exchangeRate`
+      );
+      continue;
+    }
+    const rate = await getExchangeRateForAssetToCNY(tx.assetCode);
+    const updates: {
+      exchangeRate: number;
+      amount?: Decimal;
+      commission?: Decimal;
+    } = {
+      exchangeRate: rate,
+    };
+    const quantity = tx.quantity ? Number(tx.quantity) : 0;
+    const price = tx.price ? Number(tx.price) : 0;
+    const commissionLocal = tx.commission ? Number(tx.commission) : 0;
+
+    if (tx.type === TransactionType.BUY && quantity > 0 && price > 0) {
+      const gross = quantity * price * rate;
+      const commissionCny = commissionLocal * rate;
+      updates.amount = toDecimal(gross + commissionCny);
+      updates.commission = toDecimal(commissionCny);
+    } else if (tx.type === TransactionType.SELL && quantity > 0 && price > 0) {
+      const gross = quantity * price * rate;
+      const commissionCny = commissionLocal * rate;
+      updates.amount = toDecimal(gross);
+      updates.commission = toDecimal(commissionCny);
+    } else if (tx.type === TransactionType.DIVIDEND) {
+      const amountLocal = tx.amount ? Number(tx.amount) : 0;
+      updates.amount = toDecimal(amountLocal * rate);
+      if (commissionLocal) {
+        updates.commission = toDecimal(commissionLocal * rate);
+      }
+    } else if (commissionLocal) {
+      updates.commission = toDecimal(commissionLocal * rate);
+    }
+
+    await prisma.transaction.update({
+      where: { id: tx.id },
+      data: updates,
+    });
+    console.log(
+      `[storage.prisma] 修复交易 ${tx.id} 缺失汇率，设置 exchangeRate=${rate}`
+    );
+  }
+}
+
 export async function correctHistoricalTransactionAmounts(): Promise<void> {
+  await fixForeignTransactionsMissingRates();
   return legacyCorrectHistory();
 }
 

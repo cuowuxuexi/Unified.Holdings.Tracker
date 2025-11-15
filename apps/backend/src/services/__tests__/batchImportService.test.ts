@@ -20,7 +20,7 @@ describe('BatchImportService', () => {
         commission: 92.5,
         leverageUsed: 0,
         currency: 'CNY',
-        exchangeRate: 1,
+        exchangeRate: undefined,
         notes: '买入茅台',
       });
     });
@@ -181,6 +181,21 @@ describe('BatchImportService', () => {
 
       const errors = batchImportService.validateRow(row);
       expect(errors.some((e) => e.field === '货币')).toBe(true);
+    });
+
+    it('应该要求非CNY交易提供汇率', () => {
+      const row = {
+        rowNumber: 2,
+        date: '2025-01-15',
+        type: 'BUY',
+        assetCode: 'hk00700',
+        quantity: 100,
+        price: 320,
+        currency: 'HKD',
+      };
+
+      const errors = batchImportService.validateRow(row);
+      expect(errors.some((e) => e.field === '汇率')).toBe(true);
     });
 
     it('应该接受有效的完整BUY交易', () => {

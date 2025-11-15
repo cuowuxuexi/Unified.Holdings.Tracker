@@ -46,7 +46,9 @@ export class BatchImportService {
           rowNumber: index + 2, // +2因为第1行是表头
           date: (row['日期'] || row['date']) as string,
           type: ((row['类型'] || row['type']) as string)?.toUpperCase(),
-          assetCode: (row['资产代码'] || row['assetCode'] || undefined) as string | undefined,
+          assetCode: (row['资产代码'] || row['assetCode'] || undefined) as
+            | string
+            | undefined,
           quantity: this.parseNumber(row['数量'] || row['quantity']),
           price: this.parseNumber(row['价格'] || row['price']),
           amount: this.parseNumber(row['金额'] || row['amount']),
@@ -54,10 +56,13 @@ export class BatchImportService {
           leverageUsed: this.parseNumber(
             row['融资额度'] || row['leverageUsed']
           ),
-          currency: (row['货币'] || row['currency'] || 'CNY') as string,
-          exchangeRate:
-            this.parseNumber(row['汇率'] || row['exchangeRate']) || 1,
-          notes: (row['备注'] || row['notes'] || undefined) as string | undefined,
+          currency: this.normalizeCurrency(
+            (row['货币'] || row['currency'] || 'CNY') as string
+          ),
+          exchangeRate: this.parseNumber(row['汇率'] || row['exchangeRate']),
+          notes: (row['备注'] || row['notes'] || undefined) as
+            | string
+            | undefined,
         };
       });
     } catch (error: unknown) {
@@ -103,7 +108,9 @@ export class BatchImportService {
           rowNumber: index + 2, // +2因为第1行是表头
           date: (row['日期'] || row['date']) as string,
           type: ((row['类型'] || row['type']) as string)?.toUpperCase(),
-          assetCode: (row['资产代码'] || row['assetCode'] || undefined) as string | undefined,
+          assetCode: (row['资产代码'] || row['assetCode'] || undefined) as
+            | string
+            | undefined,
           quantity: this.parseNumber(row['数量'] || row['quantity']),
           price: this.parseNumber(row['价格'] || row['price']),
           amount: this.parseNumber(row['金额'] || row['amount']),
@@ -111,10 +118,13 @@ export class BatchImportService {
           leverageUsed: this.parseNumber(
             row['融资额度'] || row['leverageUsed']
           ),
-          currency: (row['货币'] || row['currency'] || 'CNY') as string,
-          exchangeRate:
-            this.parseNumber(row['汇率'] || row['exchangeRate']) || 1,
-          notes: (row['备注'] || row['notes'] || undefined) as string | undefined,
+          currency: this.normalizeCurrency(
+            (row['货币'] || row['currency'] || 'CNY') as string
+          ),
+          exchangeRate: this.parseNumber(row['汇率'] || row['exchangeRate']),
+          notes: (row['备注'] || row['notes'] || undefined) as
+            | string
+            | undefined,
         };
       });
     } catch (error: unknown) {
@@ -128,6 +138,8 @@ export class BatchImportService {
    */
   validateRow(row: ImportRow): ValidationError[] {
     const errors: ValidationError[] = [];
+    const currency = row.currency ? row.currency.toUpperCase() : 'CNY';
+    row.currency = currency;
 
     // 1. 日期验证
     if (!row.date || isNaN(Date.parse(row.date))) {
@@ -208,12 +220,12 @@ export class BatchImportService {
     }
 
     // 4. 货币验证
-    if (row.currency && !['CNY', 'USD', 'HKD'].includes(row.currency)) {
+    if (currency && !['CNY', 'USD', 'HKD'].includes(currency)) {
       errors.push({
         rowNumber: row.rowNumber,
         field: '货币',
         message: '货币必须是 CNY, USD 或 HKD',
-        value: row.currency,
+        value: currency,
       });
     }
 
@@ -224,6 +236,17 @@ export class BatchImportService {
         field: '汇率',
         message: '汇率必须大于0',
         value: row.exchangeRate,
+      });
+    }
+
+    if (
+      currency !== 'CNY' &&
+      (row.exchangeRate === undefined || row.exchangeRate === null)
+    ) {
+      errors.push({
+        rowNumber: row.rowNumber,
+        field: '汇率',
+        message: '非人民币交易必须填写汇率',
       });
     }
 
@@ -272,7 +295,12 @@ export class BatchImportService {
   async executeImport(
     portfolioId: string,
     rows: ImportRow[],
-    addTransactionUseCase: { execute: (params: { portfolioId: string; transaction: Omit<Transaction, 'id'> }) => Promise<{ transactions: Transaction[] }> }
+    addTransactionUseCase: {
+      execute: (params: {
+        portfolioId: string;
+        transaction: Omit<Transaction, 'id'>;
+      }) => Promise<{ transactions: Transaction[] }>;
+    }
   ): Promise<ImportResult> {
     const allErrors: ValidationError[] = [];
     const importedTransactions: Transaction[] = [];
@@ -345,11 +373,9 @@ export class BatchImportService {
           `[BatchImport] 第 ${row.rowNumber} 行导入成功，交易ID: ${lastTransaction.id}`
         );
       } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : 'Unknown error';
-        console.error(
-          `[BatchImport] 第 ${row.rowNumber} 行导入失败:`,
-          message
-        );
+        const message =
+          error instanceof Error ? error.message : 'Unknown error';
+        console.error(`[BatchImport] 第 ${row.rowNumber} 行导入失败:`, message);
         allErrors.push({
           rowNumber: row.rowNumber,
           field: '导入',
@@ -374,6 +400,12 @@ export class BatchImportService {
     if (value === undefined || value === null || value === '') return undefined;
     const num = typeof value === 'string' ? parseFloat(value) : Number(value);
     return isFinite(num) ? num : undefined;
+  }
+
+  private normalizeCurrency(value: string | undefined): string {
+    if (!value) return 'CNY';
+    const normalized = value.toString().trim().toUpperCase();
+    return normalized || 'CNY';
   }
 
   /**

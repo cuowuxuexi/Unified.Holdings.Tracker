@@ -10,10 +10,7 @@ import {
   calculateTotalDividendIncome,
   calculateTotalPnlV2,
 } from '../services/calculationService';
-import {
-  getExchangeRateForAssetToCNY,
-  getExchangeRate,
-} from '../services/currencyService';
+import { getExchangeRate } from '../services/currencyService';
 import {
   Portfolio,
   Transaction,
@@ -27,6 +24,7 @@ import {
 } from '../types';
 import { parseISO, startOfYear } from 'date-fns';
 import { correctHistoricalTransactionAmounts } from '../services/storage.prisma';
+import { buildPositionsUsingLots } from '../services/portfolioReplay';
 
 const router = Router();
 
@@ -55,112 +53,47 @@ const calculateBasePositions = (transactions: Transaction[]): Position[] => {
   console.log('[calculateBasePositions] ========== 函数被调用 ==========');
   console.log(`[calculateBasePositions] 交易记录数量: ${transactions.length}`);
 
-  // 按日期升序排序，确保先买后卖的顺序正确
-  const sortedTransactions = [...transactions].sort(
-    (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
-  );
-
-  const positionsMap: Map<
-    string,
-    {
-      quantity: number;
-      totalCost: number;
-      assetCode: string;
-      transactions: Transaction[];
-    }
-  > = new Map();
-
-  sortedTransactions.forEach((tx) => {
-    if (
-      (tx.type === TransactionType.BUY || tx.type === TransactionType.SELL) &&
-      tx.assetCode
-    ) {
-      const market = getMarketFromCode(tx.assetCode);
-      if (!market) {
-        console.warn(
-          `[calculateBasePositions] Skipping transaction with invalid asset code: ${tx.assetCode}`
-        );
-        return;
-      }
-
-      if (!positionsMap.has(tx.assetCode)) {
-        positionsMap.set(tx.assetCode, {
-          quantity: 0,
-          totalCost: 0,
-          assetCode: tx.assetCode,
-          transactions: [],
-        });
-      }
-      const pos = positionsMap.get(tx.assetCode)!;
-      pos.transactions.push(tx);
-
-      const quantity = tx.quantity ? Number(tx.quantity) : 0;
-      const price = tx.price ? Number(tx.price) : 0;
-      const transactionAmount = quantity * price;
-
-      // DEBUG: 追踪关键股票
-      if (tx.assetCode === 'hk09988' || tx.assetCode === 'sz300251') {
-        console.log(`[calculateBasePositions] ${tx.assetCode} ${tx.type}:`, {
-          'tx.quantity': tx.quantity,
-          'tx.quantity typeof': typeof tx.quantity,
-          'quantity (Number后)': quantity,
-          'quantity typeof': typeof quantity,
-          当前持仓: pos.quantity,
-        });
-      }
-
-      if (tx.type === TransactionType.BUY) {
-        pos.quantity += quantity;
-        pos.totalCost += transactionAmount;
-        if (tx.assetCode === 'hk09988' || tx.assetCode === 'sz300251') {
-          console.log(`  [BUY后] 持仓: ${pos.quantity}`);
-        }
-      } else if (tx.type === TransactionType.SELL) {
-        pos.quantity -= quantity;
-        pos.totalCost -= transactionAmount;
-        if (tx.assetCode === 'hk09988' || tx.assetCode === 'sz300251') {
-          console.log(`  [SELL后] 持仓: ${pos.quantity}`);
-        }
-
-        if (pos.quantity < 0) {
-          console.warn(
-            `Overselling detected for ${tx.assetCode}. Quantity adjusted to 0.`
-          );
-          pos.quantity = 0;
-        }
-      }
-    }
-  });
-
+  const lotPositions = buildPositionsUsingLots(transactions);
   const positions: Position[] = [];
-  for (const data of positionsMap.values()) {
-    if (data.quantity <= 0) continue;
 
-    const market = getMarketFromCode(data.assetCode);
+  for (const state of lotPositions.values()) {
+    if (state.quantity <= 0) continue;
+
+    const market = getMarketFromCode(state.assetCode);
     if (!market) {
       console.error(
-        `[calculateBasePositions] Market became null unexpectedly for code: ${data.assetCode}`
+        `[calculateBasePositions] Market became null unexpectedly for code: ${state.assetCode}`
       );
       continue;
     }
 
     const asset: Asset = {
-      code: data.assetCode,
-      market: market,
-      name: data.assetCode,
+      code: state.assetCode,
+      market,
+      name: state.assetCode,
     };
 
-    const costPrice = data.quantity > 0 ? data.totalCost / data.quantity : 0;
+    const costPrice =
+      state.quantity > 0 ? state.totalCostCny / state.quantity : 0;
+    const costPriceLocal =
+      state.quantity > 0 ? state.totalCostLocal / state.quantity : 0;
 
     positions.push({
-      asset: asset,
-      quantity: data.quantity,
-      costPrice: costPrice,
-      totalCost: data.totalCost,
+      asset,
+      quantity: state.quantity,
+      costPrice,
+      costPriceLocal,
+      totalCost: state.totalCostCny,
+      totalCostLocal: state.totalCostLocal,
+      currency: state.currency,
       marketValue: 0,
+      marketValueLocal: 0,
+      marketValueCNY: 0,
       currentPrice: 0,
       dailyChange: 0,
+      dailyChangeLocal: 0,
       totalPnl: 0,
+      totalPnlLocal: 0,
     });
   }
   return positions;
@@ -732,19 +665,8 @@ router.get(
     let dailyPnlInCNY = 0;
 
     for (const pos of updatedPositions) {
-      let exchangeRate = 1;
-      if (pos.asset.market !== Market.CN) {
-        try {
-          exchangeRate = await getExchangeRateForAssetToCNY(pos.asset.code);
-        } catch (rateError) {
-          console.error(
-            `[Stats Calc] Failed to get exchange rate for ${pos.asset.code}, using 1. Error:`,
-            rateError
-          );
-        }
-      }
-      totalMarketValueInCNY += (pos.marketValue ?? 0) * exchangeRate;
-      dailyPnlInCNY += (pos.dailyChange ?? 0) * exchangeRate;
+      totalMarketValueInCNY += pos.marketValue ?? pos.marketValueCNY ?? 0;
+      dailyPnlInCNY += pos.dailyChange ?? 0;
     }
 
     const totalAssets = portfolio.cash + totalMarketValueInCNY;
@@ -934,19 +856,8 @@ router.get(
       let totalMarketValue = 0;
       let dailyPnl = 0;
       for (const pos of positions) {
-        let exchangeRate = 1;
-        if (pos.asset.market !== Market.CN) {
-          try {
-            exchangeRate = await getExchangeRateForAssetToCNY(pos.asset.code);
-          } catch (rateError) {
-            console.error(
-              `[Markdown Export] Failed to get exchange rate for ${pos.asset.code}, using 1. Error:`,
-              rateError
-            );
-          }
-        }
-        totalMarketValue += (pos.marketValue || 0) * exchangeRate;
-        dailyPnl += (pos.dailyChange || 0) * exchangeRate;
+        totalMarketValue += pos.marketValue ?? pos.marketValueCNY ?? 0;
+        dailyPnl += pos.dailyChange ?? 0;
       }
 
       const totalAssets = Number(portfolio.cash) + totalMarketValue;
