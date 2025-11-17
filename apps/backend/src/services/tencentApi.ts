@@ -3,13 +3,11 @@ import iconv from 'iconv-lite';
 import pLimit from 'p-limit';
 // Import calculation service and types
 import {
-  calculateIndexPeriodChanges,
   getYearBasePrice,
   getMonthBasePrice,
   getWeekBasePrice,
 } from './calculationService';
 import { KlinePoint, Quote } from '../types'; // Import KlinePoint from central types
-import { subYears, formatISO } from 'date-fns'; // Import date-fns functions needed
 import { cacheService } from '@uht/infra/cache/cache-service'; // K线缓存服务
 
 // Removed local Quote interface definition
@@ -224,19 +222,6 @@ function parseQuoteLine(line: string): Quote | null {
  * @param codes - 股票代码数组，例如 ['sh600519', 'hk00700', 'usAAPL']
  * @returns 返回包含 Quote 对象数组的 Promise
  */
-// Define known index codes that require period change calculation
-const INDEX_CODES_FOR_PERIOD_CHANGE = new Set([
-  'sh000001', // 上证指数
-  'sz399001', // 深证成指
-  'sz399006', // 创业板指
-  'sh000688', // 科创50
-  'hkHSI', // 恒生指数
-  // Add US indices - need to confirm exact codes used by Tencent quote API vs kline API
-  // Assuming quote API uses these, kline mapping might be needed internally in fetchKline
-  'usDJI', // 道琼斯
-  'usIXIC', // 纳斯达克
-  'usINX', // 标普500 (Corrected code)
-]);
 
 export async function fetchQuotes(codes: string[]): Promise<Quote[]> {
   if (!codes || codes.length === 0) {
@@ -261,7 +246,7 @@ export async function fetchQuotes(codes: string[]): Promise<Quote[]> {
   // 【性能优化】检查缓存，分离已缓存和未缓存的代码
   const cachedQuotes: Quote[] = [];
   const uncachedCodes: string[] = [];
-  
+
   for (const code of validCodes) {
     const cacheKey = `${QUOTE_CACHE_PREFIX}${code}`;
     const cached = cacheService.get<Quote>(cacheKey);
@@ -275,11 +260,15 @@ export async function fetchQuotes(codes: string[]): Promise<Quote[]> {
 
   // 如果所有数据都已缓存，直接返回
   if (uncachedCodes.length === 0) {
-    console.log(`[fetchQuotes] 所有 ${validCodes.length} 个行情数据均从缓存获取`);
+    console.log(
+      `[fetchQuotes] 所有 ${validCodes.length} 个行情数据均从缓存获取`
+    );
     return cachedQuotes;
   }
 
-  console.log(`[fetchQuotes] 缓存命中: ${cachedQuotes.length}, 需要请求: ${uncachedCodes.length}`);
+  console.log(
+    `[fetchQuotes] 缓存命中: ${cachedQuotes.length}, 需要请求: ${uncachedCodes.length}`
+  );
 
   const query = uncachedCodes.join(',');
   const url = `${TENCENT_QUOTE_URL}${query}`;
@@ -350,8 +339,9 @@ export async function fetchQuotes(codes: string[]): Promise<Quote[]> {
 
         // 验证基准价格不能与当前价格相差过大（不超过50倍）
         const currentPrice = quote.currentPrice!;
-        const ratio = Math.max(currentPrice, basePrice) / Math.min(currentPrice, basePrice);
-        
+        const ratio =
+          Math.max(currentPrice, basePrice) / Math.min(currentPrice, basePrice);
+
         if (ratio > 50) {
           console.warn(
             `[fetchQuotes] ${quote.code} ${periodName}基准价格与当前价格相差过大: 基准=${basePrice}, 当前=${currentPrice}, 比率=${ratio.toFixed(2)}，可能是数据错误，跳过计算`
@@ -370,8 +360,12 @@ export async function fetchQuotes(codes: string[]): Promise<Quote[]> {
         yearResult,
       } of basePriceResults) {
         // 周线涨跌幅
-        if (weekResult.price && validateBasePrice(quote, weekResult.price, '周')) {
-          const weekChange = ((quote.currentPrice! - weekResult.price) / weekResult.price) * 100;
+        if (
+          weekResult.price &&
+          validateBasePrice(quote, weekResult.price, '周')
+        ) {
+          const weekChange =
+            ((quote.currentPrice! - weekResult.price) / weekResult.price) * 100;
           quote.weekChangePercent = parseFloat(weekChange.toFixed(2));
           console.log(
             `[fetchQuotes] ${quote.code} 周线计算: 当前=${quote.currentPrice}, 基准=${weekResult.price}(${weekResult.date}), 涨跌=${quote.weekChangePercent}%`
@@ -381,8 +375,13 @@ export async function fetchQuotes(codes: string[]): Promise<Quote[]> {
         }
 
         // 月线涨跌幅
-        if (monthResult.price && validateBasePrice(quote, monthResult.price, '月')) {
-          const monthChange = ((quote.currentPrice! - monthResult.price) / monthResult.price) * 100;
+        if (
+          monthResult.price &&
+          validateBasePrice(quote, monthResult.price, '月')
+        ) {
+          const monthChange =
+            ((quote.currentPrice! - monthResult.price) / monthResult.price) *
+            100;
           quote.monthChangePercent = parseFloat(monthChange.toFixed(2));
           console.log(
             `[fetchQuotes] ${quote.code} 月线计算: 当前=${quote.currentPrice}, 基准=${monthResult.price}(${monthResult.date}), 涨跌=${quote.monthChangePercent}%`
@@ -392,8 +391,12 @@ export async function fetchQuotes(codes: string[]): Promise<Quote[]> {
         }
 
         // 年线涨跌幅
-        if (yearResult.price && validateBasePrice(quote, yearResult.price, '年')) {
-          const yearChange = ((quote.currentPrice! - yearResult.price) / yearResult.price) * 100;
+        if (
+          yearResult.price &&
+          validateBasePrice(quote, yearResult.price, '年')
+        ) {
+          const yearChange =
+            ((quote.currentPrice! - yearResult.price) / yearResult.price) * 100;
           quote.yearChangePercent = parseFloat(yearChange.toFixed(2));
           console.log(
             `[fetchQuotes] ${quote.code} 年线计算: 当前=${quote.currentPrice}, 基准=${yearResult.price}(${yearResult.date}), 涨跌=${quote.yearChangePercent}%`
@@ -419,9 +422,9 @@ export async function fetchQuotes(codes: string[]): Promise<Quote[]> {
     console.log(
       `[fetchQuotes] Successfully fetched and processed ${parsedQuotes.length} quotes. 已缓存到内存.`
     );
-    
+
     // 合并缓存数据和新数据
-    const allQuotes = [...cachedQuotes, ...parsedQuotes as Quote[]];
+    const allQuotes = [...cachedQuotes, ...(parsedQuotes as Quote[])];
     return allQuotes;
   } catch (error) {
     if (axios.isAxiosError(error)) {
@@ -441,7 +444,7 @@ export async function fetchQuotes(codes: string[]): Promise<Quote[]> {
             '[fetchQuotes] Error response data (decoded):',
             errorBody
           );
-        } catch (decodeError) {
+        } catch {
           console.error(
             '[fetchQuotes] Error response data (raw, could not decode):',
             error.response.data
@@ -453,7 +456,9 @@ export async function fetchQuotes(codes: string[]): Promise<Quote[]> {
     }
     // 【性能优化】即使出错，也返回已缓存的数据
     if (cachedQuotes.length > 0) {
-      console.log(`[fetchQuotes] 请求失败，返回 ${cachedQuotes.length} 个缓存数据`);
+      console.log(
+        `[fetchQuotes] 请求失败，返回 ${cachedQuotes.length} 个缓存数据`
+      );
       return cachedQuotes;
     }
     return [];
@@ -590,6 +595,7 @@ export async function fetchKline(
       });
 
       // 处理Buffer响应
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let responseData: any;
       if (Buffer.isBuffer(response.data)) {
         console.log(
@@ -680,6 +686,7 @@ export async function fetchKline(
       }
 
       // 尝试多种可能的数据路径
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       let klineRawData: any[] | undefined;
 
       // **修改：兼容处理复权和非复权数据**

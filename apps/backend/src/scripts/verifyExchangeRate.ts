@@ -14,8 +14,7 @@ import { PrismaClient } from '@prisma/client';
 import path from 'path';
 import fs from 'fs';
 import { buildPositionsUsingLots } from '../services/portfolioReplay';
-import { calculateRealtimePnl } from '../services/calculationService';
-import type { Position, Quote } from '../types';
+import type { Position, Transaction } from '../types';
 import { Market } from '../types';
 
 // 获取数据目录路径
@@ -28,9 +27,11 @@ function getDataDir(): string {
     return path.join(projectRoot, 'data');
   } else {
     // 生产环境：使用用户数据目录
-    const userDataPath = process.env.APPDATA ||
-                        (process.platform === 'darwin' ? path.join(process.env.HOME || '', 'Library', 'Application Support') :
-                        path.join(process.env.HOME || '', '.local', 'share'));
+    const userDataPath =
+      process.env.APPDATA ||
+      (process.platform === 'darwin'
+        ? path.join(process.env.HOME || '', 'Library', 'Application Support')
+        : path.join(process.env.HOME || '', '.local', 'share'));
     return path.join(userDataPath, 'unified-holdings-tracker', 'data');
   }
 }
@@ -83,12 +84,23 @@ interface VerificationResult {
  * 3. 检查盈亏百分比是否异常（可能因汇率问题导致）
  */
 function checkExchangeRateIssues(position: Position): VerificationIssue | null {
-  const { asset, quantity, costPrice, marketValue, totalCost, totalPnl, totalPnlPercent } = position;
+  const {
+    asset,
+    quantity,
+    costPrice,
+    marketValue,
+    totalCost,
+    totalPnl,
+    totalPnlPercent,
+  } = position;
 
   if (!asset || !quantity || quantity === 0) return null;
 
-  const currency = asset.code?.startsWith('hk') ? 'HKD' :
-                  asset.code?.startsWith('us') ? 'USD' : 'CNY';
+  const currency = asset.code?.startsWith('hk')
+    ? 'HKD'
+    : asset.code?.startsWith('us')
+      ? 'USD'
+      : 'CNY';
 
   const issues: string[] = [];
 
@@ -104,8 +116,11 @@ function checkExchangeRateIssues(position: Position): VerificationIssue | null {
   // 检查2：盈亏百分比是否异常（绝对值超过1000%）
   if (totalPnlPercent !== undefined && totalPnlPercent !== null) {
     const percentValue = Math.abs(totalPnlPercent);
-    if (percentValue > 10) {  // 10 表示 1000%
-      issues.push(`总盈亏%异常 (${(totalPnlPercent * 100).toFixed(2)}%)，远超正常范围`);
+    if (percentValue > 10) {
+      // 10 表示 1000%
+      issues.push(
+        `总盈亏%异常 (${(totalPnlPercent * 100).toFixed(2)}%)，远超正常范围`
+      );
     }
   }
 
@@ -121,8 +136,8 @@ function checkExchangeRateIssues(position: Position): VerificationIssue | null {
   if (issues.length === 0) return null;
 
   return {
-    portfolioId: '',  // 将在调用处填充
-    portfolioName: '',  // 将在调用处填充
+    portfolioId: '', // 将在调用处填充
+    portfolioName: '', // 将在调用处填充
     assetCode: asset.code || 'unknown',
     assetName: asset.name || 'unknown',
     issue: issues.join('; '),
@@ -141,7 +156,9 @@ function checkExchangeRateIssues(position: Position): VerificationIssue | null {
 /**
  * 验证单个投资组合的持仓数据
  */
-async function verifyPortfolio(portfolioId: string): Promise<VerificationResult> {
+async function verifyPortfolio(
+  portfolioId: string
+): Promise<VerificationResult> {
   const portfolio = await prisma.portfolio.findUnique({
     where: { id: portfolioId },
     include: { transactions: true },
@@ -152,10 +169,10 @@ async function verifyPortfolio(portfolioId: string): Promise<VerificationResult>
   }
 
   // 将 Prisma 交易转换为应用层 Transaction 类型
-  const transactions = portfolio.transactions.map(tx => ({
+  const transactions = portfolio.transactions.map((tx) => ({
     id: tx.id,
     date: tx.date.toISOString(),
-    type: tx.type as any, // Prisma 枚举转换
+    type: tx.type,
     assetCode: tx.assetCode ?? undefined,
     quantity: tx.quantity ? Number(tx.quantity) : undefined,
     price: tx.price ? Number(tx.price) : undefined,
@@ -168,7 +185,9 @@ async function verifyPortfolio(portfolioId: string): Promise<VerificationResult>
   }));
 
   // 使用批次系统重建持仓
-  const lotPositions = buildPositionsUsingLots(transactions);
+  const lotPositions = buildPositionsUsingLots(
+    transactions as unknown as Transaction[]
+  );
 
   // 推断市场类型
   function inferMarket(assetCode: string): Market {
@@ -178,7 +197,7 @@ async function verifyPortfolio(portfolioId: string): Promise<VerificationResult>
     return Market.CN;
   }
 
-  const positionsArray = Array.from(lotPositions.values()).map(state => ({
+  const positionsArray = Array.from(lotPositions.values()).map((state) => ({
     asset: {
       code: state.assetCode,
       name: state.assetCode, // 使用 assetCode 作为临时名称
@@ -186,8 +205,8 @@ async function verifyPortfolio(portfolioId: string): Promise<VerificationResult>
     },
     quantity: state.quantity,
     costPrice: state.totalCostCny / state.quantity,
-    currentPrice: undefined,  // 没有行情数据
-    marketValue: 0,  // 没有行情数据
+    currentPrice: undefined, // 没有行情数据
+    marketValue: 0, // 没有行情数据
     totalCost: state.totalCostCny,
     totalCostLocal: state.totalCostLocal,
   })) as Position[];
@@ -261,9 +280,9 @@ function generateMarkdownReport(results: VerificationResult[]): string {
 
   // 总览
   const totalPortfolios = results.length;
-  const okCount = results.filter(r => r.status === 'ok').length;
-  const warningCount = results.filter(r => r.status === 'warning').length;
-  const errorCount = results.filter(r => r.status === 'error').length;
+  const okCount = results.filter((r) => r.status === 'ok').length;
+  const warningCount = results.filter((r) => r.status === 'warning').length;
+  const errorCount = results.filter((r) => r.status === 'error').length;
   const totalIssues = results.reduce((sum, r) => sum + r.issuesFound.length, 0);
 
   report += `## 总览\n\n`;
@@ -334,13 +353,19 @@ async function main() {
 
     // 生成报告
     const report = generateMarkdownReport(results);
-    const reportPath = path.join(dataDir, 'exchange-rate-verification-report.md');
+    const reportPath = path.join(
+      dataDir,
+      'exchange-rate-verification-report.md'
+    );
     fs.writeFileSync(reportPath, report, 'utf-8');
 
-    console.log('\n============================================================');
+    console.log(
+      '\n============================================================'
+    );
     console.log(`✅ 验证完成！报告已保存到: ${reportPath}`);
-    console.log('============================================================\n');
-
+    console.log(
+      '============================================================\n'
+    );
   } catch (error) {
     console.error('验证失败:', error);
     process.exit(1);

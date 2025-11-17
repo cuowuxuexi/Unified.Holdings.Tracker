@@ -10,9 +10,9 @@ async function main() {
       include: {
         transactions: {
           take: 5,
-          orderBy: { date: 'desc' }
-        }
-      }
+          orderBy: { date: 'desc' },
+        },
+      },
     });
 
     console.log(`找到 ${portfolios.length} 个组合：\n`);
@@ -27,13 +27,12 @@ async function main() {
     });
 
     // 检查是否有包含 "2025" 的组合
-    const portfolio2025 = portfolios.find(p => p.name.includes('2025'));
+    const portfolio2025 = portfolios.find((p) => p.name.includes('2025'));
     if (portfolio2025) {
       console.log('✓ 找到 2025 组合！');
     } else {
       console.log('✗ 未找到 2025 组合');
     }
-
   } catch (error) {
     console.error('错误:', error);
   } finally {

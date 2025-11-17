@@ -33,7 +33,7 @@ db.all('SELECT * FROM Portfolio', [], (err, rows) => {
   });
 
   // 检查是否有 2025 组合
-  const portfolio2025 = rows.find(r => r.name && r.name.includes('2025'));
+  const portfolio2025 = rows.find((r) => r.name && r.name.includes('2025'));
   if (portfolio2025) {
     console.log('✓ 找到 2025 组合！');
     console.log('详细信息:', portfolio2025);
@@ -42,15 +42,21 @@ db.all('SELECT * FROM Portfolio', [], (err, rows) => {
     console.log('正在查找所有交易记录中是否有相关数据...\n');
 
     // 查询交易记录
-    db.all('SELECT portfolioId, COUNT(*) as count FROM Transaction GROUP BY portfolioId', [], (err, txRows) => {
-      if (!err && txRows.length > 0) {
-        console.log('各组合的交易记录数:');
-        txRows.forEach(tx => {
-          const portfolio = rows.find(r => r.id === tx.portfolioId);
-          console.log(`  ${portfolio ? portfolio.name : tx.portfolioId}: ${tx.count} 条`);
-        });
+    db.all(
+      'SELECT portfolioId, COUNT(*) as count FROM Transaction GROUP BY portfolioId',
+      [],
+      (err, txRows) => {
+        if (!err && txRows.length > 0) {
+          console.log('各组合的交易记录数:');
+          txRows.forEach((tx) => {
+            const portfolio = rows.find((r) => r.id === tx.portfolioId);
+            console.log(
+              `  ${portfolio ? portfolio.name : tx.portfolioId}: ${tx.count} 条`
+            );
+          });
+        }
       }
-    });
+    );
   }
 
   db.close((err) => {

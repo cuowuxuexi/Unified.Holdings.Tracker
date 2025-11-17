@@ -1,19 +1,13 @@
 import { format } from 'date-fns';
 import { zhCN } from 'date-fns/locale';
 import {
-  Portfolio,
   PortfolioDetail,
   Position,
   Transaction,
   TransactionType,
-  Quote,
   Market,
 } from '../types';
 import { fetchQuotes } from './tencentApi';
-import {
-  getExchangeRateForAssetToCNY,
-  getExchangeRate,
-} from './currencyService';
 
 interface AttentionItemPayload {
   id?: string;
@@ -120,7 +114,8 @@ export class ReportService {
       }
 
       return section;
-    } catch (error) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (error: any) {
       console.error(
         '[ReportService] Failed to generate market index section:',
         error
@@ -177,7 +172,6 @@ export class ReportService {
         ? detail.leverageCost
         : this.calculateLeverageCost(detail.transactions);
     const leverageCostPeriod = this.getLeverageCostPeriod(detail.transactions);
-    const totalDividend = this.calculateTotalDividend(detail.transactions);
 
     section += `**2.2 盈亏与成本**\n\n`;
     section += `| 项目 | 金额/比例 | 备注 |\n`;
@@ -442,7 +436,8 @@ export class ReportService {
         }
         return `${section}\n`;
       }
-    } catch (error) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } catch (error: any) {
       console.warn(
         '[ReportService] Failed to parse attentionInfo for markdown export:',
         error
@@ -495,7 +490,7 @@ export class ReportService {
 
     try {
       return format(new Date(date), 'yyyy/MM/dd HH:mm', { locale: zhCN });
-    } catch (error) {
+    } catch {
       console.warn(
         '[ReportService] Invalid attention timestamp detected:',
         date

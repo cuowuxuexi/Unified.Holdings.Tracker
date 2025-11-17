@@ -15,17 +15,14 @@ import {
 } from '../services/calculationService';
 import { getExchangeRate } from '../services/currencyService';
 import {
-  Portfolio,
   Transaction,
   PortfolioDetail,
   Position,
   TransactionType,
   Asset,
   Market,
-  LeverageInfo,
   Quote,
 } from '../types';
-import { parseISO, startOfYear } from 'date-fns';
 import { correctHistoricalTransactionAmounts } from '../services/storage.prisma';
 import { buildPositionsUsingLots } from '../services/portfolioReplay';
 import {
@@ -38,10 +35,11 @@ const router = Router();
 
 // Helper function to wrap async route handlers and catch errors
 const asyncHandler =
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   (fn: (req: Request, res: Response, next: NextFunction) => Promise<any>) =>
-  (req: Request, res: Response, next: NextFunction) => {
-    Promise.resolve(fn(req, res, next)).catch(next);
-  };
+    (req: Request, res: Response, next: NextFunction) => {
+      Promise.resolve(fn(req, res, next)).catch(next);
+    };
 
 // Helper function to parse market from asset code
 const getMarketFromCode = (code: string): Market | null => {
@@ -175,6 +173,7 @@ router.get(
         CNY: 1.0,
         updatedAt: new Date().toISOString(),
       });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       console.error('Error fetching exchange rates:', error);
       if (
@@ -496,6 +495,7 @@ router.post(
       );
 
       res.status(201).json(newTransaction);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       console.error(
         `Error adding transaction to portfolio ${portfolioId}:`,
@@ -525,6 +525,7 @@ router.delete(
         transactionId: txId,
       });
       res.status(204).send();
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       console.error(
         `Error deleting transaction ${txId} from portfolio ${portfolioId}:`,
@@ -566,6 +567,7 @@ router.patch(
       }
 
       res.json(updatedTransaction);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       console.error(
         `Error updating notes for transaction ${txId} in portfolio ${portfolioId}:`,
@@ -610,6 +612,7 @@ router.patch(
         id: updatedPortfolio.id,
         attentionInfo: updatedPortfolio.attentionInfo,
       });
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       console.error(
         `Error updating attention info for portfolio ${portfolioId}:`,
@@ -629,21 +632,6 @@ router.get(
   '/:id/stats',
   asyncHandler(async (req: Request, res: Response) => {
     const portfolioId = req.params.id;
-    const { startDate, endDate } = req.query;
-
-    let start: Date;
-    let end: Date;
-    if (typeof startDate === 'string') {
-      start = parseISO(startDate);
-    } else {
-      start = startOfYear(new Date());
-    }
-    if (typeof endDate === 'string') {
-      end = parseISO(endDate);
-    } else {
-      end = new Date();
-    }
-
     const rawPeriod = req.query.period as string | undefined;
     const allowedPeriods = ['total', 'daily', 'weekly', 'monthly', 'yearly'];
     const period:
@@ -654,7 +642,7 @@ router.get(
       | 'yearly'
       | undefined =
       rawPeriod && allowedPeriods.includes(rawPeriod)
-        ? (rawPeriod as any)
+        ? (rawPeriod as 'total' | 'daily' | 'weekly' | 'monthly' | 'yearly')
         : 'total';
 
     // Step 1: 获取投资组合数据
@@ -703,9 +691,7 @@ router.get(
     const bucket = periodCacheService.getPeriodStatsTimeBucket();
     const requestedPeriod = (period ?? 'total') as PeriodCacheBucket;
 
-    type PeriodStatsResult = Awaited<
-      ReturnType<typeof calculatePeriodStats>
-    >;
+    type PeriodStatsResult = Awaited<ReturnType<typeof calculatePeriodStats>>;
     const statsPromiseMap: Partial<
       Record<PeriodCacheBucket, Promise<PeriodStatsResult>>
     > = {};
@@ -816,10 +802,9 @@ router.get(
     const portfolioId = req.params.id;
 
     try {
-      const updatedPortfolio =
-        await container.recalculatePortfolioCashUseCase.execute({
-          portfolioId,
-        });
+      await container.recalculatePortfolioCashUseCase.execute({
+        portfolioId,
+      });
 
       // 注意：当前 Use Case 只返回 Portfolio，但路由需要更多信息
       // 这里需要调整，暂时使用旧的实现方式

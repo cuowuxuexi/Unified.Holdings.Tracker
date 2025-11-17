@@ -205,9 +205,7 @@ describe('Calculation Service', () => {
       ];
       const portfolio = createPortfolio(transactions, 0);
 
-      mockedFetchKline.mockResolvedValue(
-        createKline(['2024-04-05'], [120])
-      );
+      mockedFetchKline.mockResolvedValue(createKline(['2024-04-05'], [120]));
 
       const stats = await calculatePeriodStats(portfolio, 'weekly');
       expect(stats.baseDate).toBe('2024-04-05');
@@ -316,9 +314,7 @@ describe('Calculation Service', () => {
     });
 
     it('uses calendar week starting on Monday for weekly stats', async () => {
-      jest
-        .useFakeTimers()
-        .setSystemTime(new Date('2024-04-15T00:00:00.000Z')); // Monday
+      jest.useFakeTimers().setSystemTime(new Date('2024-04-15T00:00:00.000Z')); // Monday
       const transactions: Transaction[] = [
         {
           id: 'deposit-last-week',
@@ -888,10 +884,7 @@ describe('Calculation Service', () => {
 
     it('uses last day of previous month as anchor date', async () => {
       mockedFetchKline.mockResolvedValue([]);
-      await getMonthBasePrice(
-        'sh000001',
-        new Date('2024-07-10T00:00:00.000Z')
-      );
+      await getMonthBasePrice('sh000001', new Date('2024-07-10T00:00:00.000Z'));
       expect(mockedFetchKline).toHaveBeenCalledWith(
         'sh000001',
         'daily',
@@ -909,10 +902,7 @@ describe('Calculation Service', () => {
 
     it('uses last day of previous year as anchor date', async () => {
       mockedFetchKline.mockResolvedValue([]);
-      await getYearBasePrice(
-        'sh000001',
-        new Date('2024-07-10T00:00:00.000Z')
-      );
+      await getYearBasePrice('sh000001', new Date('2024-07-10T00:00:00.000Z'));
       expect(mockedFetchKline).toHaveBeenCalledWith(
         'sh000001',
         'daily',
@@ -1010,7 +1000,10 @@ describe('calculatePeriodStats - 双指标计算验证', () => {
     // 期初: 10000 股 × 100 元 = 100万
     // 期末: 10000 股 × 105 元 + 10万现金 = 115万
     // 总资产变化 = 115 - 100 = 15万
-    if (result.totalValueChange !== null && result.totalValueChange !== undefined) {
+    if (
+      result.totalValueChange !== null &&
+      result.totalValueChange !== undefined
+    ) {
       expect(result.totalValueChange).toBeGreaterThan(0);
       expect(result.totalValueChangePercent).toBeGreaterThan(0);
     }
@@ -1029,7 +1022,9 @@ describe('calculatePeriodStats - 双指标计算验证', () => {
       result.totalValueChangePercent !== undefined
     ) {
       // 投资收益率应该小于总资产变化率（因为排除了存款）
-      expect(result.periodReturnPercent).toBeLessThan(result.totalValueChangePercent);
+      expect(result.periodReturnPercent).toBeLessThan(
+        result.totalValueChangePercent
+      );
     }
   });
 
@@ -1051,9 +1046,9 @@ describe('calculatePeriodStats - 双指标计算验证', () => {
       result.totalValueChangePercent !== null &&
       result.totalValueChangePercent !== undefined
     ) {
-      expect(Math.abs(result.periodReturnPercent - result.totalValueChangePercent)).toBeLessThan(
-        0.0001
-      );
+      expect(
+        Math.abs(result.periodReturnPercent - result.totalValueChangePercent)
+      ).toBeLessThan(0.0001);
     }
   });
 });

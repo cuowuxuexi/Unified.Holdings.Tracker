@@ -7,7 +7,13 @@ import { prisma } from '../lib/prisma';
 import { buildPositionsUsingLots } from '../services/portfolioReplay';
 import { writeFileSync } from 'fs';
 import { join } from 'path';
-import { Transaction, TransactionType, Market, Position, Asset } from '../types';
+import {
+  Transaction,
+  TransactionType,
+  Market,
+  Position,
+  Asset,
+} from '../types';
 
 // 本地验证函数（避免导入依赖问题）
 function validatePositionData(position: Position): {
@@ -17,12 +23,15 @@ function validatePositionData(position: Position): {
   const warnings: string[] = [];
 
   // 检查1: 总盈亏% 异常（绝对值超过1000%，即10倍）
-  if (position.totalPnlPercent !== undefined && position.totalPnlPercent !== null) {
+  if (
+    position.totalPnlPercent !== undefined &&
+    position.totalPnlPercent !== null
+  ) {
     const percentValue = Math.abs(position.totalPnlPercent);
     if (percentValue > 10) {
       warnings.push(
         `${position.asset.code}: 总盈亏%异常 (${(position.totalPnlPercent * 100).toFixed(2)}%)，` +
-        `可能是成本价过小或数据错误。成本价=${position.costPrice?.toFixed(4)}, 市值=${position.marketValue?.toFixed(2)}`
+          `可能是成本价过小或数据错误。成本价=${position.costPrice?.toFixed(4)}, 市值=${position.marketValue?.toFixed(2)}`
       );
     }
   }
@@ -32,7 +41,7 @@ function validatePositionData(position: Position): {
     if (position.costPrice < 0.01 && position.quantity > 0) {
       warnings.push(
         `${position.asset.code}: 成本价异常 (${position.costPrice.toFixed(4)})，` +
-        `可能导致盈亏%计算错误。持仓数量=${position.quantity}`
+          `可能导致盈亏%计算错误。持仓数量=${position.quantity}`
       );
     }
   }
@@ -59,7 +68,7 @@ function validatePositionData(position: Position): {
 
   return {
     isValid: warnings.length === 0,
-    warnings
+    warnings,
   };
 }
 
@@ -84,7 +93,8 @@ interface AnomalyRecord {
 // Helper: Parse market from asset code
 function getMarketFromCode(code: string): Market | null {
   const lowerCode = code.toLowerCase();
-  if (lowerCode.startsWith('sh') || lowerCode.startsWith('sz')) return Market.CN;
+  if (lowerCode.startsWith('sh') || lowerCode.startsWith('sz'))
+    return Market.CN;
   if (lowerCode.startsWith('hk')) return Market.HK;
   if (lowerCode.startsWith('us')) return Market.US;
   console.warn(`Could not determine market for code: ${code}`);
@@ -148,13 +158,15 @@ async function diagnoseData(): Promise<DiagnosisResult[]> {
         name: assetCode, // 暂时使用代码作为名称
       };
 
-      const costPrice = state.quantity > 0 ? state.totalCostCny / state.quantity : 0;
+      const costPrice =
+        state.quantity > 0 ? state.totalCostCny / state.quantity : 0;
 
       const position: Position = {
         asset,
         quantity: state.quantity,
         costPrice,
-        costPriceLocal: state.quantity > 0 ? state.totalCostLocal / state.quantity : 0,
+        costPriceLocal:
+          state.quantity > 0 ? state.totalCostLocal / state.quantity : 0,
         totalCost: state.totalCostCny,
         totalCostLocal: state.totalCostLocal,
         currency: state.currency,
@@ -216,8 +228,13 @@ function generateMarkdownReport(results: DiagnosisResult[]): string {
 
   markdown += `## 执行摘要\n\n`;
   const totalPortfolios = results.length;
-  const portfoliosWithAnomalies = results.filter((r) => r.anomalies.length > 0).length;
-  const totalAnomalies = results.reduce((sum, r) => sum + r.anomalies.length, 0);
+  const portfoliosWithAnomalies = results.filter(
+    (r) => r.anomalies.length > 0
+  ).length;
+  const totalAnomalies = results.reduce(
+    (sum, r) => sum + r.anomalies.length,
+    0
+  );
 
   markdown += `- **检查的投资组合数量**: ${totalPortfolios}\n`;
   markdown += `- **存在异常的组合**: ${portfoliosWithAnomalies}\n`;
@@ -246,14 +263,16 @@ function generateMarkdownReport(results: DiagnosisResult[]): string {
     markdown += `|---------|---------|--------|--------|----------|\n`;
 
     for (const anomaly of result.anomalies) {
-      const warningsSummary = anomaly.warnings.map((w) => {
-        if (w.includes('总盈亏%异常')) return '盈亏%异常';
-        if (w.includes('成本价异常')) return '成本价异常';
-        if (w.includes('市值为负')) return '市值负数';
-        if (w.includes('市值为0')) return '市值为0';
-        if (w.includes('持仓数量为负')) return '数量负数';
-        return '其他';
-      }).join(', ');
+      const warningsSummary = anomaly.warnings
+        .map((w) => {
+          if (w.includes('总盈亏%异常')) return '盈亏%异常';
+          if (w.includes('成本价异常')) return '成本价异常';
+          if (w.includes('市值为负')) return '市值负数';
+          if (w.includes('市值为0')) return '市值为0';
+          if (w.includes('持仓数量为负')) return '数量负数';
+          return '其他';
+        })
+        .join(', ');
 
       markdown += `| ${anomaly.assetCode} | ${anomaly.quantity.toFixed(2)} | ${anomaly.costPrice.toFixed(4)} | ${anomaly.totalCost.toFixed(2)} | ${warningsSummary} |\n`;
     }

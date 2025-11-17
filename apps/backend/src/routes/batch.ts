@@ -291,14 +291,20 @@ router.post(
 /**
  * 错误处理中间件
  */
-router.use((error: unknown, req: Request, res: Response, next: NextFunction) => {
-  if (error instanceof multer.MulterError) {
-    if (error.code === 'LIMIT_FILE_SIZE') {
-      return res.status(400).json({ message: '文件大小超过限制（最多10MB）' });
+router.use(
+  (error: unknown, req: Request, res: Response, next: NextFunction) => {
+    if (error instanceof multer.MulterError) {
+      if (error.code === 'LIMIT_FILE_SIZE') {
+        return res
+          .status(400)
+          .json({ message: '文件大小超过限制（最多10MB）' });
+      }
+      return res
+        .status(400)
+        .json({ message: `文件上传错误: ${error.message}` });
     }
-    return res.status(400).json({ message: `文件上传错误: ${error.message}` });
+    next(error);
   }
-  next(error);
-});
+);
 
 export default router;

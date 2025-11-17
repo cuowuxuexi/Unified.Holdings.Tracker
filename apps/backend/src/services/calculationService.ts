@@ -17,9 +17,7 @@ import {
   startOfDay,
   endOfDay,
   subDays,
-  formatISO,
   parseISO,
-  getDay,
   eachDayOfInterval,
   format,
   differenceInCalendarDays,
@@ -150,7 +148,7 @@ export function calculateRealtimePnl(
     // 验证持仓数据
     const validation = validatePositionData(updatedPosition);
     if (!validation.isValid) {
-      validation.warnings.forEach(warning => {
+      validation.warnings.forEach((warning) => {
         console.warn(`[数据验证警告] ${warning}`);
       });
     }
@@ -171,12 +169,15 @@ export function validatePositionData(position: Position): {
   const warnings: string[] = [];
 
   // 检查1: 总盈亏% 异常（绝对值超过1000%，即10倍）
-  if (position.totalPnlPercent !== undefined && position.totalPnlPercent !== null) {
+  if (
+    position.totalPnlPercent !== undefined &&
+    position.totalPnlPercent !== null
+  ) {
     const percentValue = Math.abs(position.totalPnlPercent);
     if (percentValue > 10) {
       warnings.push(
         `${position.asset.code}: 总盈亏%异常 (${(position.totalPnlPercent * 100).toFixed(2)}%)，` +
-        `可能是成本价过小或数据错误。成本价=${position.costPrice?.toFixed(4)}, 市值=${position.marketValue?.toFixed(2)}`
+          `可能是成本价过小或数据错误。成本价=${position.costPrice?.toFixed(4)}, 市值=${position.marketValue?.toFixed(2)}`
       );
     }
   }
@@ -186,7 +187,7 @@ export function validatePositionData(position: Position): {
     if (position.costPrice < 0.01 && position.quantity > 0) {
       warnings.push(
         `${position.asset.code}: 成本价异常 (${position.costPrice.toFixed(4)})，` +
-        `可能导致盈亏%计算错误。持仓数量=${position.quantity}`
+          `可能导致盈亏%计算错误。持仓数量=${position.quantity}`
       );
     }
   }
@@ -213,7 +214,7 @@ export function validatePositionData(position: Position): {
 
   return {
     isValid: warnings.length === 0,
-    warnings
+    warnings,
   };
 }
 
@@ -237,8 +238,8 @@ type PriceSource = 'realtime' | 'kline' | 'cost';
 export interface PeriodStatsResult {
   periodReturnPercent: number | null;
   periodPnl: number | null;
-  totalValueChange?: number | null;          // 总资产变化（元）
-  totalValueChangePercent?: number | null;   // 总资产变化率（小数形式）
+  totalValueChange?: number | null; // 总资产变化（元）
+  totalValueChangePercent?: number | null; // 总资产变化率（小数形式）
   baseDate?: string | null;
   baseDateSource?: PriceSource;
   endDate?: string | null;
@@ -265,7 +266,6 @@ export async function calculatePeriodStats(
 ): Promise<PeriodStatsResult> {
   try {
     const quotesMap = options?.quotes;
-    const useRealtimeEndValue = options?.useRealtimeEndValue ?? true;
     const transactions = portfolio.transactions || [];
     if (transactions.length === 0 && period !== 'total') {
       // No transactions, return 0% for specific periods, null for total unless there's initial cash?
@@ -465,11 +465,7 @@ export async function calculatePeriodStats(
       for (const [code, posState] of state.positions.entries()) {
         if (posState.quantity <= 0) continue;
         const quote = quotesMap?.[code];
-        if (
-          allowRealtime &&
-          quote &&
-          typeof quote.currentPrice === 'number'
-        ) {
+        if (allowRealtime && quote && typeof quote.currentPrice === 'number') {
           const exchangeRate = getExchangeRateForAssetToCNY(code);
           value += posState.quantity * quote.currentPrice * exchangeRate;
           continue;
@@ -549,7 +545,8 @@ export async function calculatePeriodStats(
 
     // 5.1 总资产变化（简单收益率）
     const totalValueChange = endValue - startValue;
-    const totalValueChangePercent = startValue > 0 ? totalValueChange / startValue : null;
+    const totalValueChangePercent =
+      startValue > 0 ? totalValueChange / startValue : null;
 
     // 5.2 投资收益率（Modified Dietz）
     let periodReturnPercent: number | null = null;
@@ -560,11 +557,16 @@ export async function calculatePeriodStats(
       }
     }
 
-    const periodPnl = periodReturnPercent !== null ? periodReturnPercent * startValue : null;
+    const periodPnl =
+      periodReturnPercent !== null ? periodReturnPercent * startValue : null;
 
     console.log(`\n📊 周期收益统计:`);
-    console.log(`  总资产变化: ${totalValueChange.toFixed(2)} 元 (${totalValueChangePercent !== null ? (totalValueChangePercent * 100).toFixed(2) + '%' : 'N/A'})`);
-    console.log(`  投资收益率: ${periodReturnPercent !== null ? (periodReturnPercent * 100).toFixed(2) + '%' : 'N/A'}`);
+    console.log(
+      `  总资产变化: ${totalValueChange.toFixed(2)} 元 (${totalValueChangePercent !== null ? (totalValueChangePercent * 100).toFixed(2) + '%' : 'N/A'})`
+    );
+    console.log(
+      `  投资收益率: ${periodReturnPercent !== null ? (periodReturnPercent * 100).toFixed(2) + '%' : 'N/A'}`
+    );
     console.log(`  期间现金流: ${cashFlows.toFixed(2)} 元`);
 
     return {
@@ -601,29 +603,6 @@ export async function calculatePeriodStats(
 // --- Placeholder for other calculation functions ---
 
 // Removed duplicate imports as they are already imported at the top of the file
-
-/**
- * 获取指定日期的上周五日期
- * @param date 参考日期
- * @returns 上周五的日期
- */
-function getLastFriday(date: Date): Date {
-  const dayOfWeek = getDay(date); // 0-6 代表周日到周六
-  let daysToSubtract: number;
-
-  if (dayOfWeek === 5) {
-    // 如果今天是周五
-    daysToSubtract = 7; // 上周五
-  } else if (dayOfWeek < 5) {
-    // 周日到周四
-    daysToSubtract = 2 + dayOfWeek; // 上周五
-  } else {
-    // 周六
-    daysToSubtract = 1; // 昨天是周五
-  }
-
-  return subDays(date, daysToSubtract);
-}
 
 /**
  * Finds the closest K-line point on or before a target date.
@@ -676,8 +655,9 @@ export function calculateIndexPeriodChanges(
   indexCode: string,
   klineData: KlinePoint[],
   currentQuote: Quote | null
-): { yearChangePercent?: number } {
-  const results: { yearChangePercent?: number } = {};
+): { yearChangePercent?: number; yearChangeBaseDate?: string } {
+  const results: { yearChangePercent?: number; yearChangeBaseDate?: string } =
+    {};
 
   // 输入验证
   if (
@@ -720,12 +700,12 @@ export function calculateIndexPeriodChanges(
     // 返回小数形式（0-1范围），前端会乘以100显示
     const change =
       (effectiveCurrentPrice - yearChangeBasePoint.close) /
-        yearChangeBasePoint.close;
+      yearChangeBasePoint.close;
     results.yearChangePercent = parseFloat(change.toFixed(4));
-    (results as any).yearChangeBaseDate = yearChangeBasePoint.date;
+    results.yearChangeBaseDate = yearChangeBasePoint.date;
   } else {
     results.yearChangePercent = undefined;
-    (results as any).yearChangeBaseDate = undefined;
+    results.yearChangeBaseDate = undefined;
   }
 
   return results;
