@@ -1,0 +1,92 @@
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+enum Market {
+  CN
+  HK
+  US
+}
+
+enum TransactionType {
+  BUY
+  SELL
+  DEPOSIT
+  WITHDRAW
+  LEVERAGE_ADD
+  LEVERAGE_REMOVE
+  LEVERAGE_COST
+  DIVIDEND
+}
+
+model Portfolio {
+  id                       String        @id @default(uuid())
+  name                     String
+  initialCash              Decimal       
+  cash                     Decimal       
+  leverageTotalAmount      Decimal       
+  leverageUsedAmount       Decimal       
+  leverageAvailableAmount  Decimal       
+  leverageCostRate         Decimal       
+  attentionInfo            String?
+  transactions             Transaction[]
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
+}
+
+model Asset {
+  code        String          @id
+  name        String
+  market      Market
+  transactions Transaction[]
+  quotes      QuoteSnapshot[]
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+}
+
+model Transaction {
+  id            String          @id @default(uuid())
+  portfolio     Portfolio       @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  portfolioId   String
+  type          TransactionType
+  date          DateTime
+  asset         Asset?          @relation(fields: [assetCode], references: [code])
+  assetCode     String?
+  quantity      Decimal?        
+  price         Decimal?        
+  amount        Decimal?        
+  commission    Decimal?        
+  leverageUsed  Decimal?        
+  currency      String          @default("CNY")
+  exchangeRate  Decimal?        
+  notes         String?
+  createdAt     DateTime        @default(now())
+  updatedAt     DateTime        @updatedAt
+}
+
+model QuoteSnapshot {
+  id                  Int       @id @default(autoincrement())
+  asset               Asset     @relation(fields: [assetCode], references: [code], onDelete: Cascade)
+  assetCode           String
+  timestamp           DateTime
+  currentPrice        Decimal   
+  changePercent       Decimal?  
+  changeAmount        Decimal?  
+  volume              Decimal?  
+  turnover            Decimal?  
+  openPrice           Decimal?  
+  highPrice           Decimal?  
+  lowPrice            Decimal?  
+  prevClosePrice      Decimal?  
+  marketCap           Decimal?  
+  peRatio             Decimal?  
+  weekChangePercent   Decimal?  
+  monthChangePercent  Decimal?  
+  yearChangePercent   Decimal?  
+  createdAt           DateTime  @default(now())
+}

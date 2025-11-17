@@ -1,0 +1,218 @@
+📚 Git 存档与取档完全攻略
+
+  ---
+  第一部分：存档（保存当前进度）
+
+  🎮 场景1：本地快速存档（单机玩家）
+
+  # 创建存档点（标签）
+  git tag 存档名
+
+  # 示例：
+  git tag v1.0-功能完成
+  git tag 2025-11-15-稳定版
+
+  🌍 场景2：云存档（多终端同步）
+
+  # 1. 先提交当前改动
+  git add .
+  git commit -m "描述这次改动"
+
+  # 2. 推送到远程（上传云存档）
+  git push
+
+  # 3. 创建标签并推送（给云存档打标记）
+  git tag v1.0-功能完成
+  git push origin v1.0-功能完成
+
+  # 或者推送所有标签
+  git push --tags
+
+  ---
+  第二部分：取档（回到之前的版本）
+
+  📖 先查看有哪些存档
+
+  # 查看所有标签（存档点）
+  git tag
+
+  # 查看提交历史（详细存档记录）
+  git log --oneline
+
+  # 查看远程存档
+  git ls-remote --tags origin
+
+  ⏮️ 方式1：临时查看存档（只是看看，不影响现在）
+
+  # 查看某个存档的代码
+  git checkout v1.0-功能完成
+
+  # 看完后回到当前
+  git checkout main  # 或您的分支名
+
+  🔄 方式2：读档并保留当前改动（推荐⭐）
+
+  # 回到存档点，但保留后续的代码
+  git reset --soft v1.0-功能完成
+
+  # 这时候您的代码都在暂存区，可以：
+  # - 重新提交：git commit -m "新消息"
+  # - 或者放弃：git reset --hard HEAD
+
+  ⚠️ 方式3：完全读档（危险，会丢失后续改动）
+
+  # 完全回到存档状态
+  git reset --hard v1.0-功能完成
+
+  # 如果已经推送过，需要强制推送
+  git push --force  # ⚠️ 多人协作时慎用！
+
+  ---
+  第三部分：多终端安全协作流程
+
+  🖥️ 在电脑A上工作
+
+  # 1. 先拉取最新代码
+  git pull
+
+  # 2. 开始工作，修改代码...
+
+  # 3. 工作完成，提交
+  git add .
+  git commit -m "完成XX功能"
+
+  # 4. 推送到云端
+  git push
+
+  # 5. 打个存档标签（可选）
+  git tag v1.1-新功能
+  git push origin v1.1-新功能
+
+  💻 切换到电脑B继续工作
+
+  # 1. 拉取最新代码和标签
+  git pull
+  git fetch --tags
+
+  # 2. 查看有哪些存档
+  git tag
+
+  # 3. 继续在最新版本上工作
+  # （自动就是最新的，不用特别操作）
+
+  # 或者：基于某个存档创建新分支
+  git checkout -b 新分支名 v1.1-新功能
+
+  🔒 安全合并规则
+
+  # 多终端协作的黄金法则：
+  # 1. 开始工作前：先 pull
+  git pull
+
+  # 2. 工作完成后：先 pull 再 push
+  git pull
+  git push
+
+  # 3. 如果有冲突，Git 会提示您解决
+
+  ---
+  第四部分：后悔药（误操作恢复）
+
+  🆘 万能恢复大法
+
+  # 查看所有操作历史（包括已删除的）
+  git reflog
+
+  # 输出示例：
+  # abc1234 HEAD@{0}: reset: moving to v1.0
+  # def5678 HEAD@{1}: commit: 完成新功能
+  # ...
+
+  # 恢复到任意历史点
+  git reset --hard HEAD@{1}
+
+  🛡️ 预防措施：工作前先备份
+
+  # 方法1：创建备份分支
+  git branch 备份-$(date +%Y%m%d)
+
+  # 方法2：创建标签
+  git tag backup-$(date +%Y%m%d-%H%M)
+
+  # 方法3：提交当前改动（即使没写完）
+  git add .
+  git commit -m "WIP: 进行中的工作"
+
+  ---
+  第五部分：常用场景速查表
+
+  | 我想...    | 命令                              | 安全性       |
+  |----------|---------------------------------|-----------|
+  | 创建本地存档   | git tag v1.0                    | ✅ 安全      |
+  | 上传云存档    | git push origin v1.0            | ✅ 安全      |
+  | 查看所有存档   | git tag                         | ✅ 安全      |
+  | 临时查看存档   | git checkout v1.0               | ✅ 安全      |
+  | 读档（保留改动） | git reset --soft v1.0           | ✅ 安全      |
+  | 完全读档     | git reset --hard v1.0           | ⚠️ 会丢失改动  |
+  | 从远程拉取    | git pull                        | ✅ 安全      |
+  | 推送到远程    | git push                        | ✅ 安全      |
+  | 强制推送     | git push --force                | 🚨 多人协作慎用 |
+  | 查看操作历史   | git reflog                      | ✅ 安全      |
+  | 删除本地标签   | git tag -d v1.0                 | ✅ 安全      |
+  | 删除远程标签   | git push origin :refs/tags/v1.0 | ⚠️ 慎用     |
+
+  ---
+  第六部分：我的推荐工作流
+
+  ⭐ 日常开发流程
+
+  # 1. 早上开始工作
+  git pull                          # 拉取最新代码
+
+  # 2. 工作中
+  # ... 修改代码 ...
+
+  # 3. 阶段性完成
+  git add .
+  git commit -m "完成XX功能"
+  git push                          # 及时推送
+
+  # 4. 晚上收工
+  git tag daily-$(date +%Y%m%d)    # 打个日期标签
+  git push --tags                   # 推送标签
+
+  # 5. 第二天在另一台电脑
+  git pull                          # 拉取最新（包括昨天的工作）
+  git fetch --tags                  # 拉取标签
+
+  🎯 重要版本发布流程
+
+  # 1. 功能开发完成
+  git add .
+  git commit -m "feat: 完成重要功能"
+
+  # 2. 测试通过，打正式版本标签
+  git tag -a v1.0.0 -m "正式版本 1.0.0"
+
+  # 3. 推送代码和标签
+  git push
+  git push origin v1.0.0
+
+  # 4. 以后可以随时回到这个版本
+  git checkout v1.0.0
+
+  ---
+  💡 记住这3个核心命令就够了
+
+  # 1. 存档
+  git tag 存档名
+  git push origin 存档名
+
+  # 2. 查看存档
+  git tag
+
+  # 3. 读档（保留改动）
+  git reset --soft 存档名
+
+  ---
+  希望这份攻略对您有帮助！建议您收藏保存，遇到问题随时查阅 📖
