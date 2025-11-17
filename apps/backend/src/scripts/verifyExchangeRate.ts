@@ -16,6 +16,7 @@ import fs from 'fs';
 import { buildPositionsUsingLots } from '../services/portfolioReplay';
 import { calculateRealtimePnl } from '../services/calculationService';
 import type { Position, Quote } from '../types';
+import { Market } from '../types';
 
 // 获取数据目录路径
 function getDataDir(): string {
@@ -150,13 +151,38 @@ async function verifyPortfolio(portfolioId: string): Promise<VerificationResult>
     throw new Error(`Portfolio not found: ${portfolioId}`);
   }
 
+  // 将 Prisma 交易转换为应用层 Transaction 类型
+  const transactions = portfolio.transactions.map(tx => ({
+    id: tx.id,
+    date: tx.date.toISOString(),
+    type: tx.type as any, // Prisma 枚举转换
+    assetCode: tx.assetCode ?? undefined,
+    quantity: tx.quantity ? Number(tx.quantity) : undefined,
+    price: tx.price ? Number(tx.price) : undefined,
+    amount: tx.amount ? Number(tx.amount) : undefined,
+    commission: tx.commission ? Number(tx.commission) : undefined,
+    leverageUsed: tx.leverageUsed ? Number(tx.leverageUsed) : undefined,
+    exchangeRate: tx.exchangeRate ? Number(tx.exchangeRate) : undefined,
+    currency: tx.currency ?? undefined,
+    notes: tx.notes ?? undefined,
+  }));
+
   // 使用批次系统重建持仓
-  const lotPositions = buildPositionsUsingLots(portfolio.transactions);
+  const lotPositions = buildPositionsUsingLots(transactions);
+
+  // 推断市场类型
+  function inferMarket(assetCode: string): Market {
+    const prefix = assetCode.slice(0, 2).toLowerCase();
+    if (prefix === 'hk') return Market.HK;
+    if (prefix === 'us') return Market.US;
+    return Market.CN;
+  }
+
   const positionsArray = Array.from(lotPositions.values()).map(state => ({
     asset: {
-      code: state.asset.code,
-      name: state.asset.name,
-      market: state.asset.market || 'unknown',
+      code: state.assetCode,
+      name: state.assetCode, // 使用 assetCode 作为临时名称
+      market: inferMarket(state.assetCode),
     },
     quantity: state.quantity,
     costPrice: state.totalCostCny / state.quantity,

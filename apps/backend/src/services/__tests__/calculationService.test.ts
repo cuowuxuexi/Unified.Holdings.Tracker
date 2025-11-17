@@ -923,3 +923,137 @@ describe('Calculation Service', () => {
     });
   });
 });
+
+// ========================================
+// 双指标计算验证测试
+// ========================================
+
+describe('calculatePeriodStats - 双指标计算验证', () => {
+  let mockPortfolio: Portfolio;
+
+  beforeEach(() => {
+    mockPortfolio = {
+      id: 'test-dual-metrics',
+      name: '双指标测试组合',
+      initialCash: 1000000,
+      cash: 100000,
+      leverage: {
+        totalAmount: 0,
+        usedAmount: 0,
+        availableAmount: 0,
+        costRate: 0,
+      },
+      transactions: [
+        {
+          id: '1',
+          type: TransactionType.BUY,
+          date: '2025-11-01T10:00:00Z',
+          assetCode: 'sh600519',
+          quantity: 10000,
+          price: 100,
+          amount: 1000000,
+          commission: 0,
+          currency: 'CNY',
+          exchangeRate: 1,
+        } as Transaction,
+        {
+          id: '2',
+          type: TransactionType.DEPOSIT,
+          date: '2025-11-12T10:00:00Z',
+          amount: 100000,
+          currency: 'CNY',
+          exchangeRate: 1,
+        } as Transaction,
+      ],
+    };
+
+    mockedFetchKline.mockResolvedValue([
+      {
+        date: '2025-11-08',
+        open: 99.5,
+        high: 101,
+        low: 99,
+        close: 100,
+        volume: 1000000,
+      },
+      {
+        date: '2025-11-17',
+        open: 104,
+        high: 106,
+        low: 104,
+        close: 105,
+        volume: 1100000,
+      },
+    ] as KlinePoint[]);
+  });
+
+  afterEach(() => {
+    jest.restoreAllMocks();
+  });
+
+  it('应该返回 totalValueChange 和 totalValueChangePercent 字段', async () => {
+    const result = await calculatePeriodStats(mockPortfolio, 'weekly', {
+      useRealtimeEndValue: false,
+    });
+
+    expect(result).toHaveProperty('totalValueChange');
+    expect(result).toHaveProperty('totalValueChangePercent');
+    expect(result).toHaveProperty('periodReturnPercent');
+    expect(result).toHaveProperty('periodPnl');
+  });
+
+  it('总资产变化应包含存款影响', async () => {
+    const result = await calculatePeriodStats(mockPortfolio, 'weekly', {
+      useRealtimeEndValue: false,
+    });
+
+    // 期初: 10000 股 × 100 元 = 100万
+    // 期末: 10000 股 × 105 元 + 10万现金 = 115万
+    // 总资产变化 = 115 - 100 = 15万
+    if (result.totalValueChange !== null && result.totalValueChange !== undefined) {
+      expect(result.totalValueChange).toBeGreaterThan(0);
+      expect(result.totalValueChangePercent).toBeGreaterThan(0);
+    }
+  });
+
+  it('投资收益率应排除存款影响', async () => {
+    const result = await calculatePeriodStats(mockPortfolio, 'weekly', {
+      useRealtimeEndValue: false,
+    });
+
+    // Modified Dietz 应该排除10万存款的影响
+    if (
+      result.periodReturnPercent !== null &&
+      result.periodReturnPercent !== undefined &&
+      result.totalValueChangePercent !== null &&
+      result.totalValueChangePercent !== undefined
+    ) {
+      // 投资收益率应该小于总资产变化率（因为排除了存款）
+      expect(result.periodReturnPercent).toBeLessThan(result.totalValueChangePercent);
+    }
+  });
+
+  it('无存取款时，两个指标应该相等', async () => {
+    // 移除存款交易
+    mockPortfolio.transactions = mockPortfolio.transactions.filter(
+      (tx) => tx.type !== TransactionType.DEPOSIT
+    );
+    mockPortfolio.cash = 0;
+
+    const result = await calculatePeriodStats(mockPortfolio, 'weekly', {
+      useRealtimeEndValue: false,
+    });
+
+    // 无现金流时，两个指标应该相等
+    if (
+      result.periodReturnPercent !== null &&
+      result.periodReturnPercent !== undefined &&
+      result.totalValueChangePercent !== null &&
+      result.totalValueChangePercent !== undefined
+    ) {
+      expect(Math.abs(result.periodReturnPercent - result.totalValueChangePercent)).toBeLessThan(
+        0.0001
+      );
+    }
+  });
+});

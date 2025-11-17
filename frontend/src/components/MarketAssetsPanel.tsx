@@ -22,9 +22,6 @@ const MARKET_TO_CURRENCY: Record<string, string> = {
 };
 
 const inferPositionCurrency = (position: PositionWithStats): string => {
-  if (position.currency) {
-    return position.currency.toUpperCase();
-  }
   const market = position.asset?.market;
   if (!market) return 'CNY';
   return MARKET_TO_CURRENCY[market] || 'CNY';
@@ -35,34 +32,15 @@ const shouldDisplayLocalCurrency = (position: PositionWithStats) =>
 
 const getMarketValueInDisplayCurrency = (position: PositionWithStats): number => {
   if (shouldDisplayLocalCurrency(position)) {
-    if (
-      typeof position.marketValueLocal === 'number' &&
-      position.marketValueLocal !== 0
-    ) {
-      return position.marketValueLocal;
-    }
+    // For non-CNY assets, use currentPrice * quantity for local currency display
     if (typeof position.currentPrice === 'number') {
       return position.currentPrice * position.quantity;
     }
   }
+  // Otherwise use the CNY market value from backend
   return position.marketValue ?? 0;
 };
 
-const getPnlInDisplayCurrency = (position: PositionWithStats): number => {
-  if (shouldDisplayLocalCurrency(position)) {
-    if (typeof position.totalPnlLocal === 'number') {
-      return position.totalPnlLocal;
-    }
-    if (
-      typeof position.marketValueLocal === 'number' &&
-      typeof position.totalCostLocal === 'number'
-    ) {
-      return position.marketValueLocal - position.totalCostLocal;
-    }
-  }
-  const pnlCny = (position as any).pnlCNY;
-  return position.totalPnl ?? pnlCny ?? 0;
-};
 
 interface MarketSummary {
   totalMarketValueLocal: number;
@@ -412,10 +390,7 @@ const MarketAssetsPanel: React.FC<{
     // 从行情数据中获取周期涨幅
     const quote = p.asset?.code ? quoteMap[p.asset.code] : null;
 
-    // Determine currency based on asset code prefix (for display purposes only)
-    let currencyKey: 'USD' | 'HKD' | 'CNY' = 'CNY'; // Default to CNY
-    if (p.asset?.code?.startsWith('hk')) currencyKey = 'HKD';
-    else if (p.asset?.code?.startsWith('us')) currencyKey = 'USD';
+    // Currency is inferred from asset market, not stored in position
 
     // 后端已经将所有数据转换为人民币，这里直接使用即可
     // 不要再次乘以汇率！
@@ -456,15 +431,17 @@ const MarketAssetsPanel: React.FC<{
       (sum, p) => sum + (p.marketValue ?? p.marketValueCNY ?? 0),
       0
     );
-    const totalPnlLocal = marketPositions.reduce(
-      (sum, p) => sum + getPnlInDisplayCurrency(p),
-      0
-    );
     const totalPnlCNY = marketPositions.reduce(
       (sum, p) => sum + (p.totalPnl ?? (p as any).pnlCNY ?? 0),
       0
     );
-    
+
+    // 将CNY盈亏转换为本地货币
+    // 对于港股/美股：盈亏CNY / 汇率 = 盈亏本地货币
+    // 对于A股：盈亏CNY = 盈亏本地货币
+    const exchangeRate = rates?.[market.currency as 'USD' | 'HKD' | 'CNY'] ?? 1.0;
+    const totalPnlLocal = market.currency === 'CNY' ? totalPnlCNY : totalPnlCNY / exchangeRate;
+
     return {
       ...acc,
       [market.key]: {

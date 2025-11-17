@@ -42,11 +42,12 @@ function formatDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-function getLastWeekFridayDate(today: Date): Date {
-  const dayOfWeek = today.getDay(); // 0=周日
-  const daysSinceMonday = (dayOfWeek + 6) % 7; // 周一=0
-  const daysToLastFriday = daysSinceMonday + 3;
-  return subDays(today, daysToLastFriday);
+function getLastWeekSaturdayDate(today: Date): Date {
+  const dayOfWeek = today.getDay(); // 0=周日, 6=周六
+  // 计算距离上周六的天数
+  // 周日(0)→1天, 周一(1)→2天, 周二(2)→3天, ..., 周六(6)→7天
+  const daysToLastSaturday = dayOfWeek === 0 ? 1 : dayOfWeek + 1;
+  return subDays(today, daysToLastSaturday);
 }
 
 function getLastDayOfPreviousMonth(today: Date): Date {
@@ -236,6 +237,8 @@ type PriceSource = 'realtime' | 'kline' | 'cost';
 export interface PeriodStatsResult {
   periodReturnPercent: number | null;
   periodPnl: number | null;
+  totalValueChange?: number | null;          // 总资产变化（元）
+  totalValueChangePercent?: number | null;   // 总资产变化率（小数形式）
   baseDate?: string | null;
   baseDateSource?: PriceSource;
   endDate?: string | null;
@@ -305,7 +308,7 @@ export async function calculatePeriodStats(
           startDate = startOfDay(subDays(endDate, 1));
           break;
         case 'weekly':
-          startDate = startOfDay(getLastWeekFridayDate(endDate));
+          startDate = startOfDay(getLastWeekSaturdayDate(endDate));
           break;
         case 'monthly':
           startDate = startOfDay(getLastDayOfPreviousMonth(endDate));
@@ -382,8 +385,8 @@ export async function calculatePeriodStats(
     }
 
     // --- 2. 获取所有相关股票的K线 ---
-    // 需要期初用 startDate 前一天的收盘价，期末用 endDate 当天的收盘价
-    const startKlineDate = formatDate(subDays(startDate, 1));
+    // 需要期初用 startDate 当天的收盘价，期末用 endDate 当天的收盘价
+    const startKlineDate = formatDate(startDate);
     const endKlineDate = formatDate(endDate);
 
     // 收集期间涉及的股票代码
@@ -533,7 +536,7 @@ export async function calculatePeriodStats(
     }
 
     // 重建期初和期末状态
-    const startState = reconstructPortfolioState(subDays(startDate, 1));
+    const startState = reconstructPortfolioState(startDate);
     const endState = reconstructPortfolioState(endDate);
 
     // 计算期初和期末估值
@@ -542,26 +545,33 @@ export async function calculatePeriodStats(
     const startValue = startResult.value;
     const endValue = endResult.value;
 
-    // --- 4. 计算期间收益率（简化 Modified Dietz 法）---
-    // periodReturnPercent = (endValue - startValue - cashFlows) / (startValue + cashFlows * 0.5)
-    // 返回小数形式（0-1范围），前端会乘以100显示
+    // --- 5. 计算收益率 ---
+
+    // 5.1 总资产变化（简单收益率）
+    const totalValueChange = endValue - startValue;
+    const totalValueChangePercent = startValue > 0 ? totalValueChange / startValue : null;
+
+    // 5.2 投资收益率（Modified Dietz）
     let periodReturnPercent: number | null = null;
-    let periodPnl: number | null = null;
-    if (startValue !== 0) {
-      periodReturnPercent =
-        (endValue - startValue - cashFlows) / (startValue + cashFlows * 0.5);
-      periodPnl = endValue - startValue - cashFlows;
-    } else if (endValue === 0 && cashFlows === 0 && startValue === 0) {
-      periodReturnPercent = 0;
-      periodPnl = 0;
-    } else {
-      periodReturnPercent = null;
-      periodPnl = null;
+    if (startValue > 0) {
+      const denominator = startValue + cashFlows * 0.5;
+      if (Math.abs(denominator) > 1e-9) {
+        periodReturnPercent = (endValue - startValue - cashFlows) / denominator;
+      }
     }
+
+    const periodPnl = periodReturnPercent !== null ? periodReturnPercent * startValue : null;
+
+    console.log(`\n📊 周期收益统计:`);
+    console.log(`  总资产变化: ${totalValueChange.toFixed(2)} 元 (${totalValueChangePercent !== null ? (totalValueChangePercent * 100).toFixed(2) + '%' : 'N/A'})`);
+    console.log(`  投资收益率: ${periodReturnPercent !== null ? (periodReturnPercent * 100).toFixed(2) + '%' : 'N/A'}`);
+    console.log(`  期间现金流: ${cashFlows.toFixed(2)} 元`);
 
     return {
       periodReturnPercent,
       periodPnl,
+      totalValueChange,
+      totalValueChangePercent,
       baseDate: startResult.metadata.effectiveDate ?? startKlineDate,
       baseDateSource: startResult.metadata.source,
       endDate: endResult.metadata.effectiveDate ?? endKlineDate,
@@ -1008,15 +1018,15 @@ export async function getWeekBasePrice(
   code: string,
   today: Date = new Date()
 ): Promise<{ price: number | null; date: string | null }> {
-  const lastWeekFriday = getLastWeekFridayDate(today);
+  const lastWeekSaturday = getLastWeekSaturdayDate(today);
 
   console.log(
-    `[getWeekBasePrice] ${code} 目标日期: ${formatDate(lastWeekFriday)} (上周五)`
+    `[getWeekBasePrice] ${code} 目标日期: ${formatDate(lastWeekSaturday)} (上周六)`
   );
 
   const result = await getBasePrice(
     code,
-    lastWeekFriday,
+    lastWeekSaturday,
     15,
     PERIOD_CACHE_TTL.basePrice.week
   ); // 15天回溯，1小时缓存

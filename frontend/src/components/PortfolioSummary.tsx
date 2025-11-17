@@ -21,22 +21,6 @@ interface PortfolioSummaryProps {
   lastUpdated?: number;
 }
 
-const normalizePeriodPercent = (
-  value: number | null | undefined
-): number | null => {
-  if (value === null || value === undefined || Number.isNaN(value)) {
-    return null;
-  }
-  if (Math.abs(value) > 1) {
-    console.warn(
-      '[PortfolioSummary] periodReturnPercent 超出预期范围（-1~1），自动按百分比值转为小数：',
-      value
-    );
-    return value / 100;
-  }
-  return value;
-};
-
 // 核心指标卡片样式
 const coreCardStyle: React.CSSProperties = {
   background: 'linear-gradient(135deg, #fafbfc 0%, #f5f6fa 100%)',
@@ -163,12 +147,18 @@ const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({
    * 渲染周期收益，区分数据缺失/零涨幅/正常三种状态
    */
   const renderPeriodReturn = (
-    amount: number | null | undefined,
-    percent: number | null | undefined,
     label: string,
-    meta?: PortfolioStats['weeklyStats']
+    meta?: {
+      totalValueChange?: number | null;
+      totalValueChangePercent?: number | null;
+      periodReturnPercent?: number | null;
+      baseDate?: string | null;
+      baseDateSource?: string;
+      fallbackDays?: number;
+    }
   ): React.ReactNode => {
-    if (percent === null || percent === undefined || Number.isNaN(percent)) {
+    // 状态1: 数据缺失
+    if (!meta || meta.totalValueChangePercent === null || meta.totalValueChangePercent === undefined) {
       return (
         <Tooltip title={`${label}数据暂不可用，可能因为假期、停牌或新上市股票`}>
           <div style={{ textAlign: 'right' }}>
@@ -179,9 +169,8 @@ const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({
       );
     }
 
-    const safeAmount = amount ?? 0;
-
-    if (percent === 0 && safeAmount === 0) {
+    // 状态2: 零变化
+    if (meta.totalValueChange === 0 && meta.totalValueChangePercent === 0) {
       return (
         <div style={{ textAlign: 'right' }}>
           <div style={{ fontWeight: 700, color: '#888', fontSize: '14px' }}>0.00</div>
@@ -190,36 +179,40 @@ const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({
       );
     }
 
-    const color = safeAmount > 0 ? '#f5222d' : safeAmount < 0 ? '#52c41a' : '#888';
-    const prefix = safeAmount > 0 ? '+' : '';
+    // 状态3: 正常涨跌
+    const color = (meta.totalValueChange || 0) > 0 ? '#f5222d' : (meta.totalValueChange || 0) < 0 ? '#52c41a' : '#888';
+    const prefix = (meta.totalValueChange || 0) > 0 ? '+' : '';
 
-    const tooltipContent = meta ? (
+    // 构建 Tooltip 内容
+    const tooltipTitle = (
       <div>
-        <div>基准：{meta.baseDate ?? `${label}默认基准`}</div>
-        <div>估值来源：{getSourceLabel(meta.baseDateSource)}</div>
-        {meta.fallbackDays !== undefined && meta.fallbackDays > 0 ? (
-          <div>最大回溯 {meta.fallbackDays} 天</div>
-        ) : null}
-      </div>
-    ) : null;
-
-    const content = (
-      <div style={{ textAlign: 'right' }}>
-        <div style={{ fontWeight: 700, color, fontSize: '14px' }}>
-          {prefix}{formatNumber(safeAmount)}
-        </div>
-        <div style={{ fontSize: '11px', color }}>
-          {formatPercent(percent)}
+        <div>基准日期: {meta.baseDate || 'N/A'}</div>
+        <div>数据来源: {getSourceLabel(meta.baseDateSource)}</div>
+        {meta.fallbackDays && meta.fallbackDays > 0 && (
+          <div>回溯天数: {meta.fallbackDays}天</div>
+        )}
+        <div style={{ marginTop: 8, borderTop: '1px solid #555', paddingTop: 4 }}>
+          <div>总资产变化: 包含存取款影响</div>
+          <div>投资收益率: 排除存取款，仅反映投资表现</div>
         </div>
       </div>
     );
 
-    return tooltipContent ? (
-      <Tooltip title={tooltipContent}>
-        {content}
+    return (
+      <Tooltip title={tooltipTitle} placement="left">
+        <div style={{ textAlign: 'right' }}>
+          {/* 总资产变化 - 主指标 */}
+          <div style={{ fontWeight: 700, color, fontSize: '13px', lineHeight: '18px' }}>
+            {prefix}{formatNumber(meta.totalValueChange)} ({prefix}{formatPercent(meta.totalValueChangePercent)})
+          </div>
+          {/* 投资收益率 - 次要指标 */}
+          <div style={{ fontSize: '10px', color: '#888', lineHeight: '14px' }}>
+            投资 {meta.periodReturnPercent !== null && meta.periodReturnPercent !== undefined
+              ? `${(meta.periodReturnPercent || 0) > 0 ? '+' : ''}${formatPercent(meta.periodReturnPercent)}`
+              : 'N/A'}
+          </div>
+        </div>
       </Tooltip>
-    ) : (
-      content
     );
   };
 
@@ -328,14 +321,7 @@ const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({
         : 0
       : null;
 
-  const weeklyReturnPercent = normalizePeriodPercent(
-    stats?.weeklyStats?.periodReturnPercent
-  );
-  const weeklyReturnAmount = stats?.weeklyStats?.periodPnl ?? null;
-  const monthlyReturnPercent = normalizePeriodPercent(
-    stats?.monthlyStats?.periodReturnPercent
-  );
-  const monthlyReturnAmount = stats?.monthlyStats?.periodPnl ?? null;
+  // Period return values are now accessed directly from stats in renderPeriodReturn
 
   // Helper to get color based on value
   const getColor = (value: number) => {
@@ -590,13 +576,13 @@ const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({
               borderBottom: '1px dashed #d9d9d9',
               width: '100%'
             }}>周期收益</div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginTop: 4 }}>
-              <Text type="secondary">周度收益:</Text>
-              {renderPeriodReturn(weeklyReturnAmount, weeklyReturnPercent, '周度', stats?.weeklyStats)}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', fontSize: '12px', marginTop: 6 }}>
+              <Text type="secondary" style={{ lineHeight: '18px' }}>周度:</Text>
+              {renderPeriodReturn('周度', stats?.weeklyStats)}
             </div>
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginTop: 8 }}>
-              <Text type="secondary">月度收益:</Text>
-              {renderPeriodReturn(monthlyReturnAmount, monthlyReturnPercent, '月度', stats?.monthlyStats)}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', fontSize: '12px', marginTop: 8 }}>
+              <Text type="secondary" style={{ lineHeight: '18px' }}>月度:</Text>
+              {renderPeriodReturn('月度', stats?.monthlyStats)}
             </div>
           </div>
         </Card>

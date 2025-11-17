@@ -11,9 +11,6 @@ const MARKET_TO_CURRENCY: Record<string, string> = {
 };
 
 const inferCurrencyCode = (record: PositionWithStats): string => {
-  if (record.currency) {
-    return record.currency.toUpperCase();
-  }
   const market = record.asset?.market;
   if (!market) return 'CNY';
   return MARKET_TO_CURRENCY[market] || 'CNY';
