@@ -225,12 +225,22 @@ export interface PortfolioStats {
   positions: PositionWithStats[]; // Updated positions list with stats
   // Add other potential fields from backend if necessary
   timestamp: number; // Timestamp of when the stats were calculated
-  weeklyStats?: { periodReturnPercent: number | null; periodPnl: number | null };
-  monthlyStats?: { periodReturnPercent: number | null; periodPnl: number | null };
-  yearlyStats?: { periodReturnPercent: number | null; periodPnl: number | null };
+  weeklyStats?: PeriodReturnStat;
+  monthlyStats?: PeriodReturnStat;
+  yearlyStats?: PeriodReturnStat;
   totalCommission?: number; // 添加手续费总额字段
   leverageCost?: number; // 添加融资成本字段
   totalDividendIncome?: number; // 新增：总股息收入
+}
+
+export interface PeriodReturnStat {
+  periodReturnPercent: number | null;
+  periodPnl: number | null;
+  baseDate?: string | null;
+  baseDateSource?: 'realtime' | 'kline' | 'cost';
+  endDate?: string | null;
+  endDateSource?: 'realtime' | 'kline' | 'cost';
+  fallbackDays?: number;
 }
 
 // Type for creating new portfolios (omits id)
@@ -304,7 +314,6 @@ export interface AppState {
   isLoadingPortfolios: boolean;
   isLoadingPortfolioDetail: boolean;
   portfolioError: string | null;
-  currentPortfolioStats: PortfolioStats | null; // Added for stats endpoint data
 
   // Actions (Placeholders - implementation in store)
   fetchMarketIndices: () => Promise<void>; // Updated signature for Task 7.2
@@ -318,7 +327,6 @@ export interface AppState {
   fetchPortfolioDetail: (id: string) => Promise<void>;
   addTransaction: (portfolioId: string, data: TransactionInput) => Promise<void>;
   deleteTransaction: (portfolioId: string, transactionId: string) => Promise<void>;
-  fetchCurrentPortfolioStats: (portfolioId: string, period?: string, startDate?: string, endDate?: string) => Promise<void>; // 更新函数签名，添加日期参数
   setSelectedIndices: (indices: SelectedIndexItem[]) => void; // Action to set selected indices
   updateTransactionNotes: (portfolioId: string, transactionId: string, notes: string) => Promise<void>;
   updateAttentionInfo: (portfolioId: string, attentionInfo: string) => Promise<void>;

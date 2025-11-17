@@ -4,11 +4,13 @@ import useAppStore from '../../store'; // Adjust path if needed
 import PortfolioSummary from '../PortfolioSummary';
 import { fetchExchangeRates } from '../../services/api'; // Correctly import fetchExchangeRates
 import useMessageApi from '../../hooks/useMessageApi';
+import { usePortfolioStats } from '../../hooks/usePortfolioStats';
 
 const { Title } = Typography;
 
 import MarketIndices from '../MarketIndices';
 import MarketAssetsPanel from '../MarketAssetsPanel';
+import { ErrorBoundary } from '../ErrorBoundary';
 
 const detailPagePadding = '0 32px';
 
@@ -23,8 +25,13 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }
   const selectedPortfolioDetail = useAppStore((state) => state.selectedPortfolioDetail);
   const isLoadingPortfolioDetail = useAppStore((state) => state.isLoadingPortfolioDetail);
   const portfolioError = useAppStore((state) => state.portfolioError);
-  const currentPortfolioStats = useAppStore((state) => state.currentPortfolioStats);
-  const fetchCurrentPortfolioStats = useAppStore((state) => state.fetchCurrentPortfolioStats);
+  const {
+    data: stats,
+    isLoading: isStatsLoading,
+    isFetching: isStatsFetching,
+    refetch: refetchStats,
+    error: statsError,
+  } = usePortfolioStats(portfolioId);
 
   const [deleteModalVisible, setDeleteModalVisible] = useState(false);
   const [deleteInput, setDeleteInput] = useState('');
@@ -49,16 +56,6 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }
     };
     loadRates();
   }, [messageApi]); // Runs on mount (message API is stable but included for lint friendliness)
-
-  // Fetch stats when portfolioId changes (Moved to top level)
-  useEffect(() => {
-    if (portfolioId) {
-      fetchCurrentPortfolioStats(portfolioId);
-      // Optionally, set an interval to refresh stats periodically
-      // const intervalId = setInterval(() => fetchCurrentPortfolioStats(portfolioId), 30000); // e.g., every 30 seconds
-      // return () => clearInterval(intervalId); // Cleanup interval on unmount or ID change
-    }
-  }, [portfolioId, fetchCurrentPortfolioStats]); // Restore original dependency array if needed, or keep fetch function if stable
 
   // 确认删除
   const handleConfirmDelete = async () => {
@@ -92,9 +89,12 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }
     );
   }
 
+  const waitingForStats =
+    portfolioId &&
+    (isStatsLoading || (!stats && !statsError && !portfolioError));
+
   // Show loading spinner while fetching initial detail OR stats
-  // Consider a more granular loading state for stats if needed
-  if (isLoadingPortfolioDetail || (portfolioId && !currentPortfolioStats && !portfolioError)) {
+  if (isLoadingPortfolioDetail || waitingForStats) {
     return (
       <div style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: detailPagePadding }}>
         <MarketIndices />
@@ -109,16 +109,30 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }
     );
   }
 
-  if (portfolioError) {
-    // Display error specific to stats fetching if possible, otherwise general error
-    const errorMessage = portfolioError?.includes('statistics') || portfolioError?.includes('stats')
-      ? "加载投资组合统计数据时出错"
-      : "加载投资组合详情时出错";
+  const statsErrorMessage =
+    statsError instanceof Error
+      ? statsError.message
+      : statsError
+      ? String(statsError)
+      : null;
+
+  if (portfolioError || statsErrorMessage) {
+    const errorMessage =
+      portfolioError?.includes('statistics') ||
+      portfolioError?.includes('stats') ||
+      statsErrorMessage
+        ? '加载投资组合统计数据时出错'
+        : '加载投资组合详情时出错';
     return (
       <div style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: detailPagePadding }}>
         <MarketIndices />
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Alert message={errorMessage} description={portfolioError || '未知错误'} type="error" showIcon />
+          <Alert
+            message={errorMessage}
+            description={portfolioError || statsErrorMessage || '未知错误'}
+            type="error"
+            showIcon
+          />
         </div>
       </div>
     );
@@ -138,8 +152,7 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }
   }
 
   // Handle case where stats are missing after loading and no error (should ideally not happen with current logic, but as fallback)
-  if (!currentPortfolioStats) {
-    // This check ensures currentPortfolioStats is not null
+  if (!stats) {
     return (
       <div style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: detailPagePadding }}>
         <MarketIndices />
@@ -155,7 +168,7 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }
   // const updatedAt = new Date().toLocaleString();
 
   // Map positions to potentially translate market codes if needed
-  const mappedPositions = currentPortfolioStats.positions.map(p => {
+  const mappedPositions = stats.positions.map(p => {
       // Determine market string ('A股', '港股', '美股') based on asset.code prefix
       let marketDisplay = '未知';
       const code = p.asset?.code;
@@ -172,7 +185,7 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }
   console.log('positions:', mappedPositions); // 保留日志用于调试
 
   // --- Main Render ---
-  // At this point, selectedPortfolioDetail and currentPortfolioStats are guaranteed to be non-null due to checks above
+  // At this point, selectedPortfolioDetail and stats are guaranteed to be非空 due to checks above
   return (
     <div style={{ width: '100%', padding: detailPagePadding }} id="portfolio-report-area"> {/* Added ID for screenshot targeting */}
       {/* 顶部放置大盘指数，始终可见 */}
@@ -242,18 +255,45 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }
         style={{ width: '100%', marginBottom: '16px' }}
         styles={{ header: { fontSize: '20px', fontWeight: 'bold' } }}
       >
-        <PortfolioSummary 
-          portfolio={selectedPortfolioDetail}
-          stats={currentPortfolioStats} // 直接传递从后端获取的 stats
-        />
+        <ErrorBoundary
+          fallback={
+            <Alert
+              type="error"
+              showIcon
+              message="概览渲染失败"
+              description="刷新页面或稍后重试。"
+            />
+          }
+        >
+          <PortfolioSummary 
+            portfolio={selectedPortfolioDetail}
+            stats={stats} // 直接传递从后端获取的 stats
+            isLoading={isStatsLoading && !stats}
+            isRefetching={isStatsFetching && Boolean(stats)}
+            onRefresh={() => refetchStats()}
+            lastUpdated={stats?.timestamp}
+          />
+        </ErrorBoundary>
       </Card>
       
       {/* 资产明细分市场分组卡片式UI */}
-      <MarketAssetsPanel
-        portfolioId={portfolioId}
-        positions={mappedPositions}
-        transactions={selectedPortfolioDetail.transactions}
-      />
+      <ErrorBoundary
+        fallback={
+          <Alert
+            type="error"
+            showIcon
+            message="资产面板渲染失败"
+            description="请刷新页面或检查控制台日志。"
+          />
+        }
+      >
+        <MarketAssetsPanel
+          portfolioId={portfolioId}
+          positions={mappedPositions}
+          transactions={selectedPortfolioDetail.transactions}
+          stats={stats}
+        />
+      </ErrorBoundary>
     </div>
   );
 };

@@ -9,6 +9,9 @@ import {
   calculateLeverageCostByDay,
   calculateTotalDividendIncome,
   calculateTotalPnlV2,
+  getWeekBasePrice,
+  getMonthBasePrice,
+  getYearBasePrice,
 } from '../services/calculationService';
 import { getExchangeRate } from '../services/currencyService';
 import {
@@ -25,6 +28,11 @@ import {
 import { parseISO, startOfYear } from 'date-fns';
 import { correctHistoricalTransactionAmounts } from '../services/storage.prisma';
 import { buildPositionsUsingLots } from '../services/portfolioReplay';
+import {
+  periodCacheService,
+  PERIOD_CACHE_TTL,
+  PeriodCacheBucket,
+} from '@uht/infra/cache/period-cache-service';
 
 const router = Router();
 
@@ -98,6 +106,41 @@ const calculateBasePositions = (transactions: Transaction[]): Position[] => {
   }
   return positions;
 };
+
+const extractAssetCodes = (transactions: Transaction[]): string[] => {
+  const codes = new Set<string>();
+  for (const tx of transactions) {
+    if (
+      (tx.type === TransactionType.BUY || tx.type === TransactionType.SELL) &&
+      tx.assetCode
+    ) {
+      codes.add(tx.assetCode);
+    }
+  }
+  return Array.from(codes);
+};
+
+function preloadBasePrices(assetCodes: string[]) {
+  const uniqueCodes = Array.from(new Set(assetCodes.filter(Boolean)));
+  if (uniqueCodes.length === 0) {
+    return;
+  }
+  const tasks = uniqueCodes.flatMap((code) => [
+    getWeekBasePrice(code),
+    getMonthBasePrice(code),
+    getYearBasePrice(code),
+  ]);
+
+  Promise.all(tasks)
+    .then(() =>
+      console.log(
+        `[preloadBasePrices] 已预加载 ${uniqueCodes.length} 个资产的基准价格`
+      )
+    )
+    .catch((err) =>
+      console.warn('[preloadBasePrices] 预加载基准价格失败:', err)
+    );
+}
 
 // ========== 使用 Use Cases 的路由 ==========
 
@@ -293,6 +336,9 @@ router.get(
       realizedPnl: pnlV2.realizedPnl,
       unrealizedPnl: pnlV2.unrealizedPnl,
     };
+
+    const assetCodes = extractAssetCodes(portfolio.transactions);
+    preloadBasePrices(assetCodes);
 
     res.json(portfolioDetail);
   })
@@ -654,12 +700,39 @@ router.get(
 
     // Step 5: 计算周期统计
     const statsOptions = { quotes: quotesMap };
-    const periodStats = await calculatePeriodStats(portfolio, period, statsOptions);
-    const [weeklyStats, monthlyStats, yearlyStats] = await Promise.all([
-      calculatePeriodStats(portfolio, 'weekly', statsOptions),
-      calculatePeriodStats(portfolio, 'monthly', statsOptions),
-      calculatePeriodStats(portfolio, 'yearly', statsOptions),
-    ]);
+    const bucket = periodCacheService.getPeriodStatsTimeBucket();
+    const requestedPeriod = (period ?? 'total') as PeriodCacheBucket;
+
+    type PeriodStatsResult = Awaited<
+      ReturnType<typeof calculatePeriodStats>
+    >;
+    const statsPromiseMap: Partial<
+      Record<PeriodCacheBucket, Promise<PeriodStatsResult>>
+    > = {};
+
+    const getCachedPeriodStats = (target: PeriodCacheBucket) => {
+      if (!statsPromiseMap[target]) {
+        const cacheKey = periodCacheService.getPeriodStatsCacheKey(
+          portfolio.id,
+          target,
+          bucket
+        );
+        statsPromiseMap[target] = periodCacheService.rememberPeriodStats(
+          cacheKey,
+          PERIOD_CACHE_TTL.periodStats.ttl,
+          () => calculatePeriodStats(portfolio, target, statsOptions)
+        );
+      }
+      return statsPromiseMap[target]!;
+    };
+
+    const [periodStats, weeklyStats, monthlyStats, yearlyStats] =
+      await Promise.all([
+        getCachedPeriodStats(requestedPeriod),
+        getCachedPeriodStats('weekly'),
+        getCachedPeriodStats('monthly'),
+        getCachedPeriodStats('yearly'),
+      ]);
 
     // Step 6: 整合结果
     let totalMarketValueInCNY = 0;

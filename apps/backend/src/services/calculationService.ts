@@ -9,20 +9,20 @@ import {
 import { fetchKline } from './tencentApi'; // Assuming fetchKline is here
 import { cacheService } from '@uht/infra/cache/cache-service'; // 缓存服务
 import {
+  periodCacheService,
+  PERIOD_CACHE_TTL,
+} from '@uht/infra/cache/period-cache-service';
+import {
   getUnixTime,
   startOfDay,
-  startOfWeek,
-  startOfMonth,
-  startOfYear,
+  endOfDay,
   subDays,
-  subWeeks,
-  subMonths,
-  subYears,
   formatISO,
   parseISO,
   getDay,
   eachDayOfInterval,
   format,
+  differenceInCalendarDays,
 } from 'date-fns'; // Using date-fns for date manipulation, added parseISO back
 import { getExchangeRateForAssetToCNY } from './currencyService';
 import {
@@ -40,6 +40,23 @@ import {
  */
 function formatDate(d: Date): string {
   return d.toISOString().slice(0, 10);
+}
+
+function getLastWeekFridayDate(today: Date): Date {
+  const dayOfWeek = today.getDay(); // 0=周日
+  const daysSinceMonday = (dayOfWeek + 6) % 7; // 周一=0
+  const daysToLastFriday = daysSinceMonday + 3;
+  return subDays(today, daysToLastFriday);
+}
+
+function getLastDayOfPreviousMonth(today: Date): Date {
+  const firstDayOfMonth = new Date(today.getFullYear(), today.getMonth(), 1);
+  return subDays(firstDayOfMonth, 1);
+}
+
+function getLastDayOfPreviousYear(today: Date): Date {
+  const firstDayOfYear = new Date(today.getFullYear(), 0, 1);
+  return subDays(firstDayOfYear, 1);
 }
 
 /**
@@ -214,11 +231,35 @@ export interface PeriodStatsOptions {
   useRealtimeEndValue?: boolean;
 }
 
+type PriceSource = 'realtime' | 'kline' | 'cost';
+
+export interface PeriodStatsResult {
+  periodReturnPercent: number | null;
+  periodPnl: number | null;
+  baseDate?: string | null;
+  baseDateSource?: PriceSource;
+  endDate?: string | null;
+  endDateSource?: PriceSource;
+  fallbackDays?: number;
+}
+
+interface ValueMetadata {
+  anchorDate: string;
+  effectiveDate: string | null;
+  source: PriceSource;
+  fallbackDays: number;
+}
+
+interface ValueComputationResult {
+  value: number;
+  metadata: ValueMetadata;
+}
+
 export async function calculatePeriodStats(
   portfolio: Portfolio,
   period: 'daily' | 'weekly' | 'monthly' | 'yearly' | 'total' = 'total',
   options?: PeriodStatsOptions
-): Promise<{ periodReturnPercent: number | null; periodPnl: number | null }> {
+): Promise<PeriodStatsResult> {
   try {
     const quotesMap = options?.quotes;
     const useRealtimeEndValue = options?.useRealtimeEndValue ?? true;
@@ -264,15 +305,13 @@ export async function calculatePeriodStats(
           startDate = startOfDay(subDays(endDate, 1));
           break;
         case 'weekly':
-          startDate = startOfDay(
-            startOfWeek(endDate, { weekStartsOn: 1 })
-          );
+          startDate = startOfDay(getLastWeekFridayDate(endDate));
           break;
         case 'monthly':
-          startDate = startOfDay(startOfMonth(endDate));
+          startDate = startOfDay(getLastDayOfPreviousMonth(endDate));
           break;
         case 'yearly':
-          startDate = startOfDay(startOfYear(endDate));
+          startDate = startOfDay(getLastDayOfPreviousYear(endDate));
           break;
         default: // Should not happen with TS types, but good practice
           console.error(`Invalid period specified: ${period}`);
@@ -310,7 +349,7 @@ export async function calculatePeriodStats(
     function reconstructPortfolioState(atDate: Date) {
       const tracker = new LotTracker();
       let cash = portfolio.initialCash || 0;
-      const targetTimestamp = getUnixTime(atDate);
+      const targetTimestamp = getUnixTime(endOfDay(atDate));
       for (const tx of sortedTransactions) {
         const txTimestamp = getUnixTime(new Date(tx.date));
         if (txTimestamp > targetTimestamp) break;
@@ -406,22 +445,34 @@ export async function calculatePeriodStats(
       state: { positions: Map<string, LotPositionState>; cash: number },
       priceDate: string,
       mode: 'start' | 'end'
-    ) {
+    ): Promise<ValueComputationResult> {
       let value = state.cash;
+      const metadata: ValueMetadata = {
+        anchorDate: priceDate,
+        effectiveDate: priceDate,
+        source: 'kline',
+        fallbackDays: 0,
+      };
+      const anchorDate = new Date(`${priceDate}T00:00:00Z`);
+      const allowRealtime =
+        mode === 'end' && (options?.useRealtimeEndValue ?? true);
+      let usedRealtimeForAll = allowRealtime;
+      let usedCostFallback = false;
+
       for (const [code, posState] of state.positions.entries()) {
         if (posState.quantity <= 0) continue;
+        const quote = quotesMap?.[code];
         if (
-          mode === 'end' &&
-          useRealtimeEndValue &&
-          quotesMap &&
-          quotesMap[code] &&
-          typeof quotesMap[code].currentPrice === 'number'
+          allowRealtime &&
+          quote &&
+          typeof quote.currentPrice === 'number'
         ) {
-          const realtimeQuote = quotesMap[code];
           const exchangeRate = getExchangeRateForAssetToCNY(code);
-          value += posState.quantity * realtimeQuote.currentPrice * exchangeRate;
+          value += posState.quantity * quote.currentPrice * exchangeRate;
           continue;
         }
+
+        usedRealtimeForAll = false;
 
         const pricePoint = findPricePoint(code, priceDate);
         const effectivePriceDate = pricePoint?.date ?? priceDate;
@@ -432,6 +483,19 @@ export async function calculatePeriodStats(
 
         if (pricePoint && pricePoint.close != null) {
           value += posState.quantity * pricePoint.close * rate;
+          const candidateDate = pricePoint.date;
+          if (candidateDate) {
+            const diff = Math.abs(
+              differenceInCalendarDays(
+                anchorDate,
+                new Date(`${candidateDate}T00:00:00Z`)
+              )
+            );
+            if (diff > metadata.fallbackDays) {
+              metadata.fallbackDays = diff;
+              metadata.effectiveDate = candidateDate;
+            }
+          }
           continue;
         }
 
@@ -447,12 +511,25 @@ export async function calculatePeriodStats(
           continue;
         }
 
+        usedCostFallback = true;
         console.warn(
           `[calculatePeriodStats] 使用成本价估算 ${code} 在 ${priceDate} 的市值`
         );
         value += posState.quantity * fallbackUnitLocal * rate;
       }
-      return value;
+
+      if (usedCostFallback) {
+        metadata.source = 'cost';
+        metadata.effectiveDate = null;
+      } else if (usedRealtimeForAll && allowRealtime) {
+        metadata.source = 'realtime';
+        metadata.effectiveDate = formatDate(new Date());
+        metadata.fallbackDays = 0;
+      } else {
+        metadata.source = 'kline';
+      }
+
+      return { value, metadata };
     }
 
     // 重建期初和期末状态
@@ -460,8 +537,10 @@ export async function calculatePeriodStats(
     const endState = reconstructPortfolioState(endDate);
 
     // 计算期初和期末估值
-    const startValue = await calcValue(startState, startKlineDate, 'start');
-    const endValue = await calcValue(endState, endKlineDate, 'end');
+    const startResult = await calcValue(startState, startKlineDate, 'start');
+    const endResult = await calcValue(endState, endKlineDate, 'end');
+    const startValue = startResult.value;
+    const endValue = endResult.value;
 
     // --- 4. 计算期间收益率（简化 Modified Dietz 法）---
     // periodReturnPercent = (endValue - startValue - cashFlows) / (startValue + cashFlows * 0.5)
@@ -480,7 +559,15 @@ export async function calculatePeriodStats(
       periodPnl = null;
     }
 
-    return { periodReturnPercent, periodPnl };
+    return {
+      periodReturnPercent,
+      periodPnl,
+      baseDate: startResult.metadata.effectiveDate ?? startKlineDate,
+      baseDateSource: startResult.metadata.source,
+      endDate: endResult.metadata.effectiveDate ?? endKlineDate,
+      endDateSource: endResult.metadata.source,
+      fallbackDays: startResult.metadata.fallbackDays,
+    };
   } catch (error) {
     console.error(
       `Error calculating period stats for period "${period}":`,
@@ -775,21 +862,20 @@ export async function getBasePrice(
   code: string,
   anchorDate: Date,
   maxLookbackDays: number,
-  cacheTTL: number = 3600
+  cacheTTL: number = PERIOD_CACHE_TTL.basePrice.week
 ): Promise<{ price: number | null; date: string | null }> {
   try {
     // 格式化日期为 YYYY-MM-DD
     const endDateStr = formatDate(anchorDate);
     const startDateStr = formatDate(subDays(anchorDate, maxLookbackDays));
 
-    // 构建缓存键
-    const cacheKey = `base-price:${code}:${endDateStr}:${maxLookbackDays}`;
+    const cacheKey = periodCacheService.getBasePriceCacheKey(
+      code,
+      endDateStr,
+      maxLookbackDays
+    );
 
-    // 尝试从缓存获取
-    const cached = cacheService.get<{
-      price: number | null;
-      date: string | null;
-    }>(cacheKey);
+    const cached = periodCacheService.peekBasePrice(cacheKey);
     if (cached) {
       console.log(
         `[getBasePrice] 缓存命中 ${cacheKey} - 价格: ${cached.price}, 日期: ${cached.date}`
@@ -799,62 +885,61 @@ export async function getBasePrice(
 
     console.log(`[getBasePrice] 缓存未命中 ${cacheKey}，开始获取K线数据...`);
 
-    // 获取历史K线数据
-    const klineData = await fetchKline(
-      code,
-      'daily',
-      startDateStr,
-      endDateStr,
-      'qfq'
-    );
-
-    if (!klineData || klineData.length === 0) {
-      console.warn(
-        `[getBasePrice] ${code} 在 ${startDateStr} 至 ${endDateStr} 期间无K线数据`
-      );
-      return { price: null, date: null };
-    }
-
-    // 按日期降序排序（从近到远）
-    const sortedKline = [...klineData].sort((a, b) =>
-      b.date.localeCompare(a.date)
-    );
-
-    // 从锚点日期开始向前查找第一个有效的收盘价
-    for (const point of sortedKline) {
-      if (point.close && !isNaN(point.close)) {
-        const result = {
-          price: point.close,
-          date: point.date,
-        };
-
-        // 计算实际回溯天数
-        const actualDate = new Date(point.date);
-        const daysDiff = Math.floor(
-          (anchorDate.getTime() - actualDate.getTime()) / (1000 * 60 * 60 * 24)
+    return periodCacheService.rememberBasePrice(
+      cacheKey,
+      cacheTTL,
+      async () => {
+        const klineData = await fetchKline(
+          code,
+          'daily',
+          startDateStr,
+          endDateStr,
+          'qfq'
         );
 
-        if (daysDiff > 0) {
-          console.log(
-            `[getBasePrice] ${code} 目标日期 ${endDateStr} 无数据，使用 ${point.date} 的价格 ${point.close}（回溯 ${daysDiff} 天）`
+        if (!klineData || klineData.length === 0) {
+          console.warn(
+            `[getBasePrice] ${code} 在 ${startDateStr} 至 ${endDateStr} 期间无K线数据`
           );
-        } else {
-          console.log(
-            `[getBasePrice] ${code} 成功获取基准价格: ${point.close} (日期: ${point.date})`
-          );
+          return { price: null, date: null };
         }
 
-        // 缓存结果
-        cacheService.set(cacheKey, result, cacheTTL);
+        const sortedKline = [...klineData].sort((a, b) =>
+          b.date.localeCompare(a.date)
+        );
 
-        return result;
+        for (const point of sortedKline) {
+          if (point.close && !isNaN(point.close)) {
+            const result = {
+              price: point.close,
+              date: point.date,
+            };
+
+            const actualDate = new Date(point.date);
+            const daysDiff = Math.floor(
+              (anchorDate.getTime() - actualDate.getTime()) /
+                (1000 * 60 * 60 * 24)
+            );
+
+            if (daysDiff > 0) {
+              console.log(
+                `[getBasePrice] ${code} 目标日期 ${endDateStr} 无数据，使用 ${point.date} 的价格 ${point.close}（回溯 ${daysDiff} 天）`
+              );
+            } else {
+              console.log(
+                `[getBasePrice] ${code} 成功获取基准价格: ${point.close} (日期: ${point.date})`
+              );
+            }
+            return result;
+          }
+        }
+
+        console.warn(
+          `[getBasePrice] ${code} 在 ${maxLookbackDays} 天回溯窗口内无有效收盘价`
+        );
+        return { price: null, date: null };
       }
-    }
-
-    console.warn(
-      `[getBasePrice] ${code} 在 ${maxLookbackDays} 天回溯窗口内无有效收盘价`
     );
-    return { price: null, date: null };
   } catch (error) {
     console.error(`[getBasePrice] ${code} 获取基准价格失败:`, error);
     return { price: null, date: null };
@@ -866,12 +951,16 @@ export async function getBasePrice(
  * 缓存24小时
  */
 export async function getYearBasePrice(
-  code: string
+  code: string,
+  today: Date = new Date()
 ): Promise<{ price: number | null; date: string | null }> {
-  const today = new Date();
-  const thisYear = today.getFullYear();
-  const anchorDate = new Date(thisYear, 0, 1); // 1月1日
-  const result = await getBasePrice(code, anchorDate, 60, 86400); // 60天回溯，24小时缓存
+  const lastDayOfPrevYear = getLastDayOfPreviousYear(today);
+  const result = await getBasePrice(
+    code,
+    lastDayOfPrevYear,
+    60,
+    PERIOD_CACHE_TTL.basePrice.year
+  ); // 60天回溯，24小时缓存
 
   if (result.price) {
     console.log(
@@ -889,12 +978,16 @@ export async function getYearBasePrice(
  * 缓存6小时
  */
 export async function getMonthBasePrice(
-  code: string
+  code: string,
+  today: Date = new Date()
 ): Promise<{ price: number | null; date: string | null }> {
-  const today = new Date();
-  const thisMonth = today.getMonth();
-  const anchorDate = new Date(today.getFullYear(), thisMonth, 1); // 本月1日
-  const result = await getBasePrice(code, anchorDate, 20, 21600); // 20天回溯，6小时缓存
+  const lastDayOfPrevMonth = getLastDayOfPreviousMonth(today);
+  const result = await getBasePrice(
+    code,
+    lastDayOfPrevMonth,
+    20,
+    PERIOD_CACHE_TTL.basePrice.month
+  ); // 20天回溯，6小时缓存
 
   if (result.price) {
     console.log(
@@ -915,20 +1008,18 @@ export async function getWeekBasePrice(
   code: string,
   today: Date = new Date()
 ): Promise<{ price: number | null; date: string | null }> {
-  const dayOfWeek = today.getDay(); // 0=周日, 1=周一, ..., 6=周六
-
-  // 将周日视为一周的最后一天，使得"上周五"始终指向完整自然周的最后交易日
-  const daysSinceMonday = (dayOfWeek + 6) % 7; // 周一=0，周日=6
-  const daysToLastFriday = daysSinceMonday + 3; // 回溯到上周五（含周末自动跨周）
-
-  const lastWeekFriday = new Date(today);
-  lastWeekFriday.setDate(today.getDate() - daysToLastFriday);
+  const lastWeekFriday = getLastWeekFridayDate(today);
 
   console.log(
     `[getWeekBasePrice] ${code} 目标日期: ${formatDate(lastWeekFriday)} (上周五)`
   );
 
-  const result = await getBasePrice(code, lastWeekFriday, 15, 3600); // 15天回溯，1小时缓存
+  const result = await getBasePrice(
+    code,
+    lastWeekFriday,
+    15,
+    PERIOD_CACHE_TTL.basePrice.week
+  ); // 15天回溯，1小时缓存
 
   if (result.price) {
     console.log(

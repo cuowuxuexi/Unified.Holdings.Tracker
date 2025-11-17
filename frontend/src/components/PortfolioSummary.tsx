@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Typography, Card, Button } from 'antd'; // 引入 Card 组件
+import { Typography, Card, Button, Tooltip, Skeleton } from 'antd'; // 引入 Card 组件
+import { ReloadOutlined } from '@ant-design/icons';
 import { PortfolioDetail, PortfolioStats, AttentionItem } from '../store/types'; // Adjust path if needed
-import { formatPercent } from '../shared/utils/formatters';
+import { formatPercent, formatDate as formatDateTime } from '../shared/utils/formatters';
 import LeverageCostCard from './LeverageCostCard';
 import useAppStore from '../store';
 import useMessageApi from '../hooks/useMessageApi';
@@ -14,6 +15,10 @@ const { Text } = Typography;
 interface PortfolioSummaryProps {
   portfolio: PortfolioDetail; // Keep basic info
   stats: PortfolioStats | null; // Add stats object
+  isLoading?: boolean;
+  isRefetching?: boolean;
+  onRefresh?: () => void;
+  lastUpdated?: number;
 }
 
 const normalizePeriodPercent = (
@@ -73,7 +78,24 @@ const cardBodyStyle: React.CSSProperties = {
   gap: '6px',
 };
 
-const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({ portfolio, stats }) => {
+const PortfolioSummarySkeleton: React.FC = () => (
+  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', alignItems: 'flex-start' }}>
+    {[0, 1, 2, 3].map((idx) => (
+      <Card key={idx} style={cardStyle} styles={{ body: cardBodyStyle }}>
+        <Skeleton active paragraph={{ rows: 4 }} />
+      </Card>
+    ))}
+  </div>
+);
+
+const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({
+  portfolio,
+  stats,
+  isLoading,
+  isRefetching,
+  onRefresh,
+  lastUpdated,
+}) => {
   const updateAttentionInfo = useAppStore((state) => state.updateAttentionInfo);
   const messageApi = useMessageApi();
   
@@ -82,6 +104,10 @@ const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({ portfolio, stats })
   const [modalVisible, setModalVisible] = useState(false);
   const [editingItem, setEditingItem] = useState<AttentionItem | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+
+  if (isLoading && !stats) {
+    return <PortfolioSummarySkeleton />;
+  }
 
   // 初始化注意信息列表
   useEffect(() => {
@@ -118,6 +144,82 @@ const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({ portfolio, stats })
         {formatPercent(Math.abs(percent))}
         {arrowText} 较昨日变化
       </div>
+    );
+  };
+
+  const getSourceLabel = (source?: string | null) => {
+    switch (source) {
+      case 'realtime':
+        return '实时行情';
+      case 'cost':
+        return '成本估值';
+      case 'kline':
+      default:
+        return 'K线数据';
+    }
+  };
+
+  /**
+   * 渲染周期收益，区分数据缺失/零涨幅/正常三种状态
+   */
+  const renderPeriodReturn = (
+    amount: number | null | undefined,
+    percent: number | null | undefined,
+    label: string,
+    meta?: PortfolioStats['weeklyStats']
+  ): React.ReactNode => {
+    if (percent === null || percent === undefined || Number.isNaN(percent)) {
+      return (
+        <Tooltip title={`${label}数据暂不可用，可能因为假期、停牌或新上市股票`}>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontWeight: 700, color: '#999', fontSize: '14px' }}>N/A</div>
+            <div style={{ fontSize: '11px', color: '#bbb' }}>数据缺失</div>
+          </div>
+        </Tooltip>
+      );
+    }
+
+    const safeAmount = amount ?? 0;
+
+    if (percent === 0 && safeAmount === 0) {
+      return (
+        <div style={{ textAlign: 'right' }}>
+          <div style={{ fontWeight: 700, color: '#888', fontSize: '14px' }}>0.00</div>
+          <div style={{ fontSize: '11px', color: '#888' }}>0.00%</div>
+        </div>
+      );
+    }
+
+    const color = safeAmount > 0 ? '#f5222d' : safeAmount < 0 ? '#52c41a' : '#888';
+    const prefix = safeAmount > 0 ? '+' : '';
+
+    const tooltipContent = meta ? (
+      <div>
+        <div>基准：{meta.baseDate ?? `${label}默认基准`}</div>
+        <div>估值来源：{getSourceLabel(meta.baseDateSource)}</div>
+        {meta.fallbackDays !== undefined && meta.fallbackDays > 0 ? (
+          <div>最大回溯 {meta.fallbackDays} 天</div>
+        ) : null}
+      </div>
+    ) : null;
+
+    const content = (
+      <div style={{ textAlign: 'right' }}>
+        <div style={{ fontWeight: 700, color, fontSize: '14px' }}>
+          {prefix}{formatNumber(safeAmount)}
+        </div>
+        <div style={{ fontSize: '11px', color }}>
+          {formatPercent(percent)}
+        </div>
+      </div>
+    );
+
+    return tooltipContent ? (
+      <Tooltip title={tooltipContent}>
+        {content}
+      </Tooltip>
+    ) : (
+      content
     );
   };
 
@@ -256,9 +358,28 @@ const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({ portfolio, stats })
   console.log('[PortfolioSummary] totalCommission值:', totalCommission);
   console.log('[PortfolioSummary] leverageCost值:', leverageCost);
 
+  const updatedAtValue = stats?.timestamp ?? lastUpdated;
+  const updatedAtDisplay =
+    typeof updatedAtValue === 'number'
+      ? formatDateTime(new Date(updatedAtValue).toISOString())
+      : '—';
+  const refreshDisabled = !onRefresh;
+  const refreshLoading = Boolean(isRefetching && stats);
 
   return (
     <>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div style={{ fontSize: 12, color: '#888' }}>数据更新时间：{updatedAtDisplay}</div>
+        <Button
+          size="small"
+          icon={<ReloadOutlined />}
+          onClick={onRefresh}
+          disabled={refreshDisabled}
+          loading={refreshLoading}
+        >
+          刷新
+        </Button>
+      </div>
       {/* 原有的卡片部分可以保留或根据需要调整 */}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', alignItems: 'flex-start' }}>
         {/* 现金信息卡片 */}
@@ -471,25 +592,11 @@ const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({ portfolio, stats })
             }}>周期收益</div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginTop: 4 }}>
               <Text type="secondary">周度收益:</Text>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontWeight: 700, color: weeklyReturnAmount !== null && weeklyReturnAmount !== undefined ? getColor(weeklyReturnAmount) : '#111' }}>
-                  {formatNumber(weeklyReturnAmount ?? undefined)}
-                </div>
-                <div style={{ fontSize: '11px', color: weeklyReturnPercent !== null && weeklyReturnPercent !== undefined ? getColor(weeklyReturnPercent) : '#888' }}>
-                  {formatPercent(weeklyReturnPercent ?? null)}
-                </div>
-              </div>
+              {renderPeriodReturn(weeklyReturnAmount, weeklyReturnPercent, '周度', stats?.weeklyStats)}
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginTop: 8 }}>
               <Text type="secondary">月度收益:</Text>
-              <div style={{ textAlign: 'right' }}>
-                <div style={{ fontWeight: 700, color: monthlyReturnAmount !== null && monthlyReturnAmount !== undefined ? getColor(monthlyReturnAmount) : '#111' }}>
-                  {formatNumber(monthlyReturnAmount ?? undefined)}
-                </div>
-                <div style={{ fontSize: '11px', color: monthlyReturnPercent !== null && monthlyReturnPercent !== undefined ? getColor(monthlyReturnPercent) : '#888' }}>
-                  {formatPercent(monthlyReturnPercent ?? null)}
-                </div>
-              </div>
+              {renderPeriodReturn(monthlyReturnAmount, monthlyReturnPercent, '月度', stats?.monthlyStats)}
             </div>
           </div>
         </Card>

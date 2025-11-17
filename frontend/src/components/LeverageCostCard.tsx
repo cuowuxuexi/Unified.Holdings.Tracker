@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Card, Select, Spin } from 'antd';
 import dayjs from 'dayjs';
-import apiClient from '../services/api';
+import { usePortfolioStats } from '../hooks/usePortfolioStats';
 
 const { Option } = Select;
 
@@ -26,35 +26,10 @@ const getRange = (type: 'year') => {
 };
 
 const LeverageCostCard: React.FC<LeverageCostCardProps> = ({ portfolioId }) => {
-  const [rangeType] = useState<'year'>('year');
-  const [leverageCost, setLeverageCost] = useState<number | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [range, setRange] = useState(getRange('year'));
-
-  useEffect(() => {
-    setRange(getRange(rangeType));
-  }, [rangeType]);
-
-  useEffect(() => {
-    if (!portfolioId || !range) {
-      // 如果没有 portfolioId 或 range，则不进行 API 调用
-      setLeverageCost(null); // 重置融资成本
-      setLoading(false); // 确保 loading 状态为 false
-      return;
-    }
-
-    setLoading(true);
-
-    apiClient.fetchPortfolioStats(portfolioId, undefined, range.start, range.end)
-      .then(data => {
-        setLeverageCost(typeof data.leverageCost === 'number' ? data.leverageCost : null);
-      })
-      .catch(error => {
-        console.error('Error fetching leverage cost:', error);
-        setLeverageCost(null); // 错误时也重置
-      })
-      .finally(() => setLoading(false));
-  }, [portfolioId, range]);
+  const { data: stats, isLoading } = usePortfolioStats(portfolioId);
+  const range = getRange('year');
+  const leverageCost =
+    typeof stats?.leverageCost === 'number' ? stats.leverageCost : null;
 
   return (
     <Card
@@ -115,7 +90,7 @@ const LeverageCostCard: React.FC<LeverageCostCardProps> = ({ portfolioId }) => {
         <span>融资成本</span> {/* 将文本放入 span */}
         <Select
           size="small"
-          value={rangeType}
+          value="year"
           style={{ width: 70 }} // 移除 marginLeft
           disabled={true}
         >
@@ -124,7 +99,7 @@ const LeverageCostCard: React.FC<LeverageCostCardProps> = ({ portfolioId }) => {
       </div>
       {/* 主数据与备注同一行 (与 PortfolioSummary 统一) */}
       <div style={{ display: 'flex', alignItems: 'baseline' /*, marginBottom: '2px'*/ }}>
-        {loading ? <Spin size="small"/> : ( // Spin size small for consistency
+        {isLoading ? <Spin size="small"/> : ( // Spin size small for consistency
           <span style={{ fontWeight: 700, fontSize: '18px', color: '#fa541c' }}> {/* 字体调小 */}
             {leverageCost !== null ? leverageCost.toFixed(2) : '--'}
           </span>

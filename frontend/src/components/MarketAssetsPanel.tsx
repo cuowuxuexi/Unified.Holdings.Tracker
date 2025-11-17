@@ -5,7 +5,7 @@ import TransactionList from './legacy/TransactionList';
 import PositionsTable from './legacy/PositionsTable';
 import { fetchExchangeRates } from '../services/api'; // Correctly import fetchExchangeRates
 import apiClient from '../services/api'; // 添加 apiClient 导入
-import { PositionWithStats } from '../store/types'; // Import PositionWithStats type
+import { PositionWithStats, PortfolioStats } from '../store/types'; // Import PositionWithStats type
 import useAppStore from '../store'; // 导入 store
 import useMessageApi from '../hooks/useMessageApi';
 import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
@@ -191,7 +191,8 @@ const MarketAssetsPanel: React.FC<{
   portfolioId: string;
   positions: PositionWithStats[]; // Use specific type from store/types
   transactions: any[];
-}> = ({ portfolioId, positions, transactions }) => {
+  stats?: PortfolioStats | null;
+}> = ({ portfolioId, positions, transactions, stats }) => {
   console.log('[MarketAssetsPanel] Received positions prop:', JSON.stringify(positions)); // Log received positions
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [rates, setRates] = useState<{ USD: number; HKD: number; CNY: number } | null>(null); // Use specific type or Record<string, number>
@@ -208,7 +209,6 @@ const MarketAssetsPanel: React.FC<{
   // 从 store 获取市场配置和组合统计数据
   const marketConfigs = useAppStore((state) => state.marketConfigs);
   const setMarketConfigs = useAppStore((state) => state.setMarketConfigs);
-  const currentPortfolioStats = useAppStore((state) => state.currentPortfolioStats);
 
   // 市场配置管理模态框状态
   const [isConfigModalVisible, setIsConfigModalVisible] = useState(false);
@@ -560,7 +560,7 @@ const MarketAssetsPanel: React.FC<{
           >
             <PositionsTable 
               positions={marketPositions} // Pass the filtered positions
-              totalMarketValue={currentPortfolioStats?.totalMarketValue} // 传递后端计算的总市值
+              totalMarketValue={stats?.totalMarketValue} // 传递后端计算的总市值
             />
           </Card>
         );

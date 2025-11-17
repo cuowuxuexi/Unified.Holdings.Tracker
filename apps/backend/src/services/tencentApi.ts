@@ -1,5 +1,6 @@
 import axios from 'axios';
 import iconv from 'iconv-lite';
+import pLimit from 'p-limit';
 // Import calculation service and types
 import {
   calculateIndexPeriodChanges,
@@ -23,6 +24,8 @@ const KLINE_CACHE_TTL = 15 * 60 * 1000; // 15分钟缓存
 // 行情数据缓存配置
 const QUOTE_CACHE_PREFIX = 'quote:';
 const QUOTE_CACHE_TTL = 30 * 1000; // 30秒缓存
+const BASE_PRICE_CONCURRENCY = 5;
+const basePriceLimiter = pLimit(BASE_PRICE_CONCURRENCY);
 
 /**
  * 解析腾讯 API 返回的单条行情数据字符串
@@ -311,14 +314,16 @@ export async function fetchQuotes(codes: string[]): Promise<Quote[]> {
       );
 
       // 并行获取所有资产的基准价格
-      const basePricePromises = quotesWithPrices.map(async (quote) => {
-        const [weekResult, monthResult, yearResult] = await Promise.all([
-          getWeekBasePrice(quote!.code),
-          getMonthBasePrice(quote!.code),
-          getYearBasePrice(quote!.code),
-        ]);
-        return { quote: quote!, weekResult, monthResult, yearResult };
-      });
+      const basePricePromises = quotesWithPrices.map((quote) =>
+        basePriceLimiter(async () => {
+          const [weekResult, monthResult, yearResult] = await Promise.all([
+            getWeekBasePrice(quote!.code),
+            getMonthBasePrice(quote!.code),
+            getYearBasePrice(quote!.code),
+          ]);
+          return { quote: quote!, weekResult, monthResult, yearResult };
+        })
+      );
 
       const basePriceResults = await Promise.all(basePricePromises);
 

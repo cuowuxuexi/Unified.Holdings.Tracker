@@ -7,6 +7,8 @@ import {
   calculateUnrealizedPnl,
   calculateTotalPnlV2,
   getWeekBasePrice,
+  getMonthBasePrice,
+  getYearBasePrice,
 } from '../calculationService';
 import { fetchKline } from '../tencentApi';
 import {
@@ -186,6 +188,93 @@ describe('Calculation Service', () => {
 
       const stats = await calculatePeriodStats(portfolio, 'weekly');
       expect(stats).toEqual({ periodReturnPercent: 0, periodPnl: 0 });
+    });
+
+    it('exposes metadata about pricing sources', async () => {
+      const buyDate = subDays(today, 6);
+      const transactions: Transaction[] = [
+        {
+          id: 't1',
+          date: formatISO(buyDate),
+          type: TransactionType.BUY,
+          assetCode: 'sh600519',
+          quantity: 10,
+          price: 100,
+          amount: 1000,
+        },
+      ];
+      const portfolio = createPortfolio(transactions, 0);
+
+      mockedFetchKline.mockResolvedValue(
+        createKline(['2024-04-05'], [120])
+      );
+
+      const stats = await calculatePeriodStats(portfolio, 'weekly');
+      expect(stats.baseDate).toBe('2024-04-05');
+      expect(stats.baseDateSource).toBe('kline');
+    });
+
+    it('includes trades executed on the anchor date when reconstructing start state', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2024-04-15T00:00:00.000Z'));
+      const transactions: Transaction[] = [
+        {
+          id: 'deposit-1',
+          date: '2024-04-10T00:00:00.000Z',
+          type: TransactionType.DEPOSIT,
+          amount: 2000,
+        },
+        {
+          id: 't1',
+          date: '2024-04-11T01:00:00.000Z',
+          type: TransactionType.BUY,
+          assetCode: 'sh600519',
+          quantity: 10,
+          price: 100,
+          amount: 1000,
+        },
+      ];
+      const portfolio = createPortfolio(transactions, 0);
+
+      mockedFetchKline.mockResolvedValue(
+        createKline(['2024-04-11', '2024-04-14'], [100, 110])
+      );
+
+      const stats = await calculatePeriodStats(portfolio, 'weekly');
+
+      expect(stats.periodReturnPercent).toBeCloseTo(0.05, 5);
+      expect(stats.periodPnl).toBeCloseTo(100, 5);
+      jest.useRealTimers();
+    });
+
+    it('anchors weekly stats to last week Friday when fetching kline data', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2024-04-15T00:00:00.000Z'));
+      const transactions: Transaction[] = [
+        {
+          id: 't1',
+          date: '2024-04-01T00:00:00.000Z',
+          type: TransactionType.BUY,
+          assetCode: 'sh600519',
+          quantity: 10,
+          price: 100,
+          amount: 1000,
+        },
+      ];
+      const portfolio = createPortfolio(transactions, 0);
+
+      mockedFetchKline.mockResolvedValue(
+        createKline(['2024-04-10', '2024-04-14'], [100, 110])
+      );
+
+      await calculatePeriodStats(portfolio, 'weekly');
+
+      expect(mockedFetchKline).toHaveBeenCalledWith(
+        'sh600519',
+        'daily',
+        '2024-04-10',
+        '2024-04-14',
+        'qfq'
+      );
+      jest.useRealTimers();
     });
 
     it('uses realtime quotes to value the end of period when provided', async () => {
@@ -787,6 +876,48 @@ describe('Calculation Service', () => {
         'daily',
         '2024-06-27',
         '2024-07-12',
+        'qfq'
+      );
+    });
+  });
+
+  describe('getMonthBasePrice', () => {
+    beforeEach(() => {
+      mockedFetchKline.mockReset();
+    });
+
+    it('uses last day of previous month as anchor date', async () => {
+      mockedFetchKline.mockResolvedValue([]);
+      await getMonthBasePrice(
+        'sh000001',
+        new Date('2024-07-10T00:00:00.000Z')
+      );
+      expect(mockedFetchKline).toHaveBeenCalledWith(
+        'sh000001',
+        'daily',
+        '2024-06-09',
+        '2024-06-29',
+        'qfq'
+      );
+    });
+  });
+
+  describe('getYearBasePrice', () => {
+    beforeEach(() => {
+      mockedFetchKline.mockReset();
+    });
+
+    it('uses last day of previous year as anchor date', async () => {
+      mockedFetchKline.mockResolvedValue([]);
+      await getYearBasePrice(
+        'sh000001',
+        new Date('2024-07-10T00:00:00.000Z')
+      );
+      expect(mockedFetchKline).toHaveBeenCalledWith(
+        'sh000001',
+        'daily',
+        '2023-10-31',
+        '2023-12-30',
         'qfq'
       );
     });

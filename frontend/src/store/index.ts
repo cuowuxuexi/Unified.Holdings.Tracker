@@ -1,6 +1,7 @@
 import { create } from 'zustand';
-import { AppState, Quote, TransactionInput, PortfolioInput, PortfolioStats, SelectedIndexItem, MarketConfig, IndexCategory } from './types';
+import { AppState, Quote, TransactionInput, PortfolioInput, SelectedIndexItem, MarketConfig, IndexCategory } from './types';
 import apiClient from '../services/api'; // Import the API client
+import { queryClient } from '../app/providers/QueryProvider';
 // import dayjs from 'dayjs'; // No longer needed here for calculations
 
 // 本地存储键名
@@ -180,7 +181,6 @@ const useAppStore = create<AppState>((set, get) => ({ // Added get to access sta
  isLoadingPortfolios: false,
  isLoadingPortfolioDetail: false,
  portfolioError: null,
- currentPortfolioStats: null, // Initialize stats state
 
  // --- Actions ---
  fetchMarketIndices: async () => {
@@ -325,10 +325,9 @@ const useAppStore = create<AppState>((set, get) => ({ // Added get to access sta
  },
 
  selectPortfolio: (id: string | null) => { // Added type for id
-   set({ selectedPortfolioId: id, selectedPortfolioDetail: null, portfolioError: null, currentPortfolioStats: null }); // Reset detail and stats
+   set({ selectedPortfolioId: id, selectedPortfolioDetail: null, portfolioError: null }); // Reset detail
    if (id) {
      get().fetchPortfolioDetail(id); // Use get()
-     get().fetchCurrentPortfolioStats(id); // Fetch stats when portfolio is selected
    }
  },
 
@@ -352,10 +351,10 @@ const useAppStore = create<AppState>((set, get) => ({ // Added get to access sta
    set({ portfolioError: null });
    try {
      await apiClient.addTransaction(portfolioId, data);
-     await Promise.all([
-       get().fetchPortfolioDetail(portfolioId),
-       get().fetchCurrentPortfolioStats(portfolioId),
-     ]);
+     await get().fetchPortfolioDetail(portfolioId);
+     queryClient.invalidateQueries({
+       queryKey: ['portfolio-stats', portfolioId],
+     });
    } catch (error) {
      console.error('Error adding transaction in store:', error);
      throw error;
@@ -366,10 +365,10 @@ const useAppStore = create<AppState>((set, get) => ({ // Added get to access sta
    set({ portfolioError: null });
    try {
      await apiClient.deleteTransaction(portfolioId, transactionId);
-     await Promise.all([
-       get().fetchPortfolioDetail(portfolioId),
-       get().fetchCurrentPortfolioStats(portfolioId),
-     ]);
+     await get().fetchPortfolioDetail(portfolioId);
+     queryClient.invalidateQueries({
+       queryKey: ['portfolio-stats', portfolioId],
+     });
    } catch (error) {
      console.error('Error deleting transaction in store:', error);
      throw error;
@@ -388,23 +387,15 @@ const useAppStore = create<AppState>((set, get) => ({ // Added get to access sta
    }
  },
 
- fetchCurrentPortfolioStats: async (portfolioId: string, period?: string, startDate?: string, endDate?: string) => {
-   set({ portfolioError: null }); // Clear previous portfolio-specific error
-   try {
-     const statsData: PortfolioStats = await apiClient.fetchPortfolioStats(portfolioId, period, startDate, endDate); // 添加startDate和endDate参数
-     set({ currentPortfolioStats: statsData });
-   } catch (error) {
-     console.error(`Error fetching portfolio stats for ${portfolioId} in store:`, error);
-     set({ portfolioError: 'Failed to fetch portfolio statistics', currentPortfolioStats: null });
-   }
- },
-
  deletePortfolio: async (portfolioId: string) => {
    set({ portfolioError: null, isLoadingPortfolios: true });
    try {
      await apiClient.deletePortfolio(portfolioId);
      await get().fetchPortfolios();
-     set({ selectedPortfolioId: null, selectedPortfolioDetail: null, currentPortfolioStats: null });
+     set({ selectedPortfolioId: null, selectedPortfolioDetail: null });
+     queryClient.removeQueries({
+       queryKey: ['portfolio-stats', portfolioId],
+     });
    } catch (error) {
      console.error('Error deleting portfolio in store:', error);
      set({ portfolioError: 'Failed to delete portfolio', isLoadingPortfolios: false });
