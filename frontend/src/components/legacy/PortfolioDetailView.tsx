@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react'; // Import useEffect and useState
-import { Spin, Alert, Typography, Empty, Card, Button, Modal, Input, Space } from 'antd'; // 添加 Space 组件
+import { Skeleton, Alert, Typography, Empty, Card, Button, Modal, Input, Space } from 'antd'; // 将 Spin 替换为 Skeleton
 import useAppStore from '../../store'; // Adjust path if needed
 import PortfolioSummary from '../PortfolioSummary';
 import { fetchExchangeRates } from '../../services/api'; // Correctly import fetchExchangeRates
@@ -93,18 +93,11 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }
     portfolioId &&
     (isStatsLoading || (!stats && !statsError && !portfolioError));
 
-  // Show loading spinner while fetching initial detail OR stats
+  // Show loading skeleton while fetching initial detail OR stats
   if (isLoadingPortfolioDetail || waitingForStats) {
     return (
-      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: detailPagePadding }}>
-        <MarketIndices />
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-          <Spin size="large" tip="加载详情和统计数据中...">
-            <div style={{ padding: '50px', background: 'rgba(0, 0, 0, 0.05)', borderRadius: '4px', minWidth: '200px', textAlign: 'center' }}>
-              <div>加载中...</div>
-            </div>
-          </Spin>
-        </div>
+      <div style={{ padding: 24 }}>
+        <Skeleton active paragraph={{ rows: 8 }} />
       </div>
     );
   }

@@ -10,6 +10,7 @@ const execAsync = promisify(exec);
 
 let mainWindow: BrowserWindow | null = null;
 const backendUrl = 'http://localhost:3001';
+const DATABASE_FILE_NAME = 'portfolio.db';
 
 // 端口检测函数
 async function checkPortInUse(port: number): Promise<boolean> {
@@ -200,6 +201,7 @@ if (!gotTheLock) {
   });
 
   app.whenReady().then(() => {
+    configureDatabaseEnv();
     createWindow();
 
     // 开发环境快捷键
@@ -242,3 +244,23 @@ process.on('uncaughtException', (error) => {
   // 根据情况决定是否退出应用
   // app.quit();
 });
+
+function configureDatabaseEnv() {
+  if (!app.isPackaged) {
+    return;
+  }
+
+  const userDataPath = app.getPath('userData');
+  process.env.ELECTRON_USER_DATA = userDataPath;
+
+  const currentDatabaseUrl = process.env.DATABASE_URL || '';
+  const shouldOverrideDatabase =
+    currentDatabaseUrl.length === 0 ||
+    currentDatabaseUrl.includes('apps/backend/prisma') ||
+    currentDatabaseUrl.startsWith('file:./');
+
+  if (shouldOverrideDatabase) {
+    const dbPath = path.join(userDataPath, DATABASE_FILE_NAME);
+    process.env.DATABASE_URL = `file:${dbPath}`;
+  }
+}

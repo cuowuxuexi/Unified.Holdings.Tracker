@@ -1,5 +1,5 @@
 import React from 'react';
-import { Card, Select, Spin } from 'antd';
+import { Card, Select, Skeleton } from 'antd';
 import dayjs from 'dayjs';
 import { usePortfolioStats } from '../hooks/usePortfolioStats';
 
@@ -99,7 +99,7 @@ const LeverageCostCard: React.FC<LeverageCostCardProps> = ({ portfolioId }) => {
       </div>
       {/* 主数据与备注同一行 (与 PortfolioSummary 统一) */}
       <div style={{ display: 'flex', alignItems: 'baseline' /*, marginBottom: '2px'*/ }}>
-        {isLoading ? <Spin size="small"/> : ( // Spin size small for consistency
+        {isLoading ? <Skeleton.Input active size="small" style={{ width: 80, height: 18 }} /> : (
           <span style={{ fontWeight: 700, fontSize: '18px', color: '#fa541c' }}> {/* 字体调小 */}
             {leverageCost !== null ? leverageCost.toFixed(2) : '--'}
           </span>
