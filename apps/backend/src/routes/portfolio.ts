@@ -653,11 +653,12 @@ router.get(
     );
 
     // Step 5: 计算周期统计
-    const periodStats = await calculatePeriodStats(portfolio, period);
+    const statsOptions = { quotes: quotesMap };
+    const periodStats = await calculatePeriodStats(portfolio, period, statsOptions);
     const [weeklyStats, monthlyStats, yearlyStats] = await Promise.all([
-      calculatePeriodStats(portfolio, 'weekly'),
-      calculatePeriodStats(portfolio, 'monthly'),
-      calculatePeriodStats(portfolio, 'yearly'),
+      calculatePeriodStats(portfolio, 'weekly', statsOptions),
+      calculatePeriodStats(portfolio, 'monthly', statsOptions),
+      calculatePeriodStats(portfolio, 'yearly', statsOptions),
     ]);
 
     // Step 6: 整合结果

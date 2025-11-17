@@ -6,7 +6,7 @@ import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, us
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, horizontalListSortingStrategy, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { SelectedIndexItem, IndexCategory } from '../store/types';
-import { formatPercent } from './utils/format';
+import { formatPercent } from '../shared/utils/formatters';
 import useMessageApi from '../hooks/useMessageApi';
 
 const { Title, Text } = Typography;

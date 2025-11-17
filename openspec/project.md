@@ -177,7 +177,7 @@ packages/           # 共享包（domain, application, infra - 预留）
 
 3. **Prisma**: 数据库 ORM
    - Schema 定义在 `apps/backend/prisma/schema.prisma`
-   - 数据库文件: `apps/backend/data/portfolio.db`
+   - 数据库文件: `apps/backend/prisma/data/portfolio.db`
 
 4. **OpenAPI 规范**: 
    - 后端生成 OpenAPI 文档 (`/api/openapi.json`)
@@ -199,7 +199,7 @@ packages/           # 共享包（domain, application, infra - 预留）
 - **环境变量模板**: 根目录 `.env.example`、前端 `frontend/.env.example`，需复制为 `.env` / `frontend/.env`。
 - **关键变量**:
   - `PORT`、`API_BASE_PATH`、`FRONTEND_URL`
-  - `DATABASE_URL`（默认 `file:./apps/backend/data/portfolio.db`）
+  - `DATABASE_URL`（默认 `file:./apps/backend/prisma/data/portfolio.db`）
   - `VITE_API_BASE_URL`（前端访问后端的基础路径）
 - **Windows 优化**: `setup.iss`、`electron/launcher/` 提供安装器与本地服务启动脚本，保证桌面端一键部署体验。
 

@@ -2,8 +2,183 @@ import React from 'react';
 import { Table, Tag, Tooltip } from 'antd';
 import type { TableProps } from 'antd';
 import { PositionWithStats } from '../../store/types'; // Import the updated type
-import { formatPercent } from '../../shared/utils/formatters';
 import '../PositionsTable.css'; // 引入CSS样式文件
+
+const MARKET_TO_CURRENCY: Record<string, string> = {
+  HK: 'HKD',
+  US: 'USD',
+  CN: 'CNY',
+};
+
+const inferCurrencyCode = (record: PositionWithStats): string => {
+  if (record.currency) {
+    return record.currency.toUpperCase();
+  }
+  const market = record.asset?.market;
+  if (!market) return 'CNY';
+  return MARKET_TO_CURRENCY[market] || 'CNY';
+};
+
+const shouldUseLocalCurrency = (record: PositionWithStats) =>
+  inferCurrencyCode(record) !== 'CNY';
+
+const toNumber = (value: any): number | undefined =>
+  typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+
+const getQuantity = (record: PositionWithStats): number =>
+  Number.isFinite(record.quantity) ? record.quantity : 0;
+
+const getLocalCostPrice = (record: PositionWithStats): number | undefined => {
+  const data = record as any;
+  const costPriceLocal = toNumber(data.costPriceLocal);
+  if (costPriceLocal !== undefined) {
+    return costPriceLocal;
+  }
+  const totalCostLocal = toNumber(data.totalCostLocal);
+  const quantity = getQuantity(record);
+  if (totalCostLocal !== undefined && quantity > 0) {
+    return totalCostLocal / quantity;
+  }
+  return undefined;
+};
+
+const getLocalMarketValue = (
+  record: PositionWithStats
+): number | undefined => {
+  const data = record as any;
+  const marketValueLocal = toNumber(data.marketValueLocal);
+  if (marketValueLocal !== undefined) {
+    return marketValueLocal;
+  }
+  if (typeof record.currentPrice === 'number') {
+    return record.currentPrice * getQuantity(record);
+  }
+  return undefined;
+};
+
+const getLocalTotalCost = (
+  record: PositionWithStats
+): number | undefined => {
+  const data = record as any;
+  const totalCostLocal = toNumber(data.totalCostLocal);
+  if (totalCostLocal !== undefined) {
+    return totalCostLocal;
+  }
+  const costPriceLocal = getLocalCostPrice(record);
+  if (costPriceLocal !== undefined) {
+    return costPriceLocal * getQuantity(record);
+  }
+  return undefined;
+};
+
+const getLocalTotalPnl = (record: PositionWithStats): number | undefined => {
+  const data = record as any;
+  const totalPnlLocal = toNumber(data.totalPnlLocal);
+  if (totalPnlLocal !== undefined) {
+    return totalPnlLocal;
+  }
+  const marketValueLocal = getLocalMarketValue(record);
+  const totalCostLocal = getLocalTotalCost(record);
+  if (
+    marketValueLocal !== undefined &&
+    totalCostLocal !== undefined
+  ) {
+    return marketValueLocal - totalCostLocal;
+  }
+  return undefined;
+};
+
+const getLocalDailyChange = (
+  record: PositionWithStats
+): number | undefined => {
+  const data = record as any;
+  return toNumber(data.dailyChangeLocal);
+};
+
+const getDisplayCostPrice = (
+  record: PositionWithStats
+): number | undefined => {
+  if (shouldUseLocalCurrency(record)) {
+    const local = getLocalCostPrice(record);
+    if (local !== undefined) {
+      return local;
+    }
+  }
+  return record.costPrice;
+};
+
+const getDisplayMarketValue = (
+  record: PositionWithStats
+): number | undefined => {
+  if (shouldUseLocalCurrency(record)) {
+    const local = getLocalMarketValue(record);
+    if (local !== undefined) {
+      return local;
+    }
+  }
+  return record.marketValue;
+};
+
+const getDisplayDailyChange = (
+  record: PositionWithStats
+): number | undefined => {
+  if (shouldUseLocalCurrency(record)) {
+    const local = getLocalDailyChange(record);
+    if (local !== undefined) {
+      return local;
+    }
+  }
+  return record.dailyChange;
+};
+
+const getDisplayTotalPnl = (
+  record: PositionWithStats
+): number | undefined => {
+  if (shouldUseLocalCurrency(record)) {
+    const local = getLocalTotalPnl(record);
+    if (local !== undefined) {
+      return local;
+    }
+  }
+  const data = record as any;
+  const pnlCny = toNumber(data.pnlCNY);
+  if (record.totalPnl !== undefined) {
+    return record.totalPnl;
+  }
+  return pnlCny;
+};
+
+const getCostBaseForPercent = (
+  record: PositionWithStats
+): number | undefined => {
+  if (shouldUseLocalCurrency(record)) {
+    const localCost = getLocalTotalCost(record);
+    if (localCost !== undefined && localCost !== 0) {
+      return localCost;
+    }
+  }
+  const data = record as any;
+  const totalCost = toNumber(data.totalCost);
+  if (totalCost !== undefined && totalCost !== 0) {
+    return totalCost;
+  }
+  const quantity = getQuantity(record);
+  if (quantity > 0 && typeof record.costPrice === 'number') {
+    return record.costPrice * quantity;
+  }
+  return undefined;
+};
+
+const getDisplayPnlPercent = (
+  record: PositionWithStats
+): number => {
+  const pnl = getDisplayTotalPnl(record);
+  const base = getCostBaseForPercent(record);
+  if (pnl !== undefined && base) {
+    return base !== 0 ? pnl / base : 0;
+  }
+  return record.totalPnlPercent ?? 0;
+};
 
 interface PositionsTableProps {
   positions: PositionWithStats[]; // Use the type with stats
@@ -17,8 +192,9 @@ const PositionsTable: React.FC<PositionsTableProps> = React.memo(
       (value: number | undefined | null, isPercent = false) => {
         if (value === undefined || value === null) return '-'; // Match TransactionList 'N/A' style
         const color = value > 0 ? 'red' : value < 0 ? 'green' : 'default'; // Use Antd Tag colors
+        // 修复：后端返回小数形式（0-1范围），需要乘以100转换为百分比
         const formattedValue = isPercent
-          ? `${value.toFixed(2)}%`
+          ? `${(value * 100).toFixed(2)}%`
           : value.toFixed(2);
         return (
           <Tag color={color} className="pnl-tag">
@@ -174,7 +350,8 @@ const PositionsTable: React.FC<PositionsTableProps> = React.memo(
           dataIndex: 'costPrice',
           key: 'costPrice',
           // align: 'right', // Removed for global center alignment in CSS
-          render: (price) => formatNumber(price), // Keep format function
+          render: (_price: number, record: PositionWithStats) =>
+            formatNumber(getDisplayCostPrice(record)), // 使用本币成本价
           width: 100,
           // className: 'number-cell', // Optional
         },
@@ -192,7 +369,8 @@ const PositionsTable: React.FC<PositionsTableProps> = React.memo(
           dataIndex: 'marketValue',
           key: 'marketValue',
           // align: 'right', // Removed for global center alignment in CSS
-          render: (value) => formatNumber(value), // Keep format function
+          render: (_value: number, record: PositionWithStats) =>
+            formatNumber(getDisplayMarketValue(record)), // 优先展示本币市值
           width: 120,
           // className: 'number-cell', // Optional
         },
@@ -217,7 +395,8 @@ const PositionsTable: React.FC<PositionsTableProps> = React.memo(
           dataIndex: 'dailyChange',
           key: 'dailyChange',
           // align: 'right', // Removed for global center alignment in CSS
-          render: (value) => renderPnl(value),
+          render: (_value: number, record: PositionWithStats) =>
+            renderPnl(getDisplayDailyChange(record)),
           width: 120,
           // className: 'number-cell pnl-cell', // Optional
         },
@@ -235,7 +414,8 @@ const PositionsTable: React.FC<PositionsTableProps> = React.memo(
           dataIndex: 'totalPnl',
           key: 'totalPnl',
           // align: 'right', // Removed for global center alignment in CSS
-          render: (value) => renderPnl(value),
+          render: (_value: number, record: PositionWithStats) =>
+            renderPnl(getDisplayTotalPnl(record)),
           width: 120,
           // className: 'number-cell pnl-cell', // Optional
         },
@@ -244,7 +424,8 @@ const PositionsTable: React.FC<PositionsTableProps> = React.memo(
           dataIndex: 'totalPnlPercent',
           key: 'totalPnlPercent',
           // align: 'right', // Removed for global center alignment in CSS
-          render: (value) => renderPnl(value, true),
+          render: (_value: number, record: PositionWithStats) =>
+            renderPnl(getDisplayPnlPercent(record), true),
           width: 120,
           // className: 'number-cell pnl-cell', // Optional
         },

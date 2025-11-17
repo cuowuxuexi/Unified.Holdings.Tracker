@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { Input, Button, List, Space } from 'antd'; // Import necessary Antd components
 import useAppStore from '../store'; // Correct: default import
 import { Quote } from '../store/types'; // Correct: use Quote type
-import { formatPercent } from './utils/format';
+import { formatPercent } from '../shared/utils/formatters';
 
 const StockQuote: React.FC = () => {
   const [codesInput, setCodesInput] = useState('');

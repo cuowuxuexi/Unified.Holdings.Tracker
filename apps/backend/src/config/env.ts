@@ -42,7 +42,7 @@ const envSchema = z.object({
       return value.startsWith('/') ? value : `/${value}`;
     })
     .default('/api'),
-  DATABASE_URL: z.string().default('file:./data/portfolio.db'),
+  DATABASE_URL: z.string().default('file:./prisma/data/portfolio.db'),
 });
 
 const parsed = envSchema.parse(process.env);

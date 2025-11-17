@@ -168,7 +168,7 @@ describe('Calculation Service', () => {
       expect(mockedFetchKline).not.toHaveBeenCalled();
     });
 
-    it('returns null stats when K-line data is missing', async () => {
+    it('falls back to cost basis when K-line data is missing', async () => {
       const transactions: Transaction[] = [
         {
           id: 't1',
@@ -185,7 +185,65 @@ describe('Calculation Service', () => {
       mockedFetchKline.mockResolvedValue([]);
 
       const stats = await calculatePeriodStats(portfolio, 'weekly');
-      expect(stats).toEqual({ periodReturnPercent: null, periodPnl: null });
+      expect(stats).toEqual({ periodReturnPercent: 0, periodPnl: 0 });
+    });
+
+    it('uses realtime quotes to value the end of period when provided', async () => {
+      const buyDate = subDays(today, 5);
+      const transactions: Transaction[] = [
+        {
+          id: 't1',
+          date: formatISO(buyDate),
+          type: TransactionType.BUY,
+          assetCode: 'sh600519',
+          quantity: 10,
+          price: 100,
+          amount: 1000,
+        },
+      ];
+      const portfolio = createPortfolio(transactions, 0);
+
+      mockedFetchKline.mockResolvedValue(
+        createKline(['2024-04-07', '2024-04-14'], [100, 100])
+      );
+
+      const quotes: Record<string, Quote> = {
+        sh600519: {
+          code: 'sh600519',
+          name: '贵州茅台',
+          currentPrice: 120,
+          changeAmount: 0,
+          changePercent: 0,
+          timestamp: Date.now(),
+        },
+      };
+
+      const stats = await calculatePeriodStats(portfolio, 'weekly', {
+        quotes,
+      });
+
+      expect(stats.periodPnl).toBeGreaterThan(0);
+      expect(stats.periodReturnPercent).toBeGreaterThan(0);
+    });
+
+    it('uses calendar week starting on Monday for weekly stats', async () => {
+      jest
+        .useFakeTimers()
+        .setSystemTime(new Date('2024-04-15T00:00:00.000Z')); // Monday
+      const transactions: Transaction[] = [
+        {
+          id: 'deposit-last-week',
+          date: '2024-04-10T00:00:00.000Z', // Wednesday of previous week
+          type: TransactionType.DEPOSIT,
+          amount: 100000,
+        },
+      ];
+      const portfolio = createPortfolio(transactions, 0);
+
+      const stats = await calculatePeriodStats(portfolio, 'weekly');
+
+      expect(stats).toEqual({ periodReturnPercent: 0, periodPnl: 0 });
+      expect(mockedFetchKline).not.toHaveBeenCalled();
     });
 
     it('正确处理跨币种持仓的周期估值', async () => {

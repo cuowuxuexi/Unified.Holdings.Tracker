@@ -27,6 +27,8 @@
     "prisma:deploy": "prisma migrate deploy --schema prisma/schema.prisma",
     "db:push": "prisma db push --schema prisma/schema.prisma",
     "migrate:json": "ts-node --project tsconfig.scripts.json --transpile-only scripts/migrate-json-to-sqlite.ts",
+    "diagnose:data": "ts-node --project tsconfig.scripts.json --transpile-only src/scripts/diagnoseData.ts",
+    "verify:exchange-rate": "ts-node --project tsconfig.scripts.json --transpile-only src/scripts/verifyExchangeRate.ts",
     "start": "node dist/server.js"
   },
   "keywords": [],

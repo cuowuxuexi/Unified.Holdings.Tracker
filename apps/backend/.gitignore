@@ -1,0 +1,5 @@
+*.db
+*.db-*
+*.db.backup*
+prisma/data/*.db*
+prisma/data/backup/*.db*

@@ -63,18 +63,50 @@ export interface Transaction {
 // Type for creating new transactions (omits id, portfolioId)
 export type TransactionInput = Omit<Transaction, 'id' | 'portfolioId'>;
 
+/**
+ * 持仓信息
+ *
+ * **重要说明**：后端返回的持仓数据中，所有金额字段（costPrice, marketValue等）
+ * 默认均为**人民币(CNY)**计价，已经经过汇率转换。前端不应再次应用汇率转换。
+ */
 export interface Position {
   asset: {
     code: string;
     name: string;
     market?: string;
   };
+  /** 持仓数量（股数/份数） */
   quantity: number;
+
+  /**
+   * 持仓成本价（单位：CNY/人民币）
+   * - 后端已完成汇率转换，前端无需再次转换
+   */
   costPrice: number;
-  // Optional fields that might be calculated backend or added later
+
+  /**
+   * 当前价格（单位：原币种）
+   * - 来自行情API的原始价格
+   * - 港股：HKD，美股：USD，A股：CNY
+   */
   currentPrice?: number;
+
+  /**
+   * 当前市值（单位：CNY/人民币）
+   * - 后端已完成汇率转换，前端无需再次转换
+   */
   marketValue?: number;
+
+  /**
+   * 累计盈亏额（单位：CNY/人民币）
+   */
   profitLoss?: number;
+
+  /**
+   * 累计盈亏百分比（小数形式，0-1 范围）
+   * - 例如：1.5 表示 150%，-0.2 表示 -20%
+   * - 前端显示时需要乘以 100
+   */
   profitLossPercent?: number;
 }
 
@@ -109,16 +141,73 @@ export interface Portfolio {
   attentionInfo?: string;
 }
 
-// Interface for positions with calculated stats from the /stats endpoint
+/**
+ * 持仓信息（含统计数据）
+ *
+ * **重要说明**：后端返回的所有金额字段（marketValue, dailyChange, totalPnl等）
+ * 均为**人民币(CNY)**计价，已完成汇率转换。前端组件**不应再次**应用汇率转换。
+ *
+ * @see Position 基础持仓接口
+ */
 export interface PositionWithStats extends Position {
-  currentPrice: number; // Ensure this is always present in stats
+  /**
+   * 当前价格（单位：原币种）
+   * - 来自行情API的原始价格
+   * - 港股：HKD，美股：USD，A股：CNY
+   */
+  currentPrice: number;
+
+  /**
+   * 当前市值（单位：CNY/人民币）
+   * - 后端已完成汇率转换，前端无需再次转换
+   */
   marketValue: number;
-  dailyChange?: number; // Pnl amount for the day
-  dailyChangePercent?: number; // Pnl percentage for the day
-  totalPnl?: number; // Total profit/loss amount
-  totalPnlPercent?: number; // Total profit/loss percentage
+
+  /**
+   * 当日盈亏额（单位：CNY/人民币）
+   * - 后端已完成汇率转换
+   */
+  dailyChange?: number;
+
+  /**
+   * 当日盈亏百分比（小数形式，0-1 范围）
+   * - 例如：0.05 表示 5%，-0.03 表示 -3%
+   * - 前端显示时需要乘以 100
+   */
+  dailyChangePercent?: number;
+
+  /**
+   * 累计盈亏额（单位：CNY/人民币）
+   * - 后端已完成汇率转换
+   */
+  totalPnl?: number;
+
+  /**
+   * 累计盈亏百分比（小数形式，0-1 范围）
+   * - 例如：1.5 表示 150%，-0.2 表示 -20%
+   * - 前端显示时需要乘以 100
+   */
+  totalPnlPercent?: number;
+
+  /**
+   * 周涨跌幅（百分比数值形式）
+   * - 例如：18.18 表示 18.18%，-5.5 表示 -5.5%
+   * - 前端显示时无需乘以 100
+   */
   weeklyChangePercent?: number;
+
+  /**
+   * 月涨跌幅（百分比数值形式）
+   * - 例如：25.0 表示 25%，-10.0 表示 -10%
+   * - 前端显示时无需乘以 100
+   */
   monthlyChangePercent?: number;
+
+  /**
+   * 年涨跌幅（百分比数值形式）
+   * - 例如：120.0 表示 120%，-35.0 表示 -35%
+   * - 前端显示时无需乘以 100
+   */
   yearlyChangePercent?: number;
 }
 

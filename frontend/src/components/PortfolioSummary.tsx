@@ -1,22 +1,36 @@
-import React, { useState, useCallback, useEffect } from 'react';
-import { Typography, Card, Input, Button } from 'antd'; // 引入 Card 组件和 Input 组件
+import React, { useState, useEffect } from 'react';
+import { Typography, Card, Button } from 'antd'; // 引入 Card 组件
 import { PortfolioDetail, PortfolioStats, AttentionItem } from '../store/types'; // Adjust path if needed
-import { formatPercent } from './utils/format';
+import { formatPercent } from '../shared/utils/formatters';
 import LeverageCostCard from './LeverageCostCard';
 import useAppStore from '../store';
 import useMessageApi from '../hooks/useMessageApi';
-import { debounce } from 'lodash';
 import { AttentionCard } from './AttentionCard';
 import { AttentionFormModal } from './AttentionFormModal';
 import { parseAttentionInfo, serializeAttentionInfo, generateId } from '../utils/attentionParser';
 
 const { Text } = Typography;
-const { TextArea } = Input;
 
 interface PortfolioSummaryProps {
   portfolio: PortfolioDetail; // Keep basic info
   stats: PortfolioStats | null; // Add stats object
 }
+
+const normalizePeriodPercent = (
+  value: number | null | undefined
+): number | null => {
+  if (value === null || value === undefined || Number.isNaN(value)) {
+    return null;
+  }
+  if (Math.abs(value) > 1) {
+    console.warn(
+      '[PortfolioSummary] periodReturnPercent 超出预期范围（-1~1），自动按百分比值转为小数：',
+      value
+    );
+    return value / 100;
+  }
+  return value;
+};
 
 // 核心指标卡片样式
 const coreCardStyle: React.CSSProperties = {
@@ -84,6 +98,27 @@ const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({ portfolio, stats })
   const formatNumberNoSymbol = (value: number | undefined | null, decimals = 2) => {
     if (value === undefined || value === null) return 'N/A';
     return value.toFixed(decimals);
+  };
+
+  const renderDailyChangeIndicator = (
+    percent: number | null | undefined
+  ): React.ReactNode => {
+    if (percent === null || percent === undefined || Number.isNaN(percent)) {
+      return (
+        <div style={{ fontSize: '14px', color: '#999' }}>暂无较昨日数据</div>
+      );
+    }
+    const isZero = percent === 0;
+    const isPositive = percent > 0;
+    const color = isZero ? '#999' : isPositive ? '#f5222d' : '#52c41a';
+    const arrow = isZero ? '' : isPositive ? '↑' : '↓';
+    const arrowText = arrow ? ` ${arrow}` : '';
+    return (
+      <div style={{ fontSize: '14px', color }}>
+        {formatPercent(Math.abs(percent))}
+        {arrowText} 较昨日变化
+      </div>
+    );
   };
 
   // 添加注意事项
@@ -180,12 +215,24 @@ const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({ portfolio, stats })
   const dailyPnlValue = stats?.dailyPnl || 0;
   const totalPnl = stats ? (stats.totalPnl !== undefined ? stats.totalPnl.toFixed(2) : 'N/A') : '加载中...';
   const totalPnlValue = stats?.totalPnl || 0;
-  const periodReturn = stats && stats.periodReturnPercent !== undefined ? formatPercent(stats.periodReturnPercent, 2) : 'N/A';
-  const periodReturnValue = stats?.periodReturnPercent || 0;
+  const totalMarketChangePercent =
+    stats && typeof stats.totalMarketValue === 'number' && stats.totalMarketValue !== 0
+      ? (stats.dailyPnl ?? 0) / stats.totalMarketValue
+      : null;
+  const totalPnlChangePercent =
+    stats && typeof stats.totalPnl === 'number'
+      ? stats.totalPnl !== 0
+        ? (stats.dailyPnl ?? 0) / Math.abs(stats.totalPnl)
+        : 0
+      : null;
 
-  const weeklyReturnPercent = stats?.weeklyStats?.periodReturnPercent ?? null;
+  const weeklyReturnPercent = normalizePeriodPercent(
+    stats?.weeklyStats?.periodReturnPercent
+  );
   const weeklyReturnAmount = stats?.weeklyStats?.periodPnl ?? null;
-  const monthlyReturnPercent = stats?.monthlyStats?.periodReturnPercent ?? null;
+  const monthlyReturnPercent = normalizePeriodPercent(
+    stats?.monthlyStats?.periodReturnPercent
+  );
   const monthlyReturnAmount = stats?.monthlyStats?.periodPnl ?? null;
 
   // Helper to get color based on value
@@ -297,7 +344,7 @@ const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({ portfolio, stats })
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
               <Text type="secondary">杠杆比例:</Text>
-              <Text strong>{formatPercent(leveragePercent * 100, 2)}</Text>
+              <Text strong>{formatPercent(leveragePercent, 2)}</Text>
             </div>
           </div>
         </Card>
@@ -584,13 +631,15 @@ const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({ portfolio, stats })
           {/* 总市值(CNY) */}
           <div style={{ flex: '1', minWidth: '250px' }}>
             <div style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px' }}>总市值(CNY)</div>
-            <div style={{ fontSize: '24px', fontWeight: 700, marginBottom: '8px' }}>¥{formatNumberNoSymbol(stats?.totalMarketValue)}</div>
+            <div style={{ fontSize: '24px', fontWeight: 700, marginBottom: '4px' }}>¥{formatNumberNoSymbol(stats?.totalMarketValue)}</div>
+            {renderDailyChangeIndicator(totalMarketChangePercent)}
           </div>
 
           {/* 总盈亏(CNY) */}
           <div style={{ flex: '1', minWidth: '250px' }}>
             <div style={{ fontSize: '16px', fontWeight: 600, marginBottom: '8px' }}>累计盈亏(CNY)</div>
-            <div style={{ fontSize: '24px', fontWeight: 700, marginBottom: '8px' }}>¥{formatNumberNoSymbol(stats?.totalPnl)}</div>
+            <div style={{ fontSize: '24px', fontWeight: 700, marginBottom: '4px' }}>¥{formatNumberNoSymbol(stats?.totalPnl)}</div>
+            {renderDailyChangeIndicator(totalPnlChangePercent)}
           </div>
 
           {/* 当前股息收入(CNY) */}
@@ -611,7 +660,7 @@ const PortfolioSummary: React.FC<PortfolioSummaryProps> = ({ portfolio, stats })
               已用杠杆: <span style={{ fontWeight: 700 }}>{formatNumber(usedCredit)}</span>
             </div>
             <div style={{ fontSize: '15px' }}>
-              杠杆比例: <span style={{ fontWeight: 700 }}>{formatPercent(leveragePercent * 100, 2)}</span>
+              杠杆比例: <span style={{ fontWeight: 700 }}>{formatPercent(leveragePercent, 2)}</span>
             </div>
           </div>
         </div>

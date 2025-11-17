@@ -62,7 +62,8 @@ function parseQuoteLine(line: string): Quote | null {
         quote.highPrice = parseFloat(dataParts[33]);
         quote.lowPrice = parseFloat(dataParts[34]);
         quote.changeAmount = parseFloat(dataParts[31]);
-        quote.changePercent = parseFloat(dataParts[32]);
+        // 腾讯API返回的是百分比形式（如2.5表示2.5%），需转换为小数形式
+        quote.changePercent = parseFloat(dataParts[32]) / 100;
         quote.turnover = parseFloat(dataParts[37]); // 单位：万元
         quote.peRatio = parseFloat(dataParts[39]) || undefined; // 市盈率(动)
         quote.marketCap = parseFloat(dataParts[45]) || undefined; // 总市值 (亿)
@@ -106,7 +107,8 @@ function parseQuoteLine(line: string): Quote | null {
         quote.volume = parseFloat(dataParts[6]); // Corrected index: 6 (成交量 - 股)
         quote.turnover = parseFloat(dataParts[11]); // 确认索引: 11 (港元)
         quote.changeAmount = parseFloat(dataParts[31]); // 确认索引: 31
-        quote.changePercent = parseFloat(dataParts[32]); // 确认索引: 32
+        // 腾讯API返回的是百分比形式（如2.5表示2.5%），需转换为小数形式
+        quote.changePercent = parseFloat(dataParts[32]) / 100; // 确认索引: 32
         quote.peRatio = parseFloat(dataParts[38]) || undefined; // 确认索引: 38
         quote.marketCap = parseFloat(dataParts[44]) || undefined; // 确认索引: 44 (亿港元?)
 
@@ -154,7 +156,8 @@ function parseQuoteLine(line: string): Quote | null {
         quote.highPrice = parseFloat(dataParts[33]); // "212.94"
         quote.lowPrice = parseFloat(dataParts[34]); // "201.16"
         quote.changeAmount = parseFloat(dataParts[31]); // "4.37"
-        quote.changePercent = parseFloat(dataParts[32]); // "2.21"
+        // 腾讯API返回的是百分比形式（如2.21表示2.21%），需转换为小数形式
+        quote.changePercent = parseFloat(dataParts[32]) / 100; // "2.21" -> 0.0221
         quote.turnover = parseFloat(dataParts[37]); // "20819141533" (单位: 美元?) - 需要确认
         quote.peRatio = parseFloat(dataParts[39]) || undefined; // "32.15"
         quote.marketCap = parseFloat(dataParts[45]) || undefined; // "30405.56540" (单位: 亿?) - 需要确认

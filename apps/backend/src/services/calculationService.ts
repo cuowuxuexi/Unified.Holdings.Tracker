@@ -11,6 +11,9 @@ import { cacheService } from '@uht/infra/cache/cache-service'; // 缓存服务
 import {
   getUnixTime,
   startOfDay,
+  startOfWeek,
+  startOfMonth,
+  startOfYear,
   subDays,
   subWeeks,
   subMonths,
@@ -88,9 +91,10 @@ export function calculateRealtimePnl(
       }
 
       // 计算盈亏百分比（注意：当 totalCost 为负时，结果在数学上仍然有效，但可能需要特殊解读）
+      // 返回小数形式（0-1范围），前端 formatPercent() 会乘以100显示
       updatedPosition.totalPnlPercent =
         position.totalCost !== 0
-          ? (updatedPosition.totalPnl / position.totalCost) * 100
+          ? updatedPosition.totalPnl / position.totalCost
           : 0;
 
       // Calculate daily PnL based on changeAmount if available
@@ -124,9 +128,77 @@ export function calculateRealtimePnl(
       updatedPosition.dailyChangeLocal = undefined;
       updatedPosition.dailyChangePercent = undefined;
     }
+
+    // 验证持仓数据
+    const validation = validatePositionData(updatedPosition);
+    if (!validation.isValid) {
+      validation.warnings.forEach(warning => {
+        console.warn(`[数据验证警告] ${warning}`);
+      });
+    }
+
     return updatedPosition;
   });
 }
+
+/**
+ * 验证持仓数据，检测异常值
+ * @param position - 持仓数据
+ * @returns 验证结果和警告信息
+ */
+export function validatePositionData(position: Position): {
+  isValid: boolean;
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+
+  // 检查1: 总盈亏% 异常（绝对值超过1000%，即10倍）
+  if (position.totalPnlPercent !== undefined && position.totalPnlPercent !== null) {
+    const percentValue = Math.abs(position.totalPnlPercent);
+    if (percentValue > 10) {
+      warnings.push(
+        `${position.asset.code}: 总盈亏%异常 (${(position.totalPnlPercent * 100).toFixed(2)}%)，` +
+        `可能是成本价过小或数据错误。成本价=${position.costPrice?.toFixed(4)}, 市值=${position.marketValue?.toFixed(2)}`
+      );
+    }
+  }
+
+  // 检查2: 成本价异常（小于0.01或为0）
+  if (position.costPrice !== undefined && position.costPrice !== null) {
+    if (position.costPrice < 0.01 && position.quantity > 0) {
+      warnings.push(
+        `${position.asset.code}: 成本价异常 (${position.costPrice.toFixed(4)})，` +
+        `可能导致盈亏%计算错误。持仓数量=${position.quantity}`
+      );
+    }
+  }
+
+  // 检查3: 市值异常（负数或为0但有持仓）
+  if (position.marketValue !== undefined && position.marketValue !== null) {
+    if (position.marketValue < 0) {
+      warnings.push(
+        `${position.asset.code}: 市值为负数 (${position.marketValue.toFixed(2)})`
+      );
+    } else if (position.marketValue === 0 && position.quantity > 0) {
+      warnings.push(
+        `${position.asset.code}: 市值为0但持仓数量=${position.quantity}，可能是行情数据缺失`
+      );
+    }
+  }
+
+  // 检查4: 持仓数量异常（负数）
+  if (position.quantity < 0) {
+    warnings.push(
+      `${position.asset.code}: 持仓数量为负数 (${position.quantity})`
+    );
+  }
+
+  return {
+    isValid: warnings.length === 0,
+    warnings
+  };
+}
+
 /**
  * Calculates portfolio statistics for a given period, focusing on return percentage.
  * NOTE: This implementation is basic and uses placeholders for valuation.
@@ -137,11 +209,19 @@ export function calculateRealtimePnl(
  * @param period The calculation period ('daily', 'weekly', 'monthly', 'yearly', 'total').
  * @returns An object containing the period return percentage, or null if calculation fails.
  */
+export interface PeriodStatsOptions {
+  quotes?: Record<string, Quote>;
+  useRealtimeEndValue?: boolean;
+}
+
 export async function calculatePeriodStats(
   portfolio: Portfolio,
-  period: 'daily' | 'weekly' | 'monthly' | 'yearly' | 'total' = 'total'
+  period: 'daily' | 'weekly' | 'monthly' | 'yearly' | 'total' = 'total',
+  options?: PeriodStatsOptions
 ): Promise<{ periodReturnPercent: number | null; periodPnl: number | null }> {
   try {
+    const quotesMap = options?.quotes;
+    const useRealtimeEndValue = options?.useRealtimeEndValue ?? true;
     const transactions = portfolio.transactions || [];
     if (transactions.length === 0 && period !== 'total') {
       // No transactions, return 0% for specific periods, null for total unless there's initial cash?
@@ -184,13 +264,15 @@ export async function calculatePeriodStats(
           startDate = startOfDay(subDays(endDate, 1));
           break;
         case 'weekly':
-          startDate = startOfDay(subWeeks(endDate, 1));
+          startDate = startOfDay(
+            startOfWeek(endDate, { weekStartsOn: 1 })
+          );
           break;
         case 'monthly':
-          startDate = startOfDay(subMonths(endDate, 1));
+          startDate = startOfDay(startOfMonth(endDate));
           break;
         case 'yearly':
-          startDate = startOfDay(subYears(endDate, 1));
+          startDate = startOfDay(startOfYear(endDate));
           break;
         default: // Should not happen with TS types, but good practice
           console.error(`Invalid period specified: ${period}`);
@@ -285,18 +367,11 @@ export async function calculatePeriodStats(
         endKlineDate,
         'qfq'
       );
-    }
-
-    // 检查是否有股票K线数据缺失
-    const hasMissingKlineData = allAssetCodes.some(
-      (code) => !klineMap[code] || klineMap[code].length === 0
-    );
-
-    if (hasMissingKlineData) {
-      console.warn(
-        `[calculatePeriodStats] Missing K-line data for some assets in period ${period}`
-      );
-      return { periodReturnPercent: null, periodPnl: null };
+      if (!klineMap[code] || klineMap[code].length === 0) {
+        console.warn(
+          `[calculatePeriodStats] ${code} 缺少 ${period} 周期的 K 线数据，后续将使用成本价估算`
+        );
+      }
     }
 
     // --- 3. 计算期初/期末市值 ---
@@ -329,18 +404,53 @@ export async function calculatePeriodStats(
 
     async function calcValue(
       state: { positions: Map<string, LotPositionState>; cash: number },
-      priceDate: string
+      priceDate: string,
+      mode: 'start' | 'end'
     ) {
       let value = state.cash;
       for (const [code, posState] of state.positions.entries()) {
         if (posState.quantity <= 0) continue;
+        if (
+          mode === 'end' &&
+          useRealtimeEndValue &&
+          quotesMap &&
+          quotesMap[code] &&
+          typeof quotesMap[code].currentPrice === 'number'
+        ) {
+          const realtimeQuote = quotesMap[code];
+          const exchangeRate = getExchangeRateForAssetToCNY(code);
+          value += posState.quantity * realtimeQuote.currentPrice * exchangeRate;
+          continue;
+        }
+
         const pricePoint = findPricePoint(code, priceDate);
-        if (!pricePoint || pricePoint.close == null) continue;
+        const effectivePriceDate = pricePoint?.date ?? priceDate;
         const priceTimestamp = new Date(
-          `${pricePoint.date}T23:59:59Z`
+          `${effectivePriceDate}T23:59:59Z`
         ).getTime();
         const rate = getHistoricalRate(code, priceTimestamp);
-        value += posState.quantity * pricePoint.close * rate;
+
+        if (pricePoint && pricePoint.close != null) {
+          value += posState.quantity * pricePoint.close * rate;
+          continue;
+        }
+
+        const fallbackUnitLocal =
+          posState.quantity > 0
+            ? posState.totalCostLocal / posState.quantity
+            : null;
+
+        if (fallbackUnitLocal === null || Number.isNaN(fallbackUnitLocal)) {
+          console.warn(
+            `[calculatePeriodStats] 无法为 ${code} 在 ${priceDate} 推导价格，跳过该资产`
+          );
+          continue;
+        }
+
+        console.warn(
+          `[calculatePeriodStats] 使用成本价估算 ${code} 在 ${priceDate} 的市值`
+        );
+        value += posState.quantity * fallbackUnitLocal * rate;
       }
       return value;
     }
@@ -350,17 +460,17 @@ export async function calculatePeriodStats(
     const endState = reconstructPortfolioState(endDate);
 
     // 计算期初和期末估值
-    const startValue = await calcValue(startState, startKlineDate);
-    const endValue = await calcValue(endState, endKlineDate);
+    const startValue = await calcValue(startState, startKlineDate, 'start');
+    const endValue = await calcValue(endState, endKlineDate, 'end');
 
     // --- 4. 计算期间收益率（简化 Modified Dietz 法）---
-    // periodReturnPercent = (endValue - startValue - cashFlows) / (startValue + cashFlows * 0.5) * 100
+    // periodReturnPercent = (endValue - startValue - cashFlows) / (startValue + cashFlows * 0.5)
+    // 返回小数形式（0-1范围），前端会乘以100显示
     let periodReturnPercent: number | null = null;
     let periodPnl: number | null = null;
     if (startValue !== 0) {
       periodReturnPercent =
-        ((endValue - startValue - cashFlows) / (startValue + cashFlows * 0.5)) *
-        100;
+        (endValue - startValue - cashFlows) / (startValue + cashFlows * 0.5);
       periodPnl = endValue - startValue - cashFlows;
     } else if (endValue === 0 && cashFlows === 0 && startValue === 0) {
       periodReturnPercent = 0;
@@ -510,11 +620,11 @@ export function calculateIndexPeriodChanges(
     yearChangeBasePoint.close != null &&
     yearChangeBasePoint.close !== 0
   ) {
+    // 返回小数形式（0-1范围），前端会乘以100显示
     const change =
-      ((effectiveCurrentPrice - yearChangeBasePoint.close) /
-        yearChangeBasePoint.close) *
-      100;
-    results.yearChangePercent = parseFloat(change.toFixed(2));
+      (effectiveCurrentPrice - yearChangeBasePoint.close) /
+        yearChangeBasePoint.close;
+    results.yearChangePercent = parseFloat(change.toFixed(4));
     (results as any).yearChangeBaseDate = yearChangeBasePoint.date;
   } else {
     results.yearChangePercent = undefined;

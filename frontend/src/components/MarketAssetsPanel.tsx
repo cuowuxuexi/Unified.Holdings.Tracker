@@ -15,6 +15,64 @@ import type { MarketConfig } from '../store/types';
 
 const { Text } = Typography;
 
+const MARKET_TO_CURRENCY: Record<string, string> = {
+  HK: 'HKD',
+  US: 'USD',
+  CN: 'CNY',
+};
+
+const inferPositionCurrency = (position: PositionWithStats): string => {
+  if (position.currency) {
+    return position.currency.toUpperCase();
+  }
+  const market = position.asset?.market;
+  if (!market) return 'CNY';
+  return MARKET_TO_CURRENCY[market] || 'CNY';
+};
+
+const shouldDisplayLocalCurrency = (position: PositionWithStats) =>
+  inferPositionCurrency(position) !== 'CNY';
+
+const getMarketValueInDisplayCurrency = (position: PositionWithStats): number => {
+  if (shouldDisplayLocalCurrency(position)) {
+    if (
+      typeof position.marketValueLocal === 'number' &&
+      position.marketValueLocal !== 0
+    ) {
+      return position.marketValueLocal;
+    }
+    if (typeof position.currentPrice === 'number') {
+      return position.currentPrice * position.quantity;
+    }
+  }
+  return position.marketValue ?? 0;
+};
+
+const getPnlInDisplayCurrency = (position: PositionWithStats): number => {
+  if (shouldDisplayLocalCurrency(position)) {
+    if (typeof position.totalPnlLocal === 'number') {
+      return position.totalPnlLocal;
+    }
+    if (
+      typeof position.marketValueLocal === 'number' &&
+      typeof position.totalCostLocal === 'number'
+    ) {
+      return position.marketValueLocal - position.totalCostLocal;
+    }
+  }
+  const pnlCny = (position as any).pnlCNY;
+  return position.totalPnl ?? pnlCny ?? 0;
+};
+
+interface MarketSummary {
+  totalMarketValueLocal: number;
+  totalMarketValueCNY: number;
+  totalPnlLocal: number;
+  totalPnlCNY: number;
+  currencySymbol: string;
+  currencyCode: string;
+}
+
 // 汇率展示组件
 const ExchangeRateBar: React.FC<{ rates: Record<string, number>; updatedAt: string; error?: boolean }> = ({ rates, updatedAt, error }) => (
   <div style={{ marginBottom: 24, padding: '12px 16px', background: '#f5f5f5', borderRadius: '8px', fontSize: 14, color: error ? '#cf1322' : '#666' }}>
@@ -27,9 +85,8 @@ const ExchangeRateBar: React.FC<{ rates: Record<string, number>; updatedAt: stri
 // 市场标题组件
 const MarketTitle: React.FC<{
   marketName: string;
-  summary: any;
-  symbol: string;
-}> = ({ marketName, summary, symbol }) => {
+  summary: MarketSummary;
+}> = ({ marketName, summary }) => {
   // 固定宽度样式，确保所有市场标题整齐对齐
   const labelStyle: React.CSSProperties = { 
     fontWeight: 600, 
@@ -46,6 +103,14 @@ const MarketTitle: React.FC<{
     minWidth: '200px'
   };
 
+  const shouldShowApprox = summary.currencyCode !== 'CNY';
+  const symbol = summary.currencySymbol;
+  const formatWithSymbol = (value: number) =>
+    `${symbol}${value.toLocaleString(undefined, {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
+
   return (
     <div style={{ display: 'flex', alignItems: 'center', width: '100%' }}>
       <span style={labelStyle}>{marketName}</span>
@@ -53,8 +118,8 @@ const MarketTitle: React.FC<{
         <div style={{ display: 'flex', alignItems: 'center', marginLeft: 40 }}>
           <Text strong style={{ width: 70, textAlign: 'right' }}>总市值：</Text>
           <Text style={labelValueStyle}>
-            {symbol}{summary.totalMarketValue.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-            {marketName !== 'A股' && (
+            {formatWithSymbol(summary.totalMarketValueLocal)}
+            {shouldShowApprox && (
               <Text type="secondary" style={{ fontSize: '12px', marginLeft: '4px' }}>
                 (约 ¥{summary.totalMarketValueCNY.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
               </Text>
@@ -66,10 +131,15 @@ const MarketTitle: React.FC<{
           <Text 
             style={{
               ...labelValueStyle,
-              color: summary.totalPnl >= 0 ? '#f5222d' : '#52c41a'
+              color: summary.totalPnlLocal >= 0 ? '#f5222d' : '#52c41a'
             }}
           >
-            {symbol}{summary.totalPnl.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+            {formatWithSymbol(summary.totalPnlLocal)}
+            {shouldShowApprox && (
+              <Text type="secondary" style={{ fontSize: '12px', marginLeft: '4px' }}>
+                (约 ¥{summary.totalPnlCNY.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+              </Text>
+            )}
           </Text>
         </div>
       </div>
@@ -336,29 +406,31 @@ const MarketAssetsPanel: React.FC<{
   };
 
   // 将原始持仓转换为含人民币价值和周期涨幅
+  // 注意：后端返回的 marketValue, costPrice, totalCost 等字段已经是人民币金额
+  // 不需要再次乘以汇率，否则会导致数据错误
   const positionsWithCny: EnhancedPosition[] = positions.map(p => {
     // 从行情数据中获取周期涨幅
     const quote = p.asset?.code ? quoteMap[p.asset.code] : null;
 
-    // Determine currency based on asset code prefix
+    // Determine currency based on asset code prefix (for display purposes only)
     let currencyKey: 'USD' | 'HKD' | 'CNY' = 'CNY'; // Default to CNY
     if (p.asset?.code?.startsWith('hk')) currencyKey = 'HKD';
     else if (p.asset?.code?.startsWith('us')) currencyKey = 'USD';
 
-    // Ensure rates is not null before accessing keys
-    const rate = rates ? (rates[currencyKey] ?? 1) : 1; // Access rate using determined currencyKey
-    
+    // 后端已经将所有数据转换为人民币，这里直接使用即可
+    // 不要再次乘以汇率！
     const marketValue = p.marketValue || (p.currentPrice ?? 0) * (p.quantity ?? 0);
     const costValue = (p.costPrice ?? 0) * (p.quantity ?? 0);
-    
-    const marketValueCNY = marketValue * rate;
-    const costValueCNY = costValue * rate;
+
+    // ✅ 修复：直接使用后端返回的人民币数据，不再乘以汇率
+    const marketValueCNY = marketValue;  // 后端已是人民币
+    const costValueCNY = costValue;      // 后端已是人民币
     const pnlCNY = marketValueCNY - costValueCNY;
-    
-    return { 
-      ...p, 
+
+    return {
+      ...p,
       marketValueCNY,
-      costValueCNY, 
+      costValueCNY,
       pnlCNY,
       pnlRateCNY: costValueCNY > 0 ? pnlCNY / costValueCNY * 100 : 0,
       // 添加周期涨幅字段，优先使用行情数据
@@ -376,22 +448,35 @@ const MarketAssetsPanel: React.FC<{
         if (!p.asset?.code) return false;  // 如果没有 code，直接过滤掉
         return market.codePrefix.some(prefix => p.asset.code.startsWith(prefix));
     });
-    const totalMarketValue = marketPositions.reduce((sum, p) => sum + (p.marketValue || 0), 0);
-    const totalPnl = marketPositions.reduce((sum, p) => sum + (p.totalPnl || 0), 0);
-    const totalMarketValueCNY = marketPositions.reduce((sum, p) => sum + (p.marketValueCNY || 0), 0);
-    const totalPnlCNY = marketPositions.reduce((sum, p) => sum + (p.pnlCNY || 0), 0);
+    const totalMarketValueLocal = marketPositions.reduce(
+      (sum, p) => sum + getMarketValueInDisplayCurrency(p),
+      0
+    );
+    const totalMarketValueCNY = marketPositions.reduce(
+      (sum, p) => sum + (p.marketValue ?? p.marketValueCNY ?? 0),
+      0
+    );
+    const totalPnlLocal = marketPositions.reduce(
+      (sum, p) => sum + getPnlInDisplayCurrency(p),
+      0
+    );
+    const totalPnlCNY = marketPositions.reduce(
+      (sum, p) => sum + (p.totalPnl ?? (p as any).pnlCNY ?? 0),
+      0
+    );
     
     return {
       ...acc,
       [market.key]: {
-        totalMarketValue,
-        totalPnl,
+        totalMarketValueLocal,
         totalMarketValueCNY,
+        totalPnlLocal,
         totalPnlCNY,
-        currencySymbol: market.symbol
+        currencySymbol: market.symbol,
+        currencyCode: market.currency,
       }
     };
-  }, {} as Record<string, any>);
+  }, {} as Record<string, MarketSummary>);
 
   // 新增：根据 positionsWithCny 汇总全局统计
   const toggleMarket = (market: string) => {
@@ -435,7 +520,15 @@ const MarketAssetsPanel: React.FC<{
         : <ExchangeRateBar rates={rates ?? { USD: 0, HKD: 0, CNY: 1 }} updatedAt={updatedAt} error={rateError} />}
       
       {marketConfigs.filter(m => m.visible).map((market) => {
-        const summary = marketSummaries[market.key];
+        const summary =
+          marketSummaries[market.key] ?? {
+            totalMarketValueLocal: 0,
+            totalMarketValueCNY: 0,
+            totalPnlLocal: 0,
+            totalPnlCNY: 0,
+            currencySymbol: market.symbol,
+            currencyCode: market.currency,
+          };
         // Filter positions for the current market before logging and rendering
         const marketPositions = positionsWithCny.filter((p) => {
           if (!p.asset?.code) return false;  // 如果没有 code，直接过滤掉
@@ -451,7 +544,7 @@ const MarketAssetsPanel: React.FC<{
         return (
           <Card
             key={market.key}
-            title={<MarketTitle marketName={market.label} summary={summary} symbol={market.symbol} />}
+            title={<MarketTitle marketName={market.label} summary={summary} />}
             extra={
               <a onClick={() => toggleMarket(market.key)} style={{ fontSize: 13 }}>
                 {collapsed[market.key] ? '展开' : '折叠'}

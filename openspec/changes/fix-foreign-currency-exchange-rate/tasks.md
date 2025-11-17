@@ -134,7 +134,7 @@
   - [ ] 7.1.3 重新计算投资组合的现金余额
   
 - [ ] 7.2 备份数据库
-  - 在执行修复脚本前备份 `apps/backend/data/portfolio.db`
+  - 在执行修复脚本前备份 `apps/backend/prisma/data/portfolio.db`
 
 - [ ] 7.3 执行修复并验证
   - [ ] 7.3.1 运行修复脚本

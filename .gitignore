@@ -93,13 +93,16 @@ packages/**/src/**/*.js.map
 packages/**/src/**/*.d.ts
 packages/**/src/**/*.d.ts.map
 
-# 数据库文件
+# 数据库文件（只忽略数据文件，不忽略 migrations）
 *.db
 *.db-*
 *.db.backup*
 apps/backend/prisma/dev.db
 apps/backend/prisma/data/*.db*
-apps/backend/prisma/apps/
+
+# ⚠️ 重要：不要忽略 prisma/migrations/ 目录！
+# Prisma Migrations 必须被 Git 跟踪，这样 Git 回退后可以重放迁移历史
+# 正确的做法：migrations/ 目录被 Git 跟踪，.db 文件被忽略
 
 # 临时图片和日志
 Generated*.png

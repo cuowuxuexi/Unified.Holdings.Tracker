@@ -40,49 +40,137 @@ export interface Transaction {
   notes?: string; // 备注 (可选)
 }
 
-// 持仓信息 (通常由后端根据交易记录计算得出)
+/**
+ * 持仓信息（通常由后端根据交易记录计算得出）
+ *
+ * **重要说明**：后端返回的持仓数据中，所有金额字段（costPrice, marketValue, totalCost等）
+ * 默认均为**人民币(CNY)**计价，已经经过汇率转换。前端不应再次应用汇率转换。
+ *
+ * 对于港股和美股，后端会额外提供原币种字段（如 costPriceLocal, marketValueLocal），
+ * 但主字段（costPrice, marketValue等）始终为人民币。
+ */
 export interface Position {
   asset: Asset;
+  /** 持仓数量（股数/份数） */
   quantity: number;
-  costPrice: number; // 持仓成本价
-  marketValue: number; // 当前市值 (需要实时价格)
-  totalCost: number; // 总成本
+
   /**
-   * 记录交易货币，便于前端展示原币种
+   * 持仓成本价（单位：CNY/人民币）
+   * - 对于A股：直接为交易时的价格
+   * - 对于港股/美股：已通过汇率转换为人民币
+   */
+  costPrice: number;
+
+  /**
+   * 当前市值（单位：CNY/人民币）
+   * - 计算方式：currentPrice（原币种） × exchangeRate × quantity
+   * - 已包含汇率转换，前端无需再次转换
+   */
+  marketValue: number;
+
+  /**
+   * 总成本（单位：CNY/人民币）
+   * - 等于 costPrice × quantity
+   * - 已包含汇率转换，前端无需再次转换
+   */
+  totalCost: number;
+
+  /**
+   * 记录交易货币类型（CNY/USD/HKD），仅用于标识原币种
+   * 注意：此字段不影响数据转换，主字段已为人民币
    */
   currency?: string;
+
   /**
-   * 原币种维度的成本价
+   * 原币种维度的成本价（单位：原币种）
+   * - 港股：HKD
+   * - 美股：USD
+   * - A股：CNY（与 costPrice 相同）
    */
   costPriceLocal?: number;
+
   /**
-   * 原币种维度的总成本
+   * 原币种维度的总成本（单位：原币种）
    */
   totalCostLocal?: number;
+
   /**
-   * 原币种维度的市值
+   * 原币种维度的市值（单位：原币种）
    */
   marketValueLocal?: number;
+
   /**
-   * 人民币维度的市值，若未设置则默认和 marketValue 相同
+   * 人民币市值（单位：CNY/人民币）
+   * - 与 marketValue 含义相同
+   * - 保留此字段以兼容旧代码
+   * @deprecated 使用 marketValue 字段即可
    */
   marketValueCNY?: number;
-  currentPrice?: number; // 当前价格 (来自实时行情)
-  dailyChange?: number; // 当日盈亏额 (需要实时价格和昨日收盘价)
+
   /**
-   * 原币种维度的当日盈亏额
+   * 当前价格（单位：原币种）
+   * - 来自实时行情API的原始价格
+   * - 港股：HKD，美股：USD，A股：CNY
+   */
+  currentPrice?: number;
+
+  /**
+   * 当日盈亏额（单位：CNY/人民币）
+   * - 已通过汇率转换为人民币
+   */
+  dailyChange?: number;
+
+  /**
+   * 原币种维度的当日盈亏额（单位：原币种）
    */
   dailyChangeLocal?: number;
-  dailyChangePercent?: number; // 当日盈亏百分比
-  totalPnl?: number; // 累计盈亏额
+
   /**
-   * 原币种维度的累计盈亏额
+   * 当日盈亏百分比（小数形式，0-1 范围）
+   * - 例如：0.05 表示 5%，-0.03 表示 -3%
+   * - 前端显示时需要乘以 100
+   */
+  dailyChangePercent?: number;
+
+  /**
+   * 累计盈亏额（单位：CNY/人民币）
+   * - 计算方式：marketValue - totalCost
+   * - 已包含汇率转换
+   */
+  totalPnl?: number;
+
+  /**
+   * 原币种维度的累计盈亏额（单位：原币种）
    */
   totalPnlLocal?: number;
-  totalPnlPercent?: number; // 累计盈亏百分比
-  weeklyChangePercent?: number | null | undefined; // 周涨跌幅
-  monthlyChangePercent?: number | null | undefined; // 月涨跌幅
-  yearlyChangePercent?: number | null | undefined; // 年涨跌幅
+
+  /**
+   * 累计盈亏百分比（小数形式，0-1 范围）
+   * - 例如：1.5 表示 150%，-0.2 表示 -20%
+   * - 前端显示时需要乘以 100
+   */
+  totalPnlPercent?: number;
+
+  /**
+   * 周涨跌幅（百分比数值形式）
+   * - 例如：18.18 表示 18.18%，-5.5 表示 -5.5%
+   * - 前端显示时无需乘以 100
+   */
+  weeklyChangePercent?: number | null | undefined;
+
+  /**
+   * 月涨跌幅（百分比数值形式）
+   * - 例如：25.0 表示 25%，-10.0 表示 -10%
+   * - 前端显示时无需乘以 100
+   */
+  monthlyChangePercent?: number | null | undefined;
+
+  /**
+   * 年涨跌幅（百分比数值形式）
+   * - 例如：120.0 表示 120%，-35.0 表示 -35%
+   * - 前端显示时无需乘以 100
+   */
+  yearlyChangePercent?: number | null | undefined;
 }
 
 // 杠杆信息
