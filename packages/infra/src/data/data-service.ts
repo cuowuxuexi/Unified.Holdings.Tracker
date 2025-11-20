@@ -4,6 +4,7 @@ import { cacheService } from '../cache/cache-service';
 
 export class DataService {
   private baseDataDir: string;
+  private logDir: string;
   private readonly isPkg: boolean;
   private readonly CACHE_TTL = 5 * 60 * 1000; // 默认缓存 5 分钟
 
@@ -12,7 +13,9 @@ export class DataService {
     this.isPkg = (process as any).pkg !== undefined;
 
     // 确定基础数据目录
-    if (this.isPkg) {
+    if (process.env.DATA_PATH) {
+      this.baseDataDir = process.env.DATA_PATH;
+    } else if (this.isPkg) {
       // 在pkg环境中，使用可执行文件所在目录
       // 在pkg环境中，数据目录基于当前工作目录 (cwd)
       this.baseDataDir = path.join(process.cwd(), 'data');
@@ -21,20 +24,30 @@ export class DataService {
       this.baseDataDir = path.join(process.cwd(), 'data');
     }
 
+    // 确定日志目录
+    if (process.env.LOG_PATH) {
+      this.logDir = process.env.LOG_PATH;
+    } else {
+      this.logDir = path.join(this.baseDataDir, 'logs');
+    }
+
     console.log(`[dataService] 使用数据目录: ${this.baseDataDir}`);
+    console.log(`[dataService] 使用日志目录: ${this.logDir}`);
     console.log(
       `[dataService] 运行环境: ${this.isPkg ? 'pkg打包环境' : '开发环境'}`
     );
 
     // 确保基础数据目录存在
     this.ensureDirectoryExists(this.baseDataDir);
+    // 确保日志目录存在
+    this.ensureDirectoryExists(this.logDir);
 
     // 创建子目录
     this.ensureDirectoryExists(path.join(this.baseDataDir, 'portfolios'));
     this.ensureDirectoryExists(path.join(this.baseDataDir, 'transactions'));
     this.ensureDirectoryExists(path.join(this.baseDataDir, 'market'));
     this.ensureDirectoryExists(path.join(this.baseDataDir, 'settings'));
-    this.ensureDirectoryExists(path.join(this.baseDataDir, 'logs'));
+    // logs目录在上面已经处理了
   }
 
   // 确保目录存在
@@ -176,7 +189,7 @@ export class DataService {
    * @param message 日志消息
    */
   public appendToLog(message: string): void {
-    const logPath = path.join(this.baseDataDir, 'logs', 'app.log');
+    const logPath = path.join(this.logDir, 'app.log');
     try {
       const timestamp = new Date().toISOString();
       const logEntry = `[${timestamp}] ${message}\n`;

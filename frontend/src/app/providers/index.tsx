@@ -1,4 +1,6 @@
 import { ReactNode } from 'react';
+import { ConfigProvider } from 'antd';
+import zhCN from 'antd/locale/zh_CN';
 import { QueryProvider } from './QueryProvider';
 
 interface AppProvidersProps {
@@ -6,6 +8,9 @@ interface AppProvidersProps {
 }
 
 export function AppProviders({ children }: AppProvidersProps) {
-  return <QueryProvider>{children}</QueryProvider>;
+  return (
+    <ConfigProvider locale={zhCN}>
+      <QueryProvider>{children}</QueryProvider>
+    </ConfigProvider>
+  );
 }
-

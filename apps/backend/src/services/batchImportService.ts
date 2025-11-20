@@ -306,6 +306,73 @@ export class BatchImportService {
     const importedTransactions: Transaction[] = [];
     let successCount = 0;
 
+    // 🔥 新增：自动处理融资额度
+    // 扫描所有交易，找出使用融资的交易，计算总融资需求
+    let totalLeverageNeeded = 0;
+    let earliestLeverageDate: Date | null = null;
+
+    for (const row of rows) {
+      if (
+        (row.type === 'BUY' || row.type === 'SELL') &&
+        row.leverageUsed &&
+        Number(row.leverageUsed) > 0
+      ) {
+        totalLeverageNeeded = Math.max(
+          totalLeverageNeeded,
+          Number(row.leverageUsed)
+        );
+        const rowDate = new Date(row.date);
+        if (!earliestLeverageDate || rowDate < earliestLeverageDate) {
+          earliestLeverageDate = rowDate;
+        }
+      }
+    }
+
+    // 如果检测到融资需求，自动添加 LEVERAGE_ADD 交易
+    if (totalLeverageNeeded > 0 && earliestLeverageDate) {
+      console.log(
+        `[BatchImport] 检测到融资需求，自动添加融资额度: ${totalLeverageNeeded * 1.2} CNY`
+      );
+
+      // 提前一天添加融资额度，确保在使用融资前就已经有额度
+      const leverageDate = new Date(earliestLeverageDate);
+      leverageDate.setDate(leverageDate.getDate() - 1);
+
+      try {
+        const leverageAddTransaction: Omit<Transaction, 'id'> = {
+          date: leverageDate.toISOString(),
+          type: 'LEVERAGE_ADD' as TransactionType,
+          assetCode: undefined,
+          quantity: undefined,
+          price: undefined,
+          amount: Math.ceil(totalLeverageNeeded * 1.2), // 增加20%余量
+          commission: undefined,
+          leverageUsed: undefined,
+          currency: 'CNY',
+          exchangeRate: 1,
+          notes: '批量导入自动添加的融资额度',
+        };
+
+        const result = await addTransactionUseCase.execute({
+          portfolioId,
+          transaction: leverageAddTransaction,
+        });
+
+        importedTransactions.push(...result.transactions);
+        successCount++;
+        console.log(
+          `[BatchImport] 自动添加融资额度成功: ${leverageAddTransaction.amount} CNY`
+        );
+      } catch (error) {
+        console.error('[BatchImport] 自动添加融资额度失败:', error);
+        allErrors.push({
+          rowNumber: 0,
+          field: 'leverageUsed',
+          message: `自动添加融资额度失败: ${error}`,
+        });
+      }
+    }
+
     for (const row of rows) {
       // 先验证
       const errors = this.validateRow(row);

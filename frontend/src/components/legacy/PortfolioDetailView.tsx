@@ -1,5 +1,16 @@
 import React, { useEffect, useState } from 'react'; // Import useEffect and useState
-import { Skeleton, Alert, Typography, Empty, Card, Button, Modal, Input, Space } from 'antd'; // 将 Spin 替换为 Skeleton
+import { useNavigate } from 'react-router-dom';
+import {
+  Skeleton,
+  Alert,
+  Typography,
+  Empty,
+  Card,
+  Button,
+  Modal,
+  Input,
+  Space,
+} from 'antd'; // 将 Spin 替换为 Skeleton
 import useAppStore from '../../store'; // Adjust path if needed
 import PortfolioSummary from '../PortfolioSummary';
 import { fetchExchangeRates } from '../../services/api'; // Correctly import fetchExchangeRates
@@ -20,10 +31,17 @@ interface PortfolioDetailViewProps {
 
 // Removed local fetchExchangeRates definition, will use imported one from api.ts
 
-const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }) => {
+const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({
+  portfolioId,
+}) => {
+  const navigate = useNavigate();
   // Use individual selectors for better performance
-  const selectedPortfolioDetail = useAppStore((state) => state.selectedPortfolioDetail);
-  const isLoadingPortfolioDetail = useAppStore((state) => state.isLoadingPortfolioDetail);
+  const selectedPortfolioDetail = useAppStore(
+    (state) => state.selectedPortfolioDetail
+  );
+  const isLoadingPortfolioDetail = useAppStore(
+    (state) => state.isLoadingPortfolioDetail
+  );
   const portfolioError = useAppStore((state) => state.portfolioError);
   const {
     data: stats,
@@ -37,7 +55,9 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }
   const [deleteInput, setDeleteInput] = useState('');
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  const deletePortfolioAction = useAppStore((state) => (state as any).deletePortfolio); // Temporarily cast to any to bypass TS error, should be fixed in store definition
+  const deletePortfolioAction = useAppStore(
+    (state) => (state as any).deletePortfolio
+  ); // Temporarily cast to any to bypass TS error, should be fixed in store definition
   const fetchPortfolios = useAppStore((state) => state.fetchPortfolios);
   const selectPortfolio = useAppStore((state) => state.selectPortfolio);
   const messageApi = useMessageApi();
@@ -80,9 +100,23 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }
 
   if (!portfolioId) {
     return (
-      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: detailPagePadding }}>
+      <div
+        style={{
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          padding: detailPagePadding,
+        }}
+      >
         <MarketIndices />
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
           <Empty description="请选择一个投资组合以查看详情。" />
         </div>
       </div>
@@ -106,8 +140,8 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }
     statsError instanceof Error
       ? statsError.message
       : statsError
-      ? String(statsError)
-      : null;
+        ? String(statsError)
+        : null;
 
   if (portfolioError || statsErrorMessage) {
     const errorMessage =
@@ -117,9 +151,23 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }
         ? '加载投资组合统计数据时出错'
         : '加载投资组合详情时出错';
     return (
-      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: detailPagePadding }}>
+      <div
+        style={{
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          padding: detailPagePadding,
+        }}
+      >
         <MarketIndices />
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
           <Alert
             message={errorMessage}
             description={portfolioError || statsErrorMessage || '未知错误'}
@@ -135,9 +183,23 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }
   if (!selectedPortfolioDetail) {
     // This check ensures selectedPortfolioDetail is not null below
     return (
-      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: detailPagePadding }}>
+      <div
+        style={{
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          padding: detailPagePadding,
+        }}
+      >
         <MarketIndices />
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
           <Empty description="所选投资组合无可用详情。" />
         </div>
       </div>
@@ -147,9 +209,23 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }
   // Handle case where stats are missing after loading and no error (should ideally not happen with current logic, but as fallback)
   if (!stats) {
     return (
-      <div style={{ height: '100%', display: 'flex', flexDirection: 'column', padding: detailPagePadding }}>
+      <div
+        style={{
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          padding: detailPagePadding,
+        }}
+      >
         <MarketIndices />
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <div
+          style={{
+            flex: 1,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
           <Empty description="投资组合统计数据不可用。" />
         </div>
       </div>
@@ -161,17 +237,17 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }
   // const updatedAt = new Date().toLocaleString();
 
   // Map positions to potentially translate market codes if needed
-  const mappedPositions = stats.positions.map(p => {
-      // Determine market string ('A股', '港股', '美股') based on asset.code prefix
-      let marketDisplay = '未知';
-      const code = p.asset?.code;
-      if (code?.startsWith('sh') || code?.startsWith('sz')) marketDisplay = 'A股';
-      else if (code?.startsWith('hk')) marketDisplay = '港股';
-      else if (code?.startsWith('us')) marketDisplay = '美股';
-      return {
-          ...p,
-          marketDisplay: marketDisplay,
-      };
+  const mappedPositions = stats.positions.map((p) => {
+    // Determine market string ('A股', '港股', '美股') based on asset.code prefix
+    let marketDisplay = '未知';
+    const code = p.asset?.code;
+    if (code?.startsWith('sh') || code?.startsWith('sz')) marketDisplay = 'A股';
+    else if (code?.startsWith('hk')) marketDisplay = '港股';
+    else if (code?.startsWith('us')) marketDisplay = '美股';
+    return {
+      ...p,
+      marketDisplay: marketDisplay,
+    };
   });
 
   // 前端不再重新计算总览统计，直接使用后端数据
@@ -180,19 +256,33 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }
   // --- Main Render ---
   // At this point, selectedPortfolioDetail and stats are guaranteed to be非空 due to checks above
   return (
-    <div style={{ width: '100%', padding: detailPagePadding }} id="portfolio-report-area"> {/* Added ID for screenshot targeting */}
+    <div
+      style={{ width: '100%', padding: detailPagePadding }}
+      id="portfolio-report-area"
+    >
+      {' '}
+      {/* Added ID for screenshot targeting */}
       {/* 顶部放置大盘指数，始终可见 */}
       <MarketIndices />
-
       {/* 标题和操作按钮 */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-        <Title level={2} style={{ margin: 0 }}>{selectedPortfolioDetail.name}</Title>
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
+        <Title level={2} style={{ margin: 0 }}>
+          {selectedPortfolioDetail.name}
+        </Title>
         <Space>
           <Button
             type="primary"
             onClick={() => {
               // 触发打开添加交易记录的抽屉
-              const event = new CustomEvent('openAddTransaction', { detail: { portfolioId } });
+              const event = new CustomEvent('openAddTransaction', {
+                detail: { portfolioId },
+              });
               window.dispatchEvent(event);
             }}
           >
@@ -201,7 +291,9 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }
           <Button
             onClick={() => {
               // 触发打开批量导入的抽屉
-              const event = new CustomEvent('openBatchImport', { detail: { portfolioId } });
+              const event = new CustomEvent('openBatchImport', {
+                detail: { portfolioId },
+              });
               window.dispatchEvent(event);
             }}
           >
@@ -210,38 +302,48 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }
           <Button
             onClick={() => {
               // 返回主界面
-              window.location.href = '/';
+              navigate('/');
             }}
           >
             返回主界面
           </Button>
         </Space>
       </div>
-
       {/* 删除确认弹窗 */}
       <Modal
         title={`删除投资组合「${selectedPortfolioDetail.name}」`}
         open={deleteModalVisible}
         onOk={handleConfirmDelete}
         okText="确认删除"
-        okButtonProps={{ disabled: deleteInput !== '确定', loading: deleteLoading, danger: true }}
+        okButtonProps={{
+          disabled: deleteInput !== '确定',
+          loading: deleteLoading,
+          danger: true,
+        }}
         onCancel={() => setDeleteModalVisible(false)}
         cancelText="取消"
         destroyOnClose
       >
-        <p>此操作不可恢复。请输入 <b>确定</b> 以确认删除。</p>
+        <p>
+          此操作不可恢复。请输入 <b>确定</b> 以确认删除。
+        </p>
         <Input
           placeholder='请输入"确定"'
           value={deleteInput}
-          onChange={e => setDeleteInput(e.target.value)}
+          onChange={(e) => setDeleteInput(e.target.value)}
           onPressEnter={() => deleteInput === '确定' && handleConfirmDelete()}
         />
       </Modal>
-
       {/* 投资组合标题和摘要信息 */}
       <Card
         title={
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+            }}
+          >
             <span>投资组合概览(按汇率折算CNY)</span>
           </div>
         }
@@ -258,7 +360,7 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }
             />
           }
         >
-          <PortfolioSummary 
+          <PortfolioSummary
             portfolio={selectedPortfolioDetail}
             stats={stats} // 直接传递从后端获取的 stats
             isLoading={isStatsLoading && !stats}
@@ -268,7 +370,6 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({ portfolioId }
           />
         </ErrorBoundary>
       </Card>
-      
       {/* 资产明细分市场分组卡片式UI */}
       <ErrorBoundary
         fallback={

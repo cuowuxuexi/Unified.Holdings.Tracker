@@ -315,6 +315,58 @@ router.get(
     // 使用新的盈亏计算方法（已实现 + 未实现）
     const pnlV2 = await calculateTotalPnlV2(portfolio, positions);
 
+    // 计算周期统计（用于报表生成）
+    const assetCodes = positions.map((p) => p.asset.code);
+    let quotesMap: Record<string, Quote> = {};
+    if (assetCodes.length > 0) {
+      const quotesArray = await fetchQuotes(assetCodes);
+      quotesMap = quotesArray.reduce(
+        (map, quote) => {
+          map[quote.code] = quote;
+          return map;
+        },
+        {} as Record<string, Quote>
+      );
+    }
+
+    const statsOptions = { quotes: quotesMap };
+    const bucket = periodCacheService.getPeriodStatsTimeBucket();
+
+    type PeriodStatsResult = Awaited<ReturnType<typeof calculatePeriodStats>>;
+    const statsPromiseMap: Partial<
+      Record<PeriodCacheBucket, Promise<PeriodStatsResult>>
+    > = {};
+
+    const getCachedPeriodStats = (target: PeriodCacheBucket) => {
+      if (!statsPromiseMap[target]) {
+        const cacheKey = periodCacheService.getPeriodStatsCacheKey(
+          portfolio.id,
+          target,
+          bucket
+        );
+        statsPromiseMap[target] = periodCacheService.rememberPeriodStats(
+          cacheKey,
+          PERIOD_CACHE_TTL.periodStats.ttl,
+          () => calculatePeriodStats(portfolio, target, statsOptions)
+        );
+      }
+      return statsPromiseMap[target]!;
+    };
+
+    const [weeklyStats, monthlyStats] = await Promise.all([
+      getCachedPeriodStats('weekly'),
+      getCachedPeriodStats('monthly'),
+    ]);
+
+    console.log(
+      '[Portfolio Detail] weeklyStats:',
+      JSON.stringify(weeklyStats, null, 2)
+    );
+    console.log(
+      '[Portfolio Detail] monthlyStats:',
+      JSON.stringify(monthlyStats, null, 2)
+    );
+
     const portfolioDetail: PortfolioDetail = {
       id: portfolio.id,
       name: portfolio.name,
@@ -334,9 +386,11 @@ router.get(
       totalPnl: pnlV2.totalPnl,
       realizedPnl: pnlV2.realizedPnl,
       unrealizedPnl: pnlV2.unrealizedPnl,
+      weeklyStats,
+      monthlyStats,
     };
 
-    const assetCodes = extractAssetCodes(portfolio.transactions);
+    // 预加载基础价格（用于后续计算）
     preloadBasePrices(assetCodes);
 
     res.json(portfolioDetail);
@@ -928,6 +982,45 @@ router.get(
       const totalReturnPercent =
         netDeposit > 0 ? (pnlV2.totalPnl / netDeposit) * 100 : 0;
 
+      // 🔥 计算周期统计（复用 /stats 接口的逻辑）
+      const statsOptions = { quotes };
+      const bucket = periodCacheService.getPeriodStatsTimeBucket();
+
+      type PeriodStatsResult = Awaited<ReturnType<typeof calculatePeriodStats>>;
+      const statsPromiseMap: Partial<
+        Record<PeriodCacheBucket, Promise<PeriodStatsResult>>
+      > = {};
+
+      const getCachedPeriodStats = (target: PeriodCacheBucket) => {
+        if (!statsPromiseMap[target]) {
+          const cacheKey = periodCacheService.getPeriodStatsCacheKey(
+            portfolio.id,
+            target,
+            bucket
+          );
+          statsPromiseMap[target] = periodCacheService.rememberPeriodStats(
+            cacheKey,
+            PERIOD_CACHE_TTL.periodStats.ttl,
+            () => calculatePeriodStats(portfolio, target, statsOptions)
+          );
+        }
+        return statsPromiseMap[target]!;
+      };
+
+      const [weeklyStats, monthlyStats] = await Promise.all([
+        getCachedPeriodStats('weekly'),
+        getCachedPeriodStats('monthly'),
+      ]);
+
+      console.log(
+        '[Report Export] weeklyStats:',
+        JSON.stringify(weeklyStats, null, 2)
+      );
+      console.log(
+        '[Report Export] monthlyStats:',
+        JSON.stringify(monthlyStats, null, 2)
+      );
+
       // 构建 PortfolioDetail（字段含义与 /portfolio/:id、/portfolio/:id/stats 对齐）
       const portfolioDetail: PortfolioDetail = {
         ...portfolio,
@@ -943,6 +1036,8 @@ router.get(
         totalPnlPercent: totalReturnPercent,
         realizedPnl: pnlV2.realizedPnl,
         unrealizedPnl: pnlV2.unrealizedPnl,
+        weeklyStats,
+        monthlyStats,
       };
 
       // 导入 reportService

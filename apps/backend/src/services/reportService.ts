@@ -59,7 +59,11 @@ export class ReportService {
     markdown += this.generateCoreIndicatorsSection(portfolioDetail, timestamp);
     markdown += '\n\n';
 
-    // 4. 各市场持仓
+    // 4. 周期收益
+    markdown += this.generatePeriodReturnsSection(portfolioDetail);
+    markdown += '\n\n';
+
+    // 5. 各市场持仓
     markdown += this.generateHoldingsSection(portfolioDetail);
     markdown += '\n\n';
 
@@ -139,9 +143,10 @@ export class ReportService {
         ? detail.netDepositedCash
         : this.calculateNetDeposit(detail.transactions);
     const usedCash = detail.initialCash - detail.cash;
+    // 杠杆比例 = 已用杠杆 / 总资产（与前端显示一致）
     const leverageRatio =
-      leverage.totalAmount > 0
-        ? ((leverage.usedAmount / leverage.totalAmount) * 100).toFixed(2)
+      detail.totalAssets > 0
+        ? ((leverage.usedAmount / detail.totalAssets) * 100).toFixed(2)
         : '0.00';
 
     let section = `## **2. 投资组合综合概览 - ${date}** (汇率折算 CNY)\n\n`;
@@ -200,9 +205,10 @@ export class ReportService {
   ): string {
     const totalDividend = this.calculateTotalDividend(detail.transactions);
     const leverage = detail.leverage;
+    // 杠杆比例 = 已用杠杆 / 总资产（与前端显示一致）
     const leverageRatio =
-      leverage.totalAmount > 0
-        ? ((leverage.usedAmount / leverage.totalAmount) * 100).toFixed(2)
+      detail.totalAssets > 0
+        ? ((leverage.usedAmount / detail.totalAssets) * 100).toFixed(2)
         : '0.00';
 
     // 获取汇率信息
@@ -242,6 +248,104 @@ export class ReportService {
     section += `*汇率：1 USD = ${usdRate} CNY, 1 HKD = ${hkdRate} CNY（更新时间: ${timestamp}）*\n`;
 
     return section;
+  }
+
+  /**
+   * 生成周期收益部分
+   */
+  private generatePeriodReturnsSection(detail: PortfolioDetail): string {
+    console.log('[ReportService] 生成周期收益部分');
+    console.log(
+      '[ReportService] weeklyStats:',
+      JSON.stringify(detail.weeklyStats, null, 2)
+    );
+    console.log(
+      '[ReportService] monthlyStats:',
+      JSON.stringify(detail.monthlyStats, null, 2)
+    );
+
+    let section = '## **4. 周期收益**\n\n';
+    section +=
+      '| 周期 | 总资产变化 | 总资产变化率 | 投资收益率 | 基准日期 | 数据来源 |\n';
+    section +=
+      '| :--- | :--------- | :----------- | :--------- | :------- | :------- |\n';
+
+    // 周度收益
+    if (detail.weeklyStats) {
+      const ws = detail.weeklyStats;
+      // 检查是否有数据
+      if (
+        ws.totalValueChange !== null &&
+        ws.totalValueChange !== undefined &&
+        ws.totalValueChangePercent !== null &&
+        ws.totalValueChangePercent !== undefined
+      ) {
+        const valueChange = this.formatNumberWithSign(ws.totalValueChange);
+        const valueChangePercent = this.formatPercentWithSign(
+          ws.totalValueChangePercent * 100
+        );
+        const periodReturn =
+          ws.periodReturnPercent !== null
+            ? this.formatPercentWithSign(ws.periodReturnPercent * 100)
+            : 'N/A';
+        const baseDate = ws.baseDate || 'N/A';
+        const source = this.getSourceLabel(ws.baseDateSource);
+        section += `| 周度 | ${valueChange} | ${valueChangePercent} | ${periodReturn} | ${baseDate} | ${source} |\n`;
+      } else {
+        section += `| 周度 | N/A | N/A | N/A | 数据缺失 | - |\n`;
+      }
+    } else {
+      section += `| 周度 | N/A | N/A | N/A | 数据缺失 | - |\n`;
+    }
+
+    // 月度收益
+    if (detail.monthlyStats) {
+      const ms = detail.monthlyStats;
+      // 检查是否有数据
+      if (
+        ms.totalValueChange !== null &&
+        ms.totalValueChange !== undefined &&
+        ms.totalValueChangePercent !== null &&
+        ms.totalValueChangePercent !== undefined
+      ) {
+        const valueChange = this.formatNumberWithSign(ms.totalValueChange);
+        const valueChangePercent = this.formatPercentWithSign(
+          ms.totalValueChangePercent * 100
+        );
+        const periodReturn =
+          ms.periodReturnPercent !== null
+            ? this.formatPercentWithSign(ms.periodReturnPercent * 100)
+            : 'N/A';
+        const baseDate = ms.baseDate || 'N/A';
+        const source = this.getSourceLabel(ms.baseDateSource);
+        section += `| 月度 | ${valueChange} | ${valueChangePercent} | ${periodReturn} | ${baseDate} | ${source} |\n`;
+      } else {
+        section += `| 月度 | N/A | N/A | N/A | 数据缺失 | - |\n`;
+      }
+    } else {
+      section += `| 月度 | N/A | N/A | N/A | 数据缺失 | - |\n`;
+    }
+
+    section +=
+      '\n*说明：总资产变化包含存取款影响，投资收益率排除存取款影响，仅反映投资表现*\n';
+
+    return section;
+  }
+
+  /**
+   * 获取数据来源标签
+   */
+  private getSourceLabel(source?: string): string {
+    switch (source) {
+      case 'realtime':
+        return '实时行情';
+      case 'kline':
+        return 'K线数据';
+      case 'cost':
+        return '成本估值';
+      default:
+        return '-';
+    }
   }
 
   /**
@@ -524,7 +628,25 @@ export class ReportService {
     const leverageCostTxs = transactions.filter(
       (tx) => tx.type === TransactionType.LEVERAGE_COST
     );
-    if (leverageCostTxs.length === 0) return 'N/A';
+
+    if (leverageCostTxs.length === 0) {
+      // 如果没有融资成本记录，查找融资操作的时间区间
+      const leverageTxs = transactions.filter(
+        (tx) =>
+          tx.type === TransactionType.LEVERAGE_ADD ||
+          tx.type === TransactionType.LEVERAGE_REMOVE
+      );
+
+      if (leverageTxs.length === 0) {
+        return '未使用融资';
+      }
+
+      // 显示融资操作的时间区间，并提示未记录成本
+      const dates = leverageTxs.map((tx) => new Date(tx.date).getTime());
+      const minDate = new Date(Math.min(...dates));
+      const maxDate = new Date(Math.max(...dates));
+      return `${format(minDate, 'yyyy-MM-dd')} ~ ${format(maxDate, 'yyyy-MM-dd')} (未记录成本)`;
+    }
 
     const dates = leverageCostTxs.map((tx) => new Date(tx.date).getTime());
     const minDate = new Date(Math.min(...dates));

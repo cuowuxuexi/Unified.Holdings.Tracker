@@ -1,44 +1,24 @@
-// 市场枚举
-export enum Market {
-  CN = 'CN',
-  HK = 'HK',
-  US = 'US',
-}
+import {
+  Market,
+  Asset,
+  TransactionType,
+  Transaction,
+  LeverageInfo,
+  Portfolio as DomainPortfolio,
+  Position as DomainPosition,
+  Quote,
+  KlinePoint,
+} from '@uht/domain';
 
-// 资产基础信息
-export interface Asset {
-  code: string; // 包含市场前缀，如 sh600519, hk00700, usAAPL
-  name: string;
-  market: Market;
-}
-
-// 交易类型
-export enum TransactionType {
-  BUY = 'BUY',
-  SELL = 'SELL',
-  DEPOSIT = 'DEPOSIT', // 存入现金
-  WITHDRAW = 'WITHDRAW', // 取出现金
-  LEVERAGE_ADD = 'LEVERAGE_ADD', // 增加杠杆额度
-  LEVERAGE_REMOVE = 'LEVERAGE_REMOVE', // 减少杠杆额度
-  LEVERAGE_COST = 'LEVERAGE_COST', // 记录杠杆利息支出
-  DIVIDEND = 'DIVIDEND', // 新增：收到股息
-}
-
-// 交易记录
-export interface Transaction {
-  id: string; // 唯一 ID (e.g., UUID)
-  date: string; // ISO 8601 格式日期时间字符串
-  type: TransactionType;
-  assetCode?: string; // 关联的资产代码 (买卖时)
-  quantity?: number; // 交易数量 (买卖时)
-  price?: number; // 交易价格 (买卖时)
-  amount?: number; // 交易总额 (买卖时) 或 存取金额 或 杠杆调整金额/成本
-  commission?: number; // 佣金 (可选)
-  leverageUsed?: number; // 用于记录交易中使用的杠杆额度 (可选, 主要用于买入交易)
-  currency?: string; // 货币类型 (CNY/USD/HKD)
-  exchangeRate?: number; // 相对于CNY的汇率
-  notes?: string; // 备注 (可选)
-}
+export {
+  Market,
+  Asset,
+  TransactionType,
+  Transaction,
+  LeverageInfo,
+  Quote,
+  KlinePoint,
+};
 
 /**
  * 持仓信息（通常由后端根据交易记录计算得出）
@@ -49,32 +29,7 @@ export interface Transaction {
  * 对于港股和美股，后端会额外提供原币种字段（如 costPriceLocal, marketValueLocal），
  * 但主字段（costPrice, marketValue等）始终为人民币。
  */
-export interface Position {
-  asset: Asset;
-  /** 持仓数量（股数/份数） */
-  quantity: number;
-
-  /**
-   * 持仓成本价（单位：CNY/人民币）
-   * - 对于A股：直接为交易时的价格
-   * - 对于港股/美股：已通过汇率转换为人民币
-   */
-  costPrice: number;
-
-  /**
-   * 当前市值（单位：CNY/人民币）
-   * - 计算方式：currentPrice（原币种） × exchangeRate × quantity
-   * - 已包含汇率转换，前端无需再次转换
-   */
-  marketValue: number;
-
-  /**
-   * 总成本（单位：CNY/人民币）
-   * - 等于 costPrice × quantity
-   * - 已包含汇率转换，前端无需再次转换
-   */
-  totalCost: number;
-
+export interface Position extends DomainPosition {
   /**
    * 记录交易货币类型（CNY/USD/HKD），仅用于标识原币种
    * 注意：此字段不影响数据转换，主字段已为人民币
@@ -108,48 +63,14 @@ export interface Position {
   marketValueCNY?: number;
 
   /**
-   * 当前价格（单位：原币种）
-   * - 来自实时行情API的原始价格
-   * - 港股：HKD，美股：USD，A股：CNY
-   */
-  currentPrice?: number;
-
-  /**
-   * 当日盈亏额（单位：CNY/人民币）
-   * - 已通过汇率转换为人民币
-   */
-  dailyChange?: number;
-
-  /**
    * 原币种维度的当日盈亏额（单位：原币种）
    */
   dailyChangeLocal?: number;
 
   /**
-   * 当日盈亏百分比（小数形式，0-1 范围）
-   * - 例如：0.05 表示 5%，-0.03 表示 -3%
-   * - 前端显示时需要乘以 100
-   */
-  dailyChangePercent?: number;
-
-  /**
-   * 累计盈亏额（单位：CNY/人民币）
-   * - 计算方式：marketValue - totalCost
-   * - 已包含汇率转换
-   */
-  totalPnl?: number;
-
-  /**
    * 原币种维度的累计盈亏额（单位：原币种）
    */
   totalPnlLocal?: number;
-
-  /**
-   * 累计盈亏百分比（小数形式，0-1 范围）
-   * - 例如：1.5 表示 150%，-0.2 表示 -20%
-   * - 前端显示时需要乘以 100
-   */
-  totalPnlPercent?: number;
 
   /**
    * 周涨跌幅（百分比数值形式）
@@ -164,41 +85,15 @@ export interface Position {
    * - 前端显示时无需乘以 100
    */
   monthlyChangePercent?: number | null | undefined;
-
-  /**
-   * 年涨跌幅（百分比数值形式）
-   * - 例如：120.0 表示 120%，-35.0 表示 -35%
-   * - 前端显示时无需乘以 100
-   */
-  yearlyChangePercent?: number | null | undefined;
-}
-
-// 杠杆信息
-export interface LeverageInfo {
-  totalAmount: number; // 总授信额度
-  usedAmount: number; // 已用额度 (需要计算)
-  availableAmount: number; // 可用额度
-  costRate: number; // 年化利率 (例如 0.05 表示 5%)
 }
 
 // 投资组合
-export interface Portfolio {
-  id: string; // 唯一 ID
-  name: string; // 组合名称
-  cash: number; // 现金余额
-  /**
-   * 初始现金余额：创建投资组合时设定，不随后续交易变动。
-   */
-  initialCash: number;
-  leverage: LeverageInfo; // 杠杆信息
-  attentionInfo?: string; // 注意信息
-  // positions: Position[]; // 持仓列表通常在请求时由后端计算返回
-  transactions: Transaction[]; // 所有交易记录 (持久化存储的核心)
-}
+// 直接使用 Domain 的定义，因为 Transaction 也是兼容的
+export type Portfolio = DomainPortfolio;
 
 // 投资组合详情 (API 返回，包含计算结果)
 export interface PortfolioDetail extends Portfolio {
-  positions: Position[]; // 计算后的当前持仓
+  positions: Position[]; // 计算后的当前持仓 (使用扩展后的 Position)
   totalAssets: number; // 总资产 (市值 + 现金)
   netAssets: number; // 净资产 (总资产 - 已用杠杆)
   totalMarketValue: number; // 总市值
@@ -220,7 +115,6 @@ export interface PortfolioDetail extends Portfolio {
    * 融资成本：根据已用融资额度和杠杆年利率计算
    */
   leverageCost: number;
-  // ... 其他统计数据
 }
 
 // Interface for the data returned by the /portfolio/:id/stats endpoint
@@ -256,35 +150,4 @@ export interface PortfolioStats {
   };
   positions: Position[]; // Assuming Position type includes necessary fields
   timestamp: number;
-}
-
-// 实时报价 (从 tencentApi.ts 移入)
-export interface Quote {
-  code: string;
-  name: string;
-  currentPrice: number;
-  changePercent: number;
-  changeAmount: number;
-  volume?: number;
-  turnover?: number;
-  timestamp: number; // 数据时间戳
-  openPrice?: number;
-  highPrice?: number;
-  lowPrice?: number;
-  prevClosePrice?: number;
-  marketCap?: number;
-  peRatio?: number;
-  weekChangePercent?: number | null | undefined;
-  monthChangePercent?: number | null | undefined;
-  yearChangePercent?: number | null | undefined;
-}
-
-// K 线数据点 (从 tencentApi.ts 移入)
-export interface KlinePoint {
-  date: string; // 日期 (YYYY-MM-DD)
-  open: number;
-  high: number;
-  low: number;
-  close: number;
-  volume: number;
 }

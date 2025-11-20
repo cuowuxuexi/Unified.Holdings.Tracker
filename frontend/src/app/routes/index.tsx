@@ -1,9 +1,10 @@
-import { createBrowserRouter, RouterProvider } from 'react-router-dom';
+import { createHashRouter, RouterProvider } from 'react-router-dom';
 import { RootLayout } from './RootLayout';
 import { PortfolioListPage } from '../../features/portfolio/pages/PortfolioListPage';
 import { PortfolioDetailPage } from '../../features/portfolio/pages/PortfolioDetailPage';
 
-const router = createBrowserRouter([
+// 使用 HashRouter 以支持 Electron 的 file:// 协议
+const router = createHashRouter([
   {
     path: '/',
     element: <RootLayout />,
@@ -23,4 +24,3 @@ const router = createBrowserRouter([
 export function AppRouter() {
   return <RouterProvider router={router} />;
 }
-

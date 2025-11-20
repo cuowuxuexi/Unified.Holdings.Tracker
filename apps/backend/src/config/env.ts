@@ -46,6 +46,7 @@ const envSchema = z.object({
     })
     .default('/api'),
   DATABASE_URL: z.string().default(DEFAULT_DB_URL),
+  LOG_PATH: z.string().optional(),
 });
 
 const parsed = envSchema.parse(process.env);
@@ -54,8 +55,15 @@ const resolvedDatabaseUrl = resolveDatabaseUrl(
   parsed.NODE_ENV
 );
 
+const resolvedLogPath = resolveLogPath(parsed.LOG_PATH, parsed.NODE_ENV);
+
 // 统一进程内可读的数据库路径，避免 Prisma Client 读取到不一致的值
 process.env.DATABASE_URL = resolvedDatabaseUrl;
+
+// 如果解析出了日志路径，设置到环境变量中供 DataService 使用
+if (resolvedLogPath) {
+  process.env.LOG_PATH = resolvedLogPath;
+}
 
 export const appEnv = {
   nodeEnv: parsed.NODE_ENV,
@@ -63,6 +71,7 @@ export const appEnv = {
   frontendUrl: parsed.FRONTEND_URL,
   apiBasePath: parsed.API_BASE_PATH ?? '/api',
   databaseUrl: resolvedDatabaseUrl,
+  logPath: resolvedLogPath,
 };
 
 function resolveDatabaseUrl(rawUrl: string, nodeEnv: string): string {
@@ -80,4 +89,22 @@ function resolveDatabaseUrl(rawUrl: string, nodeEnv: string): string {
   }
 
   return normalized;
+}
+
+function resolveLogPath(
+  rawPath: string | undefined,
+  nodeEnv: string
+): string | undefined {
+  if (rawPath && rawPath.trim().length > 0) {
+    return rawPath;
+  }
+
+  // 如果在 Electron 环境中（有 ELECTRON_USER_DATA），优先使用 userData/logs
+  const electronUserData = process.env.ELECTRON_USER_DATA;
+  if (electronUserData && electronUserData.trim().length > 0) {
+    return path.join(electronUserData, 'logs');
+  }
+
+  // 开发环境或普通环境，返回 undefined，让 DataService 使用默认值 (baseDataDir/logs)
+  return undefined;
 }

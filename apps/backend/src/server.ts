@@ -139,8 +139,149 @@ export const createApp = (): Express => {
 
 const app = createApp();
 
+// 数据库初始化：创建所有必需的表
+async function initializeDatabase() {
+  console.log('Checking database schema...');
+
+  try {
+    const tableStatements: Record<string, string> = {
+      Portfolio: `
+        CREATE TABLE IF NOT EXISTS "Portfolio" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "name" TEXT NOT NULL,
+          "initialCash" REAL NOT NULL,
+          "cash" REAL NOT NULL,
+          "leverageTotalAmount" REAL NOT NULL,
+          "leverageUsedAmount" REAL NOT NULL,
+          "leverageAvailableAmount" REAL NOT NULL,
+          "leverageCostRate" REAL NOT NULL,
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" DATETIME NOT NULL,
+          "attentionInfo" TEXT
+        )
+      `,
+      Asset: `
+        CREATE TABLE IF NOT EXISTS "Asset" (
+          "code" TEXT NOT NULL PRIMARY KEY,
+          "name" TEXT NOT NULL,
+          "market" TEXT NOT NULL,
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" DATETIME NOT NULL
+        )
+      `,
+      Transaction: `
+        CREATE TABLE IF NOT EXISTS "Transaction" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "portfolioId" TEXT NOT NULL,
+          "type" TEXT NOT NULL,
+          "date" DATETIME NOT NULL,
+          "assetCode" TEXT,
+          "quantity" REAL,
+          "price" REAL,
+          "amount" REAL,
+          "commission" REAL,
+          "leverageUsed" REAL,
+          "currency" TEXT NOT NULL DEFAULT 'CNY',
+          "exchangeRate" REAL,
+          "notes" TEXT,
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" DATETIME NOT NULL,
+          FOREIGN KEY ("assetCode") REFERENCES "Asset"("code"),
+          FOREIGN KEY ("portfolioId") REFERENCES "Portfolio"("id") ON DELETE CASCADE
+        )
+      `,
+      QuoteSnapshot: `
+        CREATE TABLE IF NOT EXISTS "QuoteSnapshot" (
+          "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+          "assetCode" TEXT NOT NULL,
+          "timestamp" DATETIME NOT NULL,
+          "currentPrice" REAL NOT NULL,
+          "changePercent" REAL,
+          "changeAmount" REAL,
+          "volume" REAL,
+          "turnover" REAL,
+          "openPrice" REAL,
+          "highPrice" REAL,
+          "lowPrice" REAL,
+          "prevClosePrice" REAL,
+          "marketCap" REAL,
+          "peRatio" REAL,
+          "weekChangePercent" REAL,
+          "monthChangePercent" REAL,
+          "yearChangePercent" REAL,
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY ("assetCode") REFERENCES "Asset"("code") ON DELETE CASCADE
+        )
+      `,
+      AttentionItem: `
+        CREATE TABLE IF NOT EXISTS "AttentionItem" (
+          "id" TEXT NOT NULL PRIMARY KEY,
+          "portfolioId" TEXT NOT NULL,
+          "title" TEXT NOT NULL,
+          "content" TEXT NOT NULL,
+          "order" INTEGER NOT NULL DEFAULT 0,
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" DATETIME NOT NULL,
+          FOREIGN KEY ("portfolioId") REFERENCES "Portfolio"("id") ON DELETE CASCADE
+        )
+      `,
+    };
+
+    const indexStatements = [
+      `CREATE INDEX IF NOT EXISTS "Transaction_assetCode_idx" ON "Transaction"("assetCode")`,
+      `CREATE INDEX IF NOT EXISTS "Transaction_portfolioId_type_idx" ON "Transaction"("portfolioId", "type")`,
+      `CREATE INDEX IF NOT EXISTS "Transaction_portfolioId_date_idx" ON "Transaction"("portfolioId", "date")`,
+    ];
+
+    const existingTables = new Set(
+      (
+        await prisma.$queryRaw<Array<{ name: string }>>`
+          SELECT name FROM sqlite_master WHERE type = 'table'
+        `
+      ).map((row) => row.name)
+    );
+
+    const missing = Object.keys(tableStatements).filter(
+      (name) => !existingTables.has(name)
+    );
+    if (missing.length > 0) {
+      console.log(
+        `Database schema missing tables: ${missing.join(', ')}. Creating...`
+      );
+    } else {
+      console.log('Database schema exists. Ensuring all tables and indexes...');
+    }
+
+    for (const [tableName, statement] of Object.entries(tableStatements)) {
+      await prisma.$executeRawUnsafe(statement);
+      if (!existingTables.has(tableName)) {
+        console.log(`✓ Table ensured: ${tableName}`);
+      }
+    }
+
+    for (const statement of indexStatements) {
+      await prisma.$executeRawUnsafe(statement);
+    }
+
+    console.log('✅ Database schema ensured successfully');
+  } catch (error) {
+    console.error('Failed to ensure database schema:', error);
+    throw error;
+  }
+}
+
 const startServer = async () => {
   if (appEnv.nodeEnv !== 'test') {
+    // 初始化数据库
+    try {
+      await initializeDatabase();
+    } catch (error) {
+      console.error('Database initialization failed:', error);
+      console.error(
+        'Application will continue, but database operations may fail'
+      );
+    }
+
     try {
       console.log('Initializing exchange rates...');
       await initExchangeRates();
@@ -148,6 +289,23 @@ const startServer = async () => {
     } catch (error) {
       console.error('Failed to initialize exchange rates:', error);
     }
+  }
+
+  // Zombie Killer: 当作为 Electron 子进程运行时，父进程退出后自动退出
+  if (process.env.ELECTRON_RUN_AS_NODE) {
+    const parentPid = process.ppid;
+    console.log(
+      `Running as Electron child process. Monitoring parent process ${parentPid}...`
+    );
+
+    setInterval(() => {
+      try {
+        process.kill(parentPid, 0);
+      } catch (e) {
+        console.log(`Parent process ${parentPid} is gone. Exiting...`);
+        process.exit(0);
+      }
+    }, 3000); // 每 3 秒检查一次
   }
 
   const server = app.listen(port, () => {
