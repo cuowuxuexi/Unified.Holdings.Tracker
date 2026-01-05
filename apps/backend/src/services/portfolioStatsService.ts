@@ -330,7 +330,11 @@ export class PortfolioStatsService {
       const stats = await periodCacheService.rememberPeriodStats(
         cacheKey,
         PERIOD_CACHE_TTL.periodStats.ttl,
-        () => calculatePeriodStats(portfolio, period, { quotes: quotesMap })
+        () => calculatePeriodStats(portfolio, period, {
+          quotes: quotesMap,
+          // 🔧 修复：期末使用实时价格，与总盈亏计算口径保持一致
+          useRealtimeEndValue: true,
+        })
       );
 
       return [period, stats] as const;

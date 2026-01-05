@@ -281,17 +281,11 @@ export async function calculatePeriodStats(
     }
 
     // --- 3. 计算期初/期末市值 ---
-    function getHistoricalRate(code: string, timestamp: number): number {
-      const history = rateHistory[code];
-      if (!history || history.length === 0) {
-        return getExchangeRateForAssetToCNY(code);
-      }
-      for (let i = history.length - 1; i >= 0; i--) {
-        if (history[i].timestamp <= timestamp) {
-          return history[i].rate;
-        }
-      }
-      return history[0].rate;
+    // 🔧 修复：统一使用当前汇率，与 totalPnl 计算口径保持一致
+    // 原逻辑使用历史交易汇率，导致港股/美股的 periodPnl 与 totalPnl 不一致
+    function getHistoricalRate(code: string, _timestamp: number): number {
+      // 始终使用当前汇率，保证与 floatingPnl 计算口径一致
+      return getExchangeRateForAssetToCNY(code);
     }
 
     /**
@@ -529,21 +523,24 @@ export async function calculatePeriodStats(
         `加权现金流=${weightedCashFlows.toFixed(2)}`
     );
 
+    // 🔧 修复：移除 startValue > 0 的限制
+    // 当期初值为0时（新建仓），只要分母（期初值 + 加权现金流）足够大，仍可计算收益率
+    // 这对于投资组合创建当天即有入金的情况非常重要
     let periodReturnPercent: number | null = null;
-    if (startValue > 0) {
-      const denominator = startValue + weightedCashFlows;
-      if (Math.abs(denominator) > 1e-9) {
-        periodReturnPercent =
-          (endValue - startValue - totalCashFlows) / denominator;
-        console.log(
-          `[Modified Dietz] 期初=${startValue.toFixed(2)}, 期末=${endValue.toFixed(2)}, ` +
-            `分母=${denominator.toFixed(2)}, 收益率=${(periodReturnPercent * 100).toFixed(4)}%`
-        );
-      }
+    const denominator = startValue + weightedCashFlows;
+    if (Math.abs(denominator) > 1e-9) {
+      periodReturnPercent =
+        (endValue - startValue - totalCashFlows) / denominator;
+      console.log(
+        `[Modified Dietz] 期初=${startValue.toFixed(2)}, 期末=${endValue.toFixed(2)}, ` +
+          `分母=${denominator.toFixed(2)}, 收益率=${(periodReturnPercent * 100).toFixed(4)}%`
+      );
     }
 
-    const periodPnl =
-      periodReturnPercent !== null ? periodReturnPercent * startValue : null;
+    // 🔧 修复：Period PnL 应该是绝对值变化扣除净现金流，而不是 收益率 * 期初值
+    // 当期初值(V0)为0或很小时（例如新建仓），用 R * V0 计算 PnL 会导致严重误差
+    // PnL = V1 - V0 - C
+    const periodPnl = endValue - startValue - totalCashFlows;
 
     return {
       periodReturnPercent,

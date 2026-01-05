@@ -10,6 +10,7 @@ import { prisma } from './lib/prisma';
 import marketDataRouter from './routes/marketData';
 import portfolioRouter from './routes/portfolio';
 import batchRouter from './routes/batch';
+import archiveRouter from './routes/archive';
 import { dataService } from './services/dataService';
 import { initExchangeRates } from './services/currencyService';
 import { appEnv } from './config/env';
@@ -51,14 +52,13 @@ class HttpError extends Error {
 }
 
 const errorHandler = (
-  err: Error,
+  err: any,
   _req: Request,
   res: Response,
   _next: NextFunction
 ) => {
-  const status = err instanceof HttpError ? err.statusCode : 500;
-  const message =
-    err instanceof HttpError ? err.message : 'Internal Server Error';
+  const status = err.statusCode || err.status || 500;
+  const message = err.message || 'Internal Server Error';
 
   if (status >= 500) {
     console.error('[Error Handler]', err);
@@ -93,6 +93,20 @@ export const createApp = (): Express => {
       credentials: true,
     })
   );
+  // 解决 "EOF while parsing a value at line 1 column 0" 错误
+  // 当 Content-Type 是 application/json 但 body 为空时，将其视为空对象
+  app.use((req, _res, next) => {
+    if (
+      req.headers['content-type'] === 'application/json' &&
+      req.headers['content-length'] === '0'
+    ) {
+      req.body = {};
+      // 移除 Content-Type 以跳过 express.json() 解析
+      delete req.headers['content-type'];
+    }
+    next();
+  });
+
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
   app.use(requestLogger);
@@ -130,6 +144,7 @@ export const createApp = (): Express => {
   app.use(`${apiBasePath}/market`, marketDataRouter);
   app.use(`${apiBasePath}/portfolio`, portfolioRouter);
   app.use(`${apiBasePath}/batch`, batchRouter);
+  app.use(`${apiBasePath}`, archiveRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);

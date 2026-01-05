@@ -11,6 +11,90 @@ import {
 import { frontendEnv } from '../env';
 
 /**
+ * 存档相关类型定义（年度存档，保留兼容）
+ */
+export interface ArchiveMetadata {
+  id: string;
+  portfolioId: string;
+  portfolioName: string;
+  year: number;
+  createdAt: string;
+  version: string;
+  transactionCount: number;
+  positionCount: number;
+  dateRange: {
+    start: string;
+    end: string;
+  };
+}
+
+export interface ArchiveListResponse {
+  archives: ArchiveMetadata[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+export interface CreateArchiveResponse {
+  success: boolean;
+  archive: {
+    id: string;
+    filename: string;
+    path: string;
+    metadata: ArchiveMetadata;
+  };
+  message: string;
+}
+
+/**
+ * 备份相关类型定义（新的完整数据备份功能）
+ */
+export interface BackupMetadata {
+  backupId: string;
+  portfolioId: string;
+  portfolioName: string;
+  createdAt: string;
+  version: string;
+  transactionCount: number;
+  assetCount: number;
+}
+
+export interface BackupIndexEntry {
+  backupId: string;
+  portfolioId: string;
+  portfolioName: string;
+  filename: string;
+  relativePath: string;
+  createdAt: string;
+  fileSize: number;
+  transactionCount: number;
+  assetCount: number;
+}
+
+export interface BackupListResponse {
+  backups: BackupIndexEntry[];
+  total: number;
+}
+
+export interface CreateBackupResponse {
+  success: boolean;
+  backup: {
+    id: string;
+    filename: string;
+    path: string;
+    metadata: BackupMetadata;
+  };
+  message: string;
+}
+
+export interface RestoreBackupResponse {
+  success: boolean;
+  message: string;
+  restoredTransactionCount?: number;
+  restoredAssetCount?: number;
+}
+
+/**
  * 批量导入相关类型定义
  */
 export interface ImportRow {
@@ -348,6 +432,161 @@ const apiClient = {
         `Error in executeBatchImport for portfolio ${portfolioId}:`,
         error
       );
+      throw error;
+    }
+  },
+
+  // 存档相关 API
+  /**
+   * 创建年度存档
+   */
+  createArchive: async (
+    portfolioId: string,
+    year: number
+  ): Promise<CreateArchiveResponse> => {
+    try {
+      const response = await axios.post<CreateArchiveResponse>(
+        `${API_BASE_URL}/api/portfolio/${portfolioId}/archive`,
+        { year }
+      );
+      return response.data;
+    } catch (error) {
+      console.error(
+        `Error creating archive for portfolio ${portfolioId}, year ${year}:`,
+        error
+      );
+      throw error;
+    }
+  },
+
+  /**
+   * 获取存档列表
+   */
+  getArchives: async (portfolioId: string): Promise<ArchiveListResponse> => {
+    try {
+      const response = await axios.get<ArchiveListResponse>(
+        `${API_BASE_URL}/api/portfolio/${portfolioId}/archives`
+      );
+      return response.data;
+    } catch (error) {
+      console.error(
+        `Error fetching archives for portfolio ${portfolioId}:`,
+        error
+      );
+      throw error;
+    }
+  },
+
+  /**
+   * 下载存档
+   */
+  downloadArchive: async (archiveId: string): Promise<Blob> => {
+    try {
+      const response = await axios.get(
+        `${API_BASE_URL}/api/archive/${archiveId}`,
+        {
+          params: { format: 'download' },
+          responseType: 'blob',
+        }
+      );
+      return response.data;
+    } catch (error) {
+      console.error(`Error downloading archive ${archiveId}:`, error);
+      throw error;
+    }
+  },
+
+  /**
+   * 删除存档
+   */
+  deleteArchive: async (archiveId: string): Promise<void> => {
+    try {
+      await axios.delete(`${API_BASE_URL}/api/archive/${archiveId}`);
+    } catch (error) {
+      console.error(`Error deleting archive ${archiveId}:`, error);
+      throw error;
+    }
+  },
+
+  // ============================================
+  // 备份/恢复 API（新功能）
+  // ============================================
+
+  /**
+   * 创建备份
+   */
+  createBackup: async (portfolioId: string): Promise<CreateBackupResponse> => {
+    try {
+      const response = await axios.post<CreateBackupResponse>(
+        `${API_BASE_URL}/api/portfolio/${portfolioId}/backup`
+      );
+      return response.data;
+    } catch (error) {
+      console.error(`Error creating backup for portfolio ${portfolioId}:`, error);
+      throw error;
+    }
+  },
+
+  /**
+   * 获取备份列表
+   */
+  getBackups: async (portfolioId: string): Promise<BackupListResponse> => {
+    try {
+      const response = await axios.get<BackupListResponse>(
+        `${API_BASE_URL}/api/portfolio/${portfolioId}/backups`
+      );
+      return response.data;
+    } catch (error) {
+      console.error(`Error fetching backups for portfolio ${portfolioId}:`, error);
+      throw error;
+    }
+  },
+
+  /**
+   * 恢复备份
+   */
+  restoreBackup: async (
+    portfolioId: string,
+    backupId: string
+  ): Promise<RestoreBackupResponse> => {
+    try {
+      const response = await axios.post<RestoreBackupResponse>(
+        `${API_BASE_URL}/api/portfolio/${portfolioId}/restore/${backupId}`
+      );
+      return response.data;
+    } catch (error) {
+      console.error(
+        `Error restoring backup ${backupId} to portfolio ${portfolioId}:`,
+        error
+      );
+      throw error;
+    }
+  },
+
+  /**
+   * 下载备份
+   */
+  downloadBackup: async (backupId: string): Promise<Blob> => {
+    try {
+      const response = await axios.get(`${API_BASE_URL}/api/backup/${backupId}`, {
+        params: { format: 'download' },
+        responseType: 'blob',
+      });
+      return response.data;
+    } catch (error) {
+      console.error(`Error downloading backup ${backupId}:`, error);
+      throw error;
+    }
+  },
+
+  /**
+   * 删除备份
+   */
+  deleteBackup: async (backupId: string): Promise<void> => {
+    try {
+      await axios.delete(`${API_BASE_URL}/api/backup/${backupId}`);
+    } catch (error) {
+      console.error(`Error deleting backup ${backupId}:`, error);
       throw error;
     }
   },

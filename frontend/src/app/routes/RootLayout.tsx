@@ -12,11 +12,16 @@ import {
   GithubOutlined,
   DownOutlined,
   ExportOutlined,
+  SaveOutlined,
+  FolderOpenOutlined,
+  HistoryOutlined,
 } from '@ant-design/icons';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { checkBackendConnection } from '../../config';
 import useAppStore from '../../store';
 import apiClient from '../../services/api';
+import { CreateArchiveModal } from '../../components/CreateArchiveModal';
+import { ViewArchivesModal } from '../../components/ViewArchivesModal';
 
 const { Header, Content } = Layout;
 const { Title } = Typography;
@@ -25,6 +30,17 @@ export function RootLayout() {
   const [messageApi, contextHolder] = message.useMessage();
   const [isExporting, setIsExporting] = useState(false);
   const selectedPortfolioId = useAppStore((state) => state.selectedPortfolioId);
+  const refreshPortfolioDetail = useAppStore((state) => state.fetchPortfolioDetail);
+  const [createArchiveOpen, setCreateArchiveOpen] = useState(false);
+  const [viewArchivesOpen, setViewArchivesOpen] = useState(false);
+
+  // 恢复成功后刷新投资组合数据
+  const handleRestoreSuccess = useCallback(() => {
+    if (selectedPortfolioId) {
+      refreshPortfolioDetail(selectedPortfolioId);
+      messageApi.success('数据已刷新');
+    }
+  }, [selectedPortfolioId, refreshPortfolioDetail, messageApi]);
 
   useEffect(() => {
     const checkConnection = async () => {
@@ -145,6 +161,31 @@ export function RootLayout() {
       onClick: handleExportMarkdown,
       disabled: !selectedPortfolioId,
     },
+    {
+      type: 'divider',
+    },
+    {
+      key: 'create-archive',
+      label: (
+        <Space>
+          <SaveOutlined />
+          创建存档
+        </Space>
+      ),
+      onClick: () => setCreateArchiveOpen(true),
+      disabled: !selectedPortfolioId,
+    },
+    {
+      key: 'view-archives',
+      label: (
+        <Space>
+          <HistoryOutlined />
+          读取存档
+        </Space>
+      ),
+      onClick: () => setViewArchivesOpen(true),
+      disabled: !selectedPortfolioId,
+    },
   ];
 
   return (
@@ -199,6 +240,19 @@ export function RootLayout() {
           </Dropdown>
         </Space>
       </Header>
+
+      {/* 存档相关对话框 */}
+      <CreateArchiveModal
+        open={createArchiveOpen}
+        portfolioId={selectedPortfolioId}
+        onClose={() => setCreateArchiveOpen(false)}
+      />
+      <ViewArchivesModal
+        open={viewArchivesOpen}
+        portfolioId={selectedPortfolioId}
+        onClose={() => setViewArchivesOpen(false)}
+        onRestoreSuccess={handleRestoreSuccess}
+      />
 
       <Content
         style={{
