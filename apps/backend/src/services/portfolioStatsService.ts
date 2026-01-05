@@ -334,6 +334,10 @@ export class PortfolioStatsService {
           quotes: quotesMap,
           // 🔧 修复：期末使用实时价格，与总盈亏计算口径保持一致
           useRealtimeEndValue: true,
+          // 🔧 修复：周度统计启用 usePreCloseStartValue
+          // 当周度起始日是今天（如周一）时，期初使用昨收价（prevClosePrice）
+          // 这样周一的周度收益 = 当日盈亏
+          usePreCloseStartValue: period === 'weekly',
         })
       );
 

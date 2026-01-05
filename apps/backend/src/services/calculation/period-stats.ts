@@ -95,8 +95,10 @@ export async function calculatePeriodStats(
           startDate = startOfDay(subDays(endDate, 1));
           break;
         case 'weekly':
-          // 本周一作为周度起始日
+          // 本周一作为周度起始日（周度收益 = 本周至今的表现）
+          // 周一时起始日是今天，期初会使用 prevClosePrice（昨收价）
           startDate = startOfDay(getLastWeekSaturdayDate(endDate));
+          console.log(`[calculatePeriodStats] weekly: 起始日=${formatDate(startDate)}（本周一）`);
           break;
         case 'monthly':
           // 本月1日作为月度起始日

@@ -14,16 +14,35 @@ export function formatDate(d: Date): string {
 }
 
 /**
- * 获取本周一的日期（一周的开始）
- * 注意：周一是一周的第一天，周日是一周的最后一天
+ * 获取本周一的日期（周度统计起始日）
+ *
+ * 设计说明：周度收益 = 本周一开盘前 → 今天的收益
+ * - 这样周度收益统计的是"本周至今"的表现
+ * - 周一时，周度起始日就是今天，但期初使用昨收价（prevClosePrice）
+ *
+ * @param today 当前日期
+ * @returns 本周一的日期
+ *
+ * 示例（假设今天是2026-01-05周一）：
+ * - 返回 2026-01-05（本周一，即今天）
+ * - 周度期初价格 = 使用 prevClosePrice（上周五收盘价）
+ * - 周度期末价格 = 今天的实时价格
+ * - 周度收益 = 当日盈亏
  */
 export function getLastWeekSaturdayDate(today: Date): Date {
   const dayOfWeek = today.getDay(); // 0=周日, 1=周一, 2=周二, ..., 6=周六
   // 计算距离本周一的天数
-  // 周日(0)→回退到上周一(6天前)
-  // 周一(1)→0天（今天就是周一）
-  // 周二(2)→1天, 周三(3)→2天, ..., 周六(6)→5天
+  // 周日(0)→本周一是前一天?不对，周日应该属于上周，本周一是明天-6天=昨天-6天...
+  // 简单算法：周日回退6天到上周一，其他天回退 dayOfWeek-1 天
+  // 周一(1)→0天前（今天）
+  // 周二(2)→1天前
+  // 周三(3)→2天前
+  // 周四(4)→3天前
+  // 周五(5)→4天前
+  // 周六(6)→5天前
+  // 周日(0)→6天前
   const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  console.log(`[getLastWeekSaturdayDate] today=${today.toISOString()}, dayOfWeek=${dayOfWeek}, daysToMonday=${daysToMonday}`);
   return subDays(today, daysToMonday);
 }
 
