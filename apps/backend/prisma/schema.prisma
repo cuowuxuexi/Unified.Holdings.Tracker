@@ -1,0 +1,113 @@
+generator client {
+  provider = "prisma-client-js"
+  binaryTargets = ["native", "windows", "debian-openssl-3.0.x"]
+}
+
+// 数据库配置
+// DATABASE_URL 应设置为：file:./prisma/data/portfolio.db
+// 路径相对于 apps/backend/ 目录（不是项目根目录）
+// 确保 apps/backend/prisma/data/ 目录存在
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Portfolio {
+  id                      String          @id @default(uuid())
+  name                    String
+  initialCash             Decimal
+  cash                    Decimal
+  leverageTotalAmount     Decimal
+  leverageUsedAmount      Decimal
+  leverageAvailableAmount Decimal
+  leverageCostRate        Decimal
+  createdAt               DateTime        @default(now())
+  updatedAt               DateTime        @updatedAt
+  attentionInfo           String?
+  AttentionItem           AttentionItem[]
+  transactions            Transaction[]
+}
+
+model Asset {
+  code         String          @id
+  name         String
+  market       Market
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  quotes       QuoteSnapshot[]
+  transactions Transaction[]
+}
+
+model Transaction {
+  id           String          @id @default(uuid())
+  portfolioId  String
+  type         TransactionType
+  date         DateTime
+  assetCode    String?
+  quantity     Decimal?
+  price        Decimal?
+  amount       Decimal?
+  commission   Decimal?
+  leverageUsed Decimal?
+  currency     String          @default("CNY")
+  exchangeRate Decimal?
+  notes        String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+  asset        Asset?          @relation(fields: [assetCode], references: [code])
+  portfolio    Portfolio       @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@index([assetCode])
+  @@index([portfolioId, type])
+  @@index([portfolioId, date])
+}
+
+model QuoteSnapshot {
+  id                 Int      @id @default(autoincrement())
+  assetCode          String
+  timestamp          DateTime
+  currentPrice       Decimal
+  changePercent      Decimal?
+  changeAmount       Decimal?
+  volume             Decimal?
+  turnover           Decimal?
+  openPrice          Decimal?
+  highPrice          Decimal?
+  lowPrice           Decimal?
+  prevClosePrice     Decimal?
+  marketCap          Decimal?
+  peRatio            Decimal?
+  weekChangePercent  Decimal?
+  monthChangePercent Decimal?
+  yearChangePercent  Decimal?
+  createdAt          DateTime @default(now())
+  asset              Asset    @relation(fields: [assetCode], references: [code], onDelete: Cascade)
+}
+
+model AttentionItem {
+  id          String    @id
+  portfolioId String
+  title       String
+  content     String
+  order       Int       @default(0)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime
+  Portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+}
+
+enum Market {
+  CN
+  HK
+  US
+}
+
+enum TransactionType {
+  BUY
+  SELL
+  DEPOSIT
+  WITHDRAW
+  LEVERAGE_ADD
+  LEVERAGE_REMOVE
+  LEVERAGE_COST
+  DIVIDEND
+}

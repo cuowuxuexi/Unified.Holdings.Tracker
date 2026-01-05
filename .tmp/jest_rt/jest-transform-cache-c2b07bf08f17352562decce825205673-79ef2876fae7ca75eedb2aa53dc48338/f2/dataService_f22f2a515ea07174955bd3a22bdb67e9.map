@@ -1,0 +1,1 @@
+{"file":"/mnt/d/Unified.Holdings.Tracker-main/apps/backend/src/services/dataService.ts","mappings":";;;AAAA,6DAAwE;AAA/D,2GAAA,WAAW,OAAA;AAAE,2GAAA,WAAW,OAAA","names":[],"sources":["/mnt/d/Unified.Holdings.Tracker-main/apps/backend/src/services/dataService.ts"],"sourcesContent":["export { DataService, dataService } from '@uht/infra/data/data-service';\n"],"version":3}

@@ -1,0 +1,283 @@
+{
+  "timestamp": "2025-11-16T08:55:50.000Z",
+  "projectName": "Unified Holdings Tracker",
+  "projectPath": "d:\\optimize-branch-copy",
+  "summary": {
+    "totalModules": 6,
+    "primaryLanguages": ["TypeScript", "JavaScript"],
+    "architecture": "Monorepo + DDD (Domain-Driven Design)",
+    "techStack": {
+      "desktop": "Electron 35",
+      "frontend": "React 19 + Vite + Ant Design",
+      "backend": "Node.js + Express 5 + Prisma",
+      "database": "SQLite",
+      "stateManagement": "Zustand",
+      "testing": "Jest + Vitest"
+    }
+  },
+  "modules": [
+    {
+      "name": "backend",
+      "path": "apps/backend",
+      "type": "service",
+      "language": "TypeScript",
+      "entryPoint": "src/server.ts",
+      "port": 3001,
+      "documentation": "apps/backend/CLAUDE.md",
+      "responsibilities": [
+        "RESTful API 服务",
+        "投资组合管理",
+        "交易记录 CRUD",
+        "市场数据获取",
+        "批量导入功能"
+      ],
+      "keyFiles": {
+        "entry": "src/server.ts",
+        "routes": ["src/routes/portfolio.ts", "src/routes/marketData.ts", "src/routes/batch.ts"],
+        "services": ["src/services/storage.prisma.ts", "src/services/tencentApi.ts", "src/services/cacheService.ts"],
+        "database": "prisma/schema.prisma",
+        "tests": "src/services/__tests__/"
+      },
+      "dependencies": {
+        "domain": "file:../packages/domain",
+        "application": "file:../packages/application",
+        "infra": "file:../packages/infra"
+      },
+      "coverage": {
+        "hasTests": true,
+        "testFiles": 4,
+        "missingTests": ["routes/**", "container.ts"]
+      }
+    },
+    {
+      "name": "domain",
+      "path": "packages/domain",
+      "type": "library",
+      "language": "TypeScript",
+      "entryPoint": "src/index.ts",
+      "documentation": "packages/domain/CLAUDE.md",
+      "responsibilities": [
+        "核心实体定义",
+        "值对象",
+        "仓储接口",
+        "业务规则"
+      ],
+      "keyFiles": {
+        "entities": ["src/entities/portfolio.ts", "src/entities/asset.ts", "src/entities/transaction.ts", "src/entities/position.ts", "src/entities/quote.ts"],
+        "repositories": ["src/repositories/portfolio-repository.ts", "src/repositories/market-data-provider.ts", "src/repositories/fx-rate-provider.ts"],
+        "valueObjects": ["src/value-objects/leverage-info.ts"]
+      },
+      "dependencies": {},
+      "coverage": {
+        "hasTests": false,
+        "missingTests": ["entities/**", "value-objects/**"]
+      }
+    },
+    {
+      "name": "application",
+      "path": "packages/application",
+      "type": "library",
+      "language": "TypeScript",
+      "entryPoint": "src/index.ts",
+      "documentation": "packages/application/CLAUDE.md",
+      "responsibilities": [
+        "业务用例编排",
+        "事务管理",
+        "DTO 转换"
+      ],
+      "keyFiles": {
+        "useCases": [
+          "src/use-cases/list-portfolios.use-case.ts",
+          "src/use-cases/get-portfolio.use-case.ts",
+          "src/use-cases/create-portfolio.use-case.ts",
+          "src/use-cases/add-transaction.use-case.ts",
+          "src/use-cases/remove-transaction.use-case.ts",
+          "src/use-cases/update-portfolio-attention.use-case.ts",
+          "src/use-cases/recalculate-portfolio-cash.use-case.ts",
+          "src/use-cases/update-transaction-notes.use-case.ts"
+        ]
+      },
+      "dependencies": {
+        "domain": "file:../domain"
+      },
+      "coverage": {
+        "hasTests": false,
+        "missingTests": ["use-cases/**"]
+      }
+    },
+    {
+      "name": "infra",
+      "path": "packages/infra",
+      "type": "library",
+      "language": "TypeScript",
+      "entryPoint": "src/index.ts",
+      "documentation": "packages/infra/CLAUDE.md",
+      "responsibilities": [
+        "仓储接口实现",
+        "外部 API 调用",
+        "缓存服务",
+        "数据库访问"
+      ],
+      "keyFiles": {
+        "repositories": ["src/storage/prisma-portfolio.repository.ts"],
+        "providers": ["src/providers/currency-service.ts"],
+        "services": ["src/cache/cache-service.ts", "src/data/data-service.ts"],
+        "database": ["src/database/prisma-client.ts"]
+      },
+      "dependencies": {
+        "domain": "file:../domain"
+      },
+      "coverage": {
+        "hasTests": false,
+        "missingTests": ["storage/**", "providers/**", "cache/**"]
+      }
+    },
+    {
+      "name": "frontend",
+      "path": "frontend",
+      "type": "application",
+      "language": "TypeScript",
+      "entryPoint": "src/main.tsx",
+      "port": 5173,
+      "documentation": "frontend/CLAUDE.md",
+      "responsibilities": [
+        "用户界面",
+        "状态管理",
+        "API 调用",
+        "数据可视化"
+      ],
+      "keyFiles": {
+        "entry": "src/main.tsx",
+        "app": "src/App.tsx",
+        "routes": "src/app/routes/index.tsx",
+        "features": ["src/features/portfolio/", "src/features/transaction/"],
+        "components": ["src/components/PortfolioSummary.tsx", "src/components/MarketIndices.tsx"],
+        "api": ["src/shared/api/client.ts", "src/generated/api/"],
+        "store": "src/store/index.ts",
+        "tests": ["src/components/legacy/__tests__/", "src/utils/__tests__/"]
+      },
+      "dependencies": {},
+      "coverage": {
+        "hasTests": true,
+        "testFiles": 6,
+        "missingTests": ["features/**", "components/**"]
+      }
+    },
+    {
+      "name": "electron",
+      "path": "electron",
+      "type": "application",
+      "language": "TypeScript",
+      "entryPoint": "dist/main.js",
+      "documentation": "electron/CLAUDE.md",
+      "responsibilities": [
+        "主进程管理",
+        "窗口管理",
+        "IPC 通信",
+        "应用打包"
+      ],
+      "keyFiles": {
+        "main": "src/main.ts",
+        "launcher": "launcher/launcher.js",
+        "config": "forge.config.js"
+      },
+      "dependencies": {},
+      "coverage": {
+        "hasTests": false,
+        "missingTests": ["src/**"]
+      }
+    }
+  ],
+  "ignorePatterns": {
+    "fromGitignore": true,
+    "patterns": [
+      "node_modules/**",
+      ".git/**",
+      "dist/**",
+      "build/**",
+      ".next/**",
+      "__pycache__/**",
+      "*.lock",
+      "*.log",
+      "*.bin",
+      "*.pdf",
+      "*.png",
+      "*.jpg",
+      "*.jpeg",
+      "*.gif",
+      "*.mp4",
+      "*.zip",
+      "*.tar",
+      "*.gz"
+    ],
+    "additionalFromProject": [
+      ".vscode/**",
+      ".idea/**",
+      ".cursor/**",
+      ".repomix/**",
+      ".specstory/**",
+      "*.db",
+      "*.db-*",
+      "apps/backend/data/**",
+      "electron/renderer/**",
+      "frontend/.vite/**"
+    ]
+  },
+  "coverage": {
+    "estimatedTotalFiles": 150,
+    "scannedFiles": 120,
+    "coveragePercent": 80,
+    "modulesCovered": 6,
+    "modulesTotal": 6,
+    "gaps": [
+      {
+        "area": "测试覆盖",
+        "description": "Domain 和 Application 层缺少单元测试",
+        "priority": "high"
+      },
+      {
+        "area": "接口文档",
+        "description": "部分 API 端点缺少 OpenAPI 注释",
+        "priority": "medium"
+      },
+      {
+        "area": "代码重构",
+        "description": "frontend/src/components/legacy/ 需要迁移到新架构",
+        "priority": "medium"
+      }
+    ]
+  },
+  "nextSteps": [
+    "为 Domain 层实体添加单元测试（特别是成本计算、盈亏计算逻辑）",
+    "为 Application 层用例添加单元测试（Mock 仓储接口）",
+    "重构 frontend/src/components/legacy/ 组件到 features/ 目录",
+    "补充 Electron 主进程的测试",
+    "完善 OpenAPI 文档，确保所有端点都有详细说明",
+    "添加 Infrastructure 层的集成测试（Prisma 仓储）"
+  ],
+  "statistics": {
+    "documentation": {
+      "rootClaude": "CLAUDE.md",
+      "moduleDocs": 6,
+      "additionalDocs": 14
+    },
+    "codebase": {
+      "primaryLanguages": {
+        "TypeScript": "~85%",
+        "JavaScript": "~10%",
+        "Other": "~5%"
+      },
+      "keyMetrics": {
+        "estimatedLines": "~50,000",
+        "modules": 6,
+        "features": ["Portfolio Management", "Transaction Tracking", "Market Data", "Batch Import", "Leverage Management"]
+      }
+    }
+  },
+  "metadata": {
+    "generatedBy": "Claude Code (Sonnet 4.5)",
+    "initializationDate": "2025-11-16T08:55:50.000Z",
+    "version": "1.0.0",
+    "notes": "初始化版本，覆盖核心模块和主要功能。建议定期更新以反映代码变化。"
+  }
+}

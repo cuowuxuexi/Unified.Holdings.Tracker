@@ -1,0 +1,94 @@
+e2e40ffd9cbadd5f8cbf2937aa38958c
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.PrismaPortfolioRepository = void 0;
+const domain_1 = require("@uht/domain");
+const storage_prisma_1 = require("./storage.prisma");
+const prisma_client_1 = require("../database/prisma-client");
+/**
+ * Prisma 实现的 PortfolioRepository
+ * 适配 storage.prisma.ts 中的函数以符合领域层接口
+ */
+class PrismaPortfolioRepository {
+    async findAll() {
+        return (0, storage_prisma_1.readPortfolios)();
+    }
+    async findById(id) {
+        return (0, storage_prisma_1.getPortfolioById)(id);
+    }
+    async create(input) {
+        return (0, storage_prisma_1.addPortfolio)({
+            name: input.name,
+            initialCash: input.initialCash,
+            leverage: (0, domain_1.ensureLeverageInfo)(input.leverage),
+        });
+    }
+    async save(portfolio) {
+        // 注意：当前 storage.prisma 没有直接的 save 方法
+        // 这里需要使用 writePortfolios，但这个方法接受 Portfolio[]
+        // 为了简化，我们暂时不实现这个方法，因为当前流程主要使用其他方法
+        throw new Error('save method not implemented yet. Use specific methods like addTransaction instead.');
+    }
+    async delete(id) {
+        const success = await (0, storage_prisma_1.deletePortfolio)(id);
+        if (!success) {
+            throw new Error(`Failed to delete portfolio ${id}`);
+        }
+    }
+    async addTransaction(portfolioId, transaction) {
+        const result = await (0, storage_prisma_1.addTransactionToPortfolio)(portfolioId, transaction);
+        if (!result) {
+            throw new Error(`Failed to add transaction to portfolio ${portfolioId}`);
+        }
+        // 添加交易后，重新获取完整的 Portfolio 对象
+        const portfolio = await (0, storage_prisma_1.getPortfolioById)(portfolioId);
+        if (!portfolio) {
+            throw new Error(`Portfolio ${portfolioId} not found after adding transaction`);
+        }
+        return portfolio;
+    }
+    async removeTransaction(portfolioId, transactionId) {
+        const success = await (0, storage_prisma_1.deleteTransactionFromPortfolio)(portfolioId, transactionId);
+        if (!success) {
+            throw new Error(`Failed to remove transaction ${transactionId} from portfolio ${portfolioId}`);
+        }
+        // 删除交易后，重新获取完整的 Portfolio 对象
+        const portfolio = await (0, storage_prisma_1.getPortfolioById)(portfolioId);
+        if (!portfolio) {
+            throw new Error(`Portfolio ${portfolioId} not found after removing transaction`);
+        }
+        return portfolio;
+    }
+    async recalculateCash(portfolioId) {
+        const portfolio = await (0, storage_prisma_1.getPortfolioById)(portfolioId);
+        if (!portfolio) {
+            throw new Error(`Portfolio ${portfolioId} not found`);
+        }
+        // 执行现金重算
+        const result = await (0, storage_prisma_1.cashRecalculateForPortfolioAsync)(portfolio);
+        // 将计算结果写入数据库，修复浮点数精度问题
+        // 舍入到分（保留2位小数），避免精度累积误差
+        await prisma_client_1.prisma.portfolio.update({
+            where: { id: portfolioId },
+            data: { cash: Math.round(result.cash * 100) / 100 },
+        });
+        console.log(`[recalculateCash] 更新组合 ${portfolioId} 现金值: ${portfolio.cash} -> ${result.cash} (差异: ${result.diff.toFixed(2)})`);
+        // 重新获取更新后的 Portfolio
+        const updatedPortfolio = await (0, storage_prisma_1.getPortfolioById)(portfolioId);
+        if (!updatedPortfolio) {
+            throw new Error(`Portfolio ${portfolioId} not found after recalculation`);
+        }
+        return updatedPortfolio;
+    }
+    async correctHistoricalTransactions() {
+        await (0, storage_prisma_1.correctHistoricalTransactionAmounts)();
+    }
+    async updateTransactionNotes(portfolioId, transactionId, notes) {
+        return (0, storage_prisma_1.updateTransactionNotes)(portfolioId, transactionId, notes);
+    }
+    async updatePortfolioAttention(portfolioId, attentionInfo) {
+        return (0, storage_prisma_1.updatePortfolioAttention)(portfolioId, attentionInfo);
+    }
+}
+exports.PrismaPortfolioRepository = PrismaPortfolioRepository;
+//# sourceMappingURL=data:application/json;charset=utf-8;base64,eyJmaWxlIjoiL21udC9kL1VuaWZpZWQuSG9sZGluZ3MuVHJhY2tlci1tYWluL3BhY2thZ2VzL2luZnJhL3NyYy9zdG9yYWdlL3ByaXNtYS1wb3J0Zm9saW8ucmVwb3NpdG9yeS50cyIsIm1hcHBpbmdzIjoiOzs7QUFBQSx3Q0FPcUI7QUFDckIscURBVzBCO0FBQzFCLDZEQUFtRDtBQUVuRDs7O0dBR0c7QUFDSCxNQUFhLHlCQUF5QjtJQUNwQyxLQUFLLENBQUMsT0FBTztRQUNYLE9BQU8sSUFBQSwrQkFBYyxHQUFFLENBQUM7SUFDMUIsQ0FBQztJQUVELEtBQUssQ0FBQyxRQUFRLENBQUMsRUFBVTtRQUN2QixPQUFPLElBQUEsaUNBQWdCLEVBQUMsRUFBRSxDQUFDLENBQUM7SUFDOUIsQ0FBQztJQUVELEtBQUssQ0FBQyxNQUFNLENBQUMsS0FBMkI7UUFDdEMsT0FBTyxJQUFBLDZCQUFZLEVBQUM7WUFDbEIsSUFBSSxFQUFFLEtBQUssQ0FBQyxJQUFJO1lBQ2hCLFdBQVcsRUFBRSxLQUFLLENBQUMsV0FBVztZQUM5QixRQUFRLEVBQUUsSUFBQSwyQkFBa0IsRUFBQyxLQUFLLENBQUMsUUFBUSxDQUFDO1NBQzdDLENBQUMsQ0FBQztJQUNMLENBQUM7SUFFRCxLQUFLLENBQUMsSUFBSSxDQUFDLFNBQW9CO1FBQzdCLHFDQUFxQztRQUNyQyw2Q0FBNkM7UUFDN0Msa0NBQWtDO1FBQ2xDLE1BQU0sSUFBSSxLQUFLLENBQ2Isb0ZBQW9GLENBQ3JGLENBQUM7SUFDSixDQUFDO0lBRUQsS0FBSyxDQUFDLE1BQU0sQ0FBQyxFQUFVO1FBQ3JCLE1BQU0sT0FBTyxHQUFHLE1BQU0sSUFBQSxnQ0FBZSxFQUFDLEVBQUUsQ0FBQyxDQUFDO1FBQzFDLElBQUksQ0FBQyxPQUFPLEVBQUUsQ0FBQztZQUNiLE1BQU0sSUFBSSxLQUFLLENBQUMsOEJBQThCLEVBQUUsRUFBRSxDQUFDLENBQUM7UUFDdEQsQ0FBQztJQUNILENBQUM7SUFFRCxLQUFLLENBQUMsY0FBYyxDQUNsQixXQUFtQixFQUNuQixXQUFnQztRQUVoQyxN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QW1CLEVBQ25CLGFBQXFCO1FBRXJCLE9BQU8sSUFBQSx5Q0FBd0IsRUFBQyxXQUFXLEVBQUUsYUFBYSxDQUFDLENBQUM7SUFDOUQsQ0FBQztDQUNGO0FBMUhELDhEQTBIQyIsIm5hbWVzIjpbXSwic291cmNlcyI6WyIvbW50L2QvVW5pZmllZC5Ib2xkaW5ncy5UcmFja2VyLW1haW4vcGFja2FnZXMvaW5mcmEvc3JjL3N0b3JhZ2UvcHJpc21hLXBvcnRmb2xpby5yZXBvc2l0b3J5LnRzIl0sInNvdXJjZXNDb250ZW50IjpbImltcG9ydCB7XG4gIFBvcnRmb2xpbyxcbiAgVHJhbnNhY3Rpb24sXG4gIFBvcnRmb2xpb1JlcG9zaXRvcnksXG4gIENyZWF0ZVBvcnRmb2xpb0lucHV0LFxuICBOZXdUcmFuc2FjdGlvbklucHV0LFxuICBlbnN1cmVMZXZlcmFnZUluZm8sXG59IGZyb20gJ0B1aHQvZG9tYWluJztcbmltcG9ydCB7XG4gIHJlYWRQb3J0Zm9saW9zLFxuICBnZXRQb3J0Zm9saW9CeUlkLFxuICBhZGRQb3J0Zm9saW8sXG4gIGRlbGV0ZVBvcnRmb2xpbyxcbiAgYWRkVHJhbnNhY3Rpb25Ub1BvcnRmb2xpbyxcbiAgZGVsZXRlVHJhbnNhY3Rpb25Gcm9tUG9ydGZvbGlvLFxuICBjYXNoUmVjYWxjdWxhdGVGb3JQb3J0Zm9saW9Bc3luYyxcbiAgY29ycmVjdEhpc3RvcmljYWxUcmFuc2FjdGlvbkFtb3VudHMsXG4gIHVwZGF0ZVRyYW5zYWN0aW9uTm90ZXMsXG4gIHVwZGF0ZVBvcnRmb2xpb0F0dGVudGlvbixcbn0gZnJvbSAnLi9zdG9yYWdlLnByaXNtYSc7XG5pbXBvcnQgeyBwcmlzbWEgfSBmcm9tICcuLi9kYXRhYmFzZS9wcmlzbWEtY2xpZW50JztcblxuLyoqXG4gKiBQcmlzbWEg5a6e546w55qEIFBvcnRmb2xpb1JlcG9zaXRvcnlcbiAqIOmAgumFjSBzdG9yYWdlLnByaXNtYS50cyDkuK3nmoTlh73mlbDku6XnrKblkIjpoobln5/lsYLmjqXlj6NcbiAqL1xuZXhwb3J0IGNsYXNzIFByaXNtYVBvcnRmb2xpb1JlcG9zaXRvcnkgaW1wbGVtZW50cyBQb3J0Zm9saW9SZXBvc2l0b3J5IHtcbiAgYXN5bmMgZmluZEFsbCgpOiBQcm9taXNlPFBvcnRmb2xpb1tdPiB7XG4gICAgcmV0dXJuIHJlYWRQb3J0Zm9saW9zKCk7XG4gIH1cblxuICBhc3luYyBmaW5kQnlJZChpZDogc3RyaW5nKTogUHJvbWlzZTxQb3J0Zm9saW8gfCBudWxsPiB7XG4gICAgcmV0dXJuIGdldFBvcnRmb2xpb0J5SWQoaWQpO1xuICB9XG5cbiAgYXN5bmMgY3JlYXRlKGlucHV0OiBDcmVhdGVQb3J0Zm9saW9JbnB1dCk6IFByb21pc2U8UG9ydGZvbGlvPiB7XG4gICAgcmV0dXJuIGFkZFBvcnRmb2xpbyh7XG4gICAgICBuYW1lOiBpbnB1dC5uYW1lLFxuICAgICAgaW5pdGlhbENhc2g6IGlucHV0LmluaXRpYWxDYXNoLFxuICAgICAgbGV2ZXJhZ2U6IGVuc3VyZUxldmVyYWdlSW5mbyhpbnB1dC5sZXZlcmFnZSksXG4gICAgfSk7XG4gIH1cblxuICBhc3luYyBzYXZlKHBvcnRmb2xpbzogUG9ydGZvbGlvKTogUHJvbWlzZTx2b2lkPiB7XG4gICAgLy8g5rOo5oSP77ya5b2T5YmNIHN0b3JhZ2UucHJpc21hIOayoeacieebtOaOpeeahCBzYXZlIOaWueazlVxuICAgIC8vIOi/memHjOmcgOimgeS9v+eUqCB3cml0ZVBvcnRmb2xpb3PvvIzkvYbov5nkuKrmlrnms5XmjqXlj5cgUG9ydGZvbGlvW11cbiAgICAvLyDkuLrkuobnroDljJbvvIzmiJHku6zmmoLml7bkuI3lrp7njrDov5nkuKrmlrnms5XvvIzlm6DkuLrlvZPliY3mtYHnqIvkuLvopoHkvb/nlKjlhbbku5bmlrnms5VcbiAgICB0aHJvdyBuZXcgRXJyb3IoXG4gICAgICAnc2F2ZSBtZXRob2Qgbm90IGltcGxlbWVudGVkIHlldC4gVXNlIHNwZWNpZmljIG1ldGhvZHMgbGlrZSBhZGRUcmFuc2FjdGlvbiBpbnN0ZWFkLidcbiAgICApO1xuICB9XG5cbiAgYXN5bmMgZGVsZXRlKGlkOiBzdHJpbmcpOiBQcm9taXNlPHZvaWQ+IHtcbiAgICBjb25zdCBzdWNjZXNzID0gYXdhaXQgZGVsZXRlUG9ydGZvbGlvKGlkKTtcbiAgICBpZiAoIXN1Y2Nlc3MpIHtcbiAgICAgIHRocm93IG5ldyBFcnJvcihgRmFpbGVkIHRvIGRlbGV0ZSBwb3J0Zm9saW8gJHtpZH1gKTtcbiAgICB9XG4gIH1cblxuICBhc3luYyBhZGRUcmFuc2FjdGlvbihcbiAgICBwb3J0Zm9saW9JZDogc3RyaW5nLFxuICAgIHRyYW5zYWN0aW9uOiBOZXdUcmFuc2FjdGlvbklucHV0XG4gICk6IFByb21pc2U8UG9ydGZvbGlvPiB7XG4gICAgY29uc3QgcmVzdWx0ID0gYXdhaXQgYWRkVHJhbnNhY3Rpb25Ub1BvcnRmb2xpbyhwb3J0Zm9saW9JZCwgdHJhbnNhY3Rpb24pO1xuICAgIGlmICghcmVzdWx0KSB7XG4gICAgICB0aHJvdyBuZXcgRXJyb3IoYEZhaWxlZCB0byBhZGQgdHJhbnNhY3Rpb24gdG8gcG9ydGZvbGlvICR7cG9ydGZvbGlvSWR9YCk7XG4gICAgfVxuXG4gICAgLy8g5re75Yqg5Lqk5piT5ZCO77yM6YeN5paw6I635Y+W5a6M5pW055qEIFBvcnRmb2xpbyDlr7nosaFcbiAgICBjb25zdCBwb3J0Zm9saW8gPSBhd2FpdCBnZXRQb3J0Zm9saW9CeUlkKHBvcnRmb2xpb0lkKTtcbiAgICBpZiAoIXBvcnRmb2xpbykge1xuICAgICAgdGhyb3cgbmV3IEVycm9yKFxuICAgICAgICBgUG9ydGZvbGlvICR7cG9ydGZvbGlvSWR9IG5vdCBmb3VuZCBhZnRlciBhZGRpbmcgdHJhbnNhY3Rpb25gXG4gICAgICApO1xuICAgIH1cbiAgICByZXR1cm4gcG9ydGZvbGlvO1xuICB9XG5cbiAgYXN5bmMgcmVtb3ZlVHJhbnNhY3Rpb24oXG4gICAgcG9ydGZvbGlvSWQ6IHN0cmluZyxcbiAgICB0cmFuc2FjdGlvbklkOiBzdHJpbmdcbiAgKTogUHJvbWlzZTxQb3J0Zm9saW8+IHtcbiAgICBjb25zdCBzdWNjZXNzID0gYXdhaXQgZGVsZXRlVHJhbnNhY3Rpb25Gcm9tUG9ydGZvbGlvKFxuICAgICAgcG9ydGZvbGlvSWQsXG4gICAgICB0cmFuc2FjdGlvbklkXG4gICAgKTtcbiAgICBpZiAoIXN1Y2Nlc3MpIHtcbiAgICAgIHRocm93IG5ldyBFcnJvcihcbiAgICAgICAgYEZhaWxlZCB0byByZW1vdmUgdHJhbnNhY3Rpb24gJHt0cmFuc2FjdGlvbklkfSBmcm9tIHBvcnRmb2xpbyAke3BvcnRmb2xpb0lkfWBcbiAgICAgICk7XG4gICAgfVxuXG4gICAgLy8g5Yig6Zmk5Lqk5piT5ZCO77yM6YeN5paw6I635Y+W5a6M5pW055qEIFBvcnRmb2xpbyDlr7nosaFcbiAgICBjb25zdCBwb3J0Zm9saW8gPSBhd2FpdCBnZXRQb3J0Zm9saW9CeUlkKHBvcnRmb2xpb0lkKTtcbiAgICBpZiAoIXBvcnRmb2xpbykge1xuICAgICAgdGhyb3cgbmV3IEVycm9yKFxuICAgICAgICBgUG9ydGZvbGlvICR7cG9ydGZvbGlvSWR9IG5vdCBmb3VuZCBhZnRlciByZW1vdmluZyB0cmFuc2FjdGlvbmBcbiAgICAgICk7XG4gICAgfVxuICAgIHJldHVybiBwb3J0Zm9saW87XG4gIH1cblxuICBhc3luYyByZWNhbGN1bGF0ZUNhc2gocG9ydGZvbGlvSWQ6IHN0cmluZyk6IFByb21pc2U8UG9ydGZvbGlvPiB7XG4gICAgY29uc3QgcG9ydGZvbGlvID0gYXdhaXQgZ2V0UG9ydGZvbGlvQnlJZChwb3J0Zm9saW9JZCk7XG4gICAgaWYgKCFwb3J0Zm9saW8pIHtcbiAgICAgIHRocm93IG5ldyBFcnJvcihgUG9ydGZvbGlvICR7cG9ydGZvbGlvSWR9IG5vdCBmb3VuZGApO1xuICAgIH1cblxuICAgIC8vIOaJp+ihjOeOsOmHkemHjeeul1xuICAgIGNvbnN0IHJlc3VsdCA9IGF3YWl0IGNhc2hSZWNhbGN1bGF0ZUZvclBvcnRmb2xpb0FzeW5jKHBvcnRmb2xpbyk7XG5cbiAgICAvLyDlsIborqHnrpfnu5PmnpzlhpnlhaXmlbDmja7lupPvvIzkv67lpI3mta7ngrnmlbDnsr7luqbpl67pophcbiAgICAvLyDoiI3lhaXliLDliIbvvIjkv53nlZky5L2N5bCP5pWw77yJ77yM6YG/5YWN57K+5bqm57Sv56ev6K+v5beuXG4gICAgYXdhaXQgcHJpc21hLnBvcnRmb2xpby51cGRhdGUoe1xuICAgICAgd2hlcmU6IHsgaWQ6IHBvcnRmb2xpb0lkIH0sXG4gICAgICBkYXRhOiB7IGNhc2g6IE1hdGgucm91bmQocmVzdWx0LmNhc2ggKiAxMDApIC8gMTAwIH0sXG4gICAgfSk7XG5cbiAgICBjb25zb2xlLmxvZyhcbiAgICAgIGBbcmVjYWxjdWxhdGVDYXNoXSDmm7TmlrDnu4TlkIggJHtwb3J0Zm9saW9JZH0g546w6YeR5YC8OiAke3BvcnRmb2xpby5jYXNofSAtPiAke3Jlc3VsdC5jYXNofSAo5beu5byCOiAke3Jlc3VsdC5kaWZmLnRvRml4ZWQoMil9KWBcbiAgICApO1xuXG4gICAgLy8g6YeN5paw6I635Y+W5pu05paw5ZCO55qEIFBvcnRmb2xpb1xuICAgIGNvbnN0IHVwZGF0ZWRQb3J0Zm9saW8gPSBhd2FpdCBnZXRQb3J0Zm9saW9CeUlkKHBvcnRmb2xpb0lkKTtcbiAgICBpZiAoIXVwZGF0ZWRQb3J0Zm9saW8pIHtcbiAgICAgIHRocm93IG5ldyBFcnJvcihgUG9ydGZvbGlvICR7cG9ydGZvbGlvSWR9IG5vdCBmb3VuZCBhZnRlciByZWNhbGN1bGF0aW9uYCk7XG4gICAgfVxuICAgIHJldHVybiB1cGRhdGVkUG9ydGZvbGlvO1xuICB9XG5cbiAgYXN5bmMgY29ycmVjdEhpc3RvcmljYWxUcmFuc2FjdGlvbnMoKTogUHJvbWlzZTx2b2lkPiB7XG4gICAgYXdhaXQgY29ycmVjdEhpc3RvcmljYWxUcmFuc2FjdGlvbkFtb3VudHMoKTtcbiAgfVxuXG4gIGFzeW5jIHVwZGF0ZVRyYW5zYWN0aW9uTm90ZXMoXG4gICAgcG9ydGZvbGlvSWQ6IHN0cmluZyxcbiAgICB0cmFuc2FjdGlvbklkOiBzdHJpbmcsXG4gICAgbm90ZXM6IHN0cmluZ1xuICApOiBQcm9taXNlPFRyYW5zYWN0aW9uIHwgbnVsbD4ge1xuICAgIHJldHVybiB1cGRhdGVUcmFuc2FjdGlvbk5vdGVzKHBvcnRmb2xpb0lkLCB0cmFuc2FjdGlvbklkLCBub3Rlcyk7XG4gIH1cblxuICBhc3luYyB1cGRhdGVQb3J0Zm9saW9BdHRlbnRpb24oXG4gICAgcG9ydGZvbGlvSWQ6IHN0cmluZyxcbiAgICBhdHRlbnRpb25JbmZvOiBzdHJpbmdcbiAgKTogUHJvbWlzZTxQb3J0Zm9saW8gfCBudWxsPiB7XG4gICAgcmV0dXJuIHVwZGF0ZVBvcnRmb2xpb0F0dGVudGlvbihwb3J0Zm9saW9JZCwgYXR0ZW50aW9uSW5mbyk7XG4gIH1cbn1cbiJdLCJ2ZXJzaW9uIjozfQ==

@@ -1,0 +1,11 @@
+58d98a157386cae4727ce0f2e1a9a08a
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.Market = void 0;
+var Market;
+(function (Market) {
+    Market["CN"] = "CN";
+    Market["HK"] = "HK";
+    Market["US"] = "US";
+})(Market || (exports.Market = Market = {}));
+//# sourceMappingURL=data:application/json;charset=utf-8;base64,eyJmaWxlIjoiL21udC9kL1VuaWZpZWQuSG9sZGluZ3MuVHJhY2tlci1tYWluL3BhY2thZ2VzL2RvbWFpbi9zcmMvZW50aXRpZXMvYXNzZXQudHMiLCJtYXBwaW5ncyI6Ijs7O0FBQUEsSUFBWSxNQUlYO0FBSkQsV0FBWSxNQUFNO0lBQ2hCLG1CQUFTLENBQUE7SUFDVCxtQkFBUyxDQUFBO0lBQ1QsbUJBQVMsQ0FBQTtBQUNYLENBQUMsRUFKVyxNQUFNLHNCQUFOLE1BQU0sUUFJakIiLCJuYW1lcyI6W10sInNvdXJjZXMiOlsiL21udC9kL1VuaWZpZWQuSG9sZGluZ3MuVHJhY2tlci1tYWluL3BhY2thZ2VzL2RvbWFpbi9zcmMvZW50aXRpZXMvYXNzZXQudHMiXSwic291cmNlc0NvbnRlbnQiOlsiZXhwb3J0IGVudW0gTWFya2V0IHtcbiAgQ04gPSAnQ04nLFxuICBISyA9ICdISycsXG4gIFVTID0gJ1VTJyxcbn1cblxuZXhwb3J0IGludGVyZmFjZSBBc3NldCB7XG4gIGNvZGU6IHN0cmluZztcbiAgbmFtZTogc3RyaW5nO1xuICBtYXJrZXQ6IE1hcmtldDtcbiAgY3VycmVuY3k/OiBzdHJpbmc7XG59XG4iXSwidmVyc2lvbiI6M30=

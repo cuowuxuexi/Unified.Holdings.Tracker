@@ -1,0 +1,92 @@
+# 项目目录结构与实施进度
+
+## 目录结构
+```
+e:\V3\
+├── backend/                  # 后端服务
+│   ├── src/                  # 源代码
+│   │   ├── routes/           # API路由
+│   │   ├── services/         # 业务服务
+│   │   ├── types/            # 类型定义
+│   │   └── server.ts         # 服务器入口
+│   ├── data/                 # 数据存储目录
+│   ├── dist/                 # 编译输出目录
+│   ├── package.json          # 已配置pkg打包
+│   └── tsconfig.json         # TypeScript配置
+├── frontend/                 # 前端应用
+│   ├── src/                  # 源代码
+│   │   ├── components/       # React组件
+│   │   ├── services/         # API服务
+│   │   ├── store/            # Zustand状态管理
+│   │   ├── App.tsx           # 主应用组件
+│   │   ├── config.ts         # API配置
+│   │   └── main.tsx          # 应用入口
+│   ├── dist/                 # 构建输出目录
+│   ├── index.html            # HTML模板
+│   └── package.json          # 依赖配置
+├── electron/                 # Electron应用
+│   ├── assets/               # 应用图标等资源
+│   ├── dist/                 # 编译输出目录
+│   ├── launcher/             # 启动器
+│   │   ├── launcher.js       # 启动器脚本
+│   │   └── package.json      # 启动器配置
+│   ├── release/              # 打包输出目录
+│   │   ├── backend/          # 后端打包输出
+│   │   ├── frontend/         # 前端打包输出
+│   │   └── portfolio-launcher.exe  # 已打包的启动器
+│   ├── forge.config.js       # Electron Forge配置
+│   ├── main.ts               # Electron主进程
+│   ├── package.json          # 依赖配置
+│   └── tsconfig.json         # TypeScript配置
+├── 打包方案/                  # 打包方案文档
+│   └── 后端独立服务 + 前端Electron应用的实施流程.md  # 当前实施方案
+└── docs/                     # 项目文档
+```
+
+## 实施进度
+
+### 已完成
+1. ✅ 准备工作
+   - 安装pkg用于打包后端
+   - 配置Electron Forge
+   - 创建工作目录
+
+2. ✅ 修改后端代码
+   - 调整backend/src/server.ts，添加数据目录支持
+   - 更新backend/package.json，添加pkg配置
+
+3. ✅ 修改前端代码
+   - 创建frontend/src/config.ts，添加API配置
+   - 在frontend/src/App.tsx中添加后端连接检测
+
+4. ✅ 修改Electron应用
+   - 简化electron/main.ts，移除后端启动代码，添加后端连接检测
+   - 配置electron/forge.config.js
+
+5. ✅ 创建启动器
+   - 创建launcher/launcher.js脚本
+   - 打包启动器到release/portfolio-launcher.exe
+
+### 待完成
+6. ⬜ 构建和打包流程
+   - 构建后端
+   - 构建前端
+   - 打包Electron应用
+   - 整合所有组件
+
+7. ⬜ 创建安装程序（可选）
+   - 使用Inno Setup
+   - 编译安装程序
+
+8. ⬜ 测试
+   - 测试独立组件
+   - 测试完整安装
+
+9. ⬜ 发布
+   - 准备发布文件
+   - 发布
+
+## 注意事项
+- 采用分步骤实施策略，完成一个步骤验收一个步骤，确保没有问题再继续下一步
+- 后端作为独立服务运行，前端通过HTTP API与后端通信
+- 启动器负责启动后端服务和前端应用，确保它们能够正常通信

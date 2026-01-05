@@ -1,0 +1,1 @@
+{"file":"/mnt/d/Unified.Holdings.Tracker-main/apps/backend/src/lib/prisma.ts","mappings":";;;AAAA,oCAAoC;AAA3B,+FAAA,MAAM,OAAA","names":[],"sources":["/mnt/d/Unified.Holdings.Tracker-main/apps/backend/src/lib/prisma.ts"],"sourcesContent":["export { prisma } from '@uht/infra';\n"],"version":3}

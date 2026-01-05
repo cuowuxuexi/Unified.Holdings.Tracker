@@ -1,0 +1,57 @@
+8fa65dbdece8c7081b9d245f425a19c8
+"use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.prisma = void 0;
+const fs_1 = __importDefault(require("fs"));
+const path_1 = __importDefault(require("path"));
+const client_1 = require("@prisma/client");
+const databaseUrl = resolveDatabaseUrl(process.env.DATABASE_URL);
+exports.prisma = new client_1.PrismaClient({
+    datasources: {
+        db: { url: databaseUrl },
+    },
+});
+function resolveDatabaseUrl(rawUrl) {
+    const SQLITE_PREFIX = 'file:';
+    const repoRoot = path_1.default.resolve(__dirname, '../../../..');
+    const fallbackRelativePath = path_1.default.join('apps', 'backend', 'prisma', 'data', 'portfolio.db');
+    const rawPath = extractPath(rawUrl, SQLITE_PREFIX) ?? fallbackRelativePath;
+    const absolutePath = ensureAbsolutePath(rawPath, repoRoot);
+    fs_1.default.mkdirSync(path_1.default.dirname(absolutePath), { recursive: true });
+    const resolvedUrl = `${SQLITE_PREFIX}${absolutePath}`;
+    console.log(`[prisma-client] 使用数据库: ${resolvedUrl}`);
+    return resolvedUrl;
+}
+function extractPath(rawUrl, prefix) {
+    if (!rawUrl || rawUrl.trim() === '')
+        return null;
+    if (rawUrl.startsWith(prefix)) {
+        const stripped = rawUrl.slice(prefix.length).trim();
+        return stripped.length > 0 ? stripped : null;
+    }
+    return rawUrl.trim();
+}
+function ensureAbsolutePath(targetPath, repoRoot) {
+    if (path_1.default.isAbsolute(targetPath)) {
+        return path_1.default.normalize(targetPath);
+    }
+    const normalizedTarget = targetPath.replace(/^\.\//, '');
+    const potentialBases = [
+        process.cwd(),
+        repoRoot,
+        path_1.default.join(repoRoot, 'apps', 'backend'),
+        path_1.default.join(repoRoot, 'apps', 'backend', 'prisma'),
+    ];
+    for (const base of potentialBases) {
+        const candidate = path_1.default.resolve(base, normalizedTarget);
+        if (fs_1.default.existsSync(path_1.default.dirname(candidate))) {
+            return candidate;
+        }
+    }
+    // 如果以上路径都不存在，最后使用仓库根目录下的 fallback 路径
+    return path_1.default.resolve(repoRoot, normalizedTarget);
+}
+//# sourceMappingURL=data:application/json;charset=utf-8;base64,eyJmaWxlIjoiL21udC9kL1VuaWZpZWQuSG9sZGluZ3MuVHJhY2tlci1tYWluL3BhY2thZ2VzL2luZnJhL3NyYy9kYXRhYmFzZS9wcmlzbWEtY2xpZW50LnRzIiwibWFwcGluZ3MiOiI7Ozs7OztBQUFBLDRDQUFvQjtBQUNwQixnREFBd0I7QUFDeEIsMkNBQThDO0FBRTlDLE1BQU0sV0FBVyxHQUFHLGtCQUFrQixDQUFDLE9BQU8sQ0FBQyxHQUFHLENBQUMsWUFBWSxDQUFDLENBQUM7QUFFcEQsUUFBQSxNQUFNLEdBQUcsSUFBSSxxQkFBWSxDQUFDO0lBQ3JDLFdBQVcsRUFBRTtRQUNYLEVBQUUsRUFBRSxFQUFFLEdBQUcsRUFBRSxXQUFXLEVBQUU7S0FDekI7Q0FDRixDQUFDLENBQUM7QUFJSCxTQUFTLGtCQUFrQixDQUFDLE1BQTBCO0lBQ3BELE1BQU0sYUFBYSxHQUFHLE9BQU8sQ0FBQztJQUM5QixNQUFNLFFBQVEsR0FBRyxjQUFJLENBQUMsT0FBTyxDQUFDLFNBQVMsRUFBRSxhQUFhLENBQUMsQ0FBQztJQUN4RCxNQUFNLG9CQUFvQixHQUFHLGNBQUksQ0FBQyxJQUFJLENBQ3BDLE1BQU0sRUFDTixTQUFTLEVBQ1QsUUFBUSxFQUNSLE1BQU0sRUFDTixjQUFjLENBQ2YsQ0FBQztJQUVGLE1BQU0sT0FBTyxHQUFHLFdBQVcsQ0FBQyxNQUFNLEVBQUUsYUFBYSxDQUFDLElBQUksb0JBQW9CLENBQUM7SUFDM0UsTUFBTSxZQUFZLEdBQUcsa0JBQWtCLENBQUMsT0FBTyxFQUFFLFFBQVEsQ0FBQyxDQUFDO0lBRTNELFlBQUUsQ0FBQyxTQUFTLENBQUMsY0FBSSxDQUFDLE9BQU8sQ0FBQyxZQUFZLENBQUMsRUFBRSxFQUFFLFNBQVMsRUFBRSxJQUFJLEVBQUUsQ0FBQyxDQUFDO0lBRTlELE1BQU0sV0FBVyxHQUFHLEdBQUcsYUFBYSxHQUFHLFlBQVksRUFBRSxDQUFDO0lBQ3RELE9BQU8sQ0FBQyxHQUFHLENBQUMsMEJBQTBCLFdBQVcsRUFBRSxDQUFDLENBQUM7SUFDckQsT0FBTyxXQUFXLENBQUM7QUFDckIsQ0FBQztBQUVELFNBQVMsV0FBVyxDQUFDLE1BQTBCLEVBQUUsTUFBYztJQUM3RCxJQUFJLENBQUMsTUFBTSxJQUFJLE1BQU0sQ0FBQyxJQUFJLEVBQUUsS0FBSyxFQUFFO1FBQUUsT0FBTyxJQUFJLENBQUM7SUFDakQsSUFBSSxNQUFNLENBQUMsVUFBVSxDQUFDLE1BQU0sQ0FBQyxFQUFFLENBQUM7UUFDOUIsTUFBTSxRQUFRLEdBQUcsTUFBTSxDQUFDLEtBQUssQ0FBQyxNQUFNLENBQUMsTUFBTSxDQUFDLENBQUMsSUFBSSxFQUFFLENBQUM7UUFDcEQsT0FBTyxRQUFRLENBQUMsTUFBTSxHQUFHLENBQUMsQ0FBQyxDQUFDLENBQUMsUUFBUSxDQUFDLENBQUMsQ0FBQyxJQUFJLENBQUM7SUFDL0MsQ0FBQztJQUNELE9BQU8sTUFBTSxDQUFDLElBQUksRUFBRSxDQUFDO0FBQ3ZCLENBQUM7QUFFRCxTQUFTLGtCQUFrQixDQUFDLFVBQWtCLEVBQUUsUUFBZ0I7SUFDOUQsSUFBSSxjQUFJLENBQUMsVUFBVSxDQUFDLFVBQVUsQ0FBQyxFQUFFLENBQUM7UUFDaEMsT0FBTyxjQUFJLENBQUMsU0FBUyxDQUFDLFVBQVUsQ0FBQyxDQUFDO0lBQ3BDLENBQUM7SUFFRCxNQUFNLGdCQUFnQixHQUFHLFVBQVUsQ0FBQyxPQUFPLENBQUMsT0FBTyxFQUFFLEVBQUUsQ0FBQyxDQUFDO0lBQ3pELE1BQU0sY0FBYyxHQUFHO1FBQ3JCLE9BQU8sQ0FBQyxHQUFHLEVBQUU7UUFDYixRQUFRO1FBQ1IsY0FBSSxDQUFDLElBQUksQ0FBQyxRQUFRLEVBQUUsTUFBTSxFQUFFLFNBQVMsQ0FBQztRQUN0QyxjQUFJLENBQUMsSUFBSSxDQUFDLFFBQVEsRUFBRSxNQUFNLEVBQUUsU0FBUyxFQUFFLFFBQVEsQ0FBQztLQUNqRCxDQUFDO0lBRUYsS0FBSyxNQUFNLElBQUksSUFBSSxjQUFjLEVBQUUsQ0FBQztRQUNsQyxNQUFNLFNBQVMsR0FBRyxjQUFJLENBQUMsT0FBTyxDQUFDLElBQUksRUFBRSxnQkFBZ0IsQ0FBQyxDQUFDO1FBQ3ZELElBQUksWUFBRSxDQUFDLFVBQVUsQ0FBQyxjQUFJLENBQUMsT0FBTyxDQUFDLFNBQVMsQ0FBQyxDQUFDLEVBQUUsQ0FBQztZQUMzQyxPQUFPLFNBQVMsQ0FBQztRQUNuQixDQUFDO0lBQ0gsQ0FBQztJQUVELHFDQUFxQztJQUNyQyxPQUFPLGNBQUksQ0FBQyxPQUFPLENBQUMsUUFBUSxFQUFFLGdCQUFnQixDQUFDLENBQUM7QUFDbEQsQ0FBQyIsIm5hbWVzIjpbXSwic291cmNlcyI6WyIvbW50L2QvVW5pZmllZC5Ib2xkaW5ncy5UcmFja2VyLW1haW4vcGFja2FnZXMvaW5mcmEvc3JjL2RhdGFiYXNlL3ByaXNtYS1jbGllbnQudHMiXSwic291cmNlc0NvbnRlbnQiOlsiaW1wb3J0IGZzIGZyb20gJ2ZzJztcbmltcG9ydCBwYXRoIGZyb20gJ3BhdGgnO1xuaW1wb3J0IHsgUHJpc21hQ2xpZW50IH0gZnJvbSAnQHByaXNtYS9jbGllbnQnO1xuXG5jb25zdCBkYXRhYmFzZVVybCA9IHJlc29sdmVEYXRhYmFzZVVybChwcm9jZXNzLmVudi5EQVRBQkFTRV9VUkwpO1xuXG5leHBvcnQgY29uc3QgcHJpc21hID0gbmV3IFByaXNtYUNsaWVudCh7XG4gIGRhdGFzb3VyY2VzOiB7XG4gICAgZGI6IHsgdXJsOiBkYXRhYmFzZVVybCB9LFxuICB9LFxufSk7XG5cbmV4cG9ydCB0eXBlIFByaXNtYUNsaWVudEluc3RhbmNlID0gUHJpc21hQ2xpZW50O1xuXG5mdW5jdGlvbiByZXNvbHZlRGF0YWJhc2VVcmwocmF3VXJsOiBzdHJpbmcgfCB1bmRlZmluZWQpOiBzdHJpbmcge1xuICBjb25zdCBTUUxJVEVfUFJFRklYID0gJ2ZpbGU6JztcbiAgY29uc3QgcmVwb1Jvb3QgPSBwYXRoLnJlc29sdmUoX19kaXJuYW1lLCAnLi4vLi4vLi4vLi4nKTtcbiAgY29uc3QgZmFsbGJhY2tSZWxhdGl2ZVBhdGggPSBwYXRoLmpvaW4oXG4gICAgJ2FwcHMnLFxuICAgICdiYWNrZW5kJyxcbiAgICAncHJpc21hJyxcbiAgICAnZGF0YScsXG4gICAgJ3BvcnRmb2xpby5kYidcbiAgKTtcblxuICBjb25zdCByYXdQYXRoID0gZXh0cmFjdFBhdGgocmF3VXJsLCBTUUxJVEVfUFJFRklYKSA/PyBmYWxsYmFja1JlbGF0aXZlUGF0aDtcbiAgY29uc3QgYWJzb2x1dGVQYXRoID0gZW5zdXJlQWJzb2x1dGVQYXRoKHJhd1BhdGgsIHJlcG9Sb290KTtcblxuICBmcy5ta2RpclN5bmMocGF0aC5kaXJuYW1lKGFic29sdXRlUGF0aCksIHsgcmVjdXJzaXZlOiB0cnVlIH0pO1xuXG4gIGNvbnN0IHJlc29sdmVkVXJsID0gYCR7U1FMSVRFX1BSRUZJWH0ke2Fic29sdXRlUGF0aH1gO1xuICBjb25zb2xlLmxvZyhgW3ByaXNtYS1jbGllbnRdIOS9v+eUqOaVsOaNruW6kzogJHtyZXNvbHZlZFVybH1gKTtcbiAgcmV0dXJuIHJlc29sdmVkVXJsO1xufVxuXG5mdW5jdGlvbiBleHRyYWN0UGF0aChyYXdVcmw6IHN0cmluZyB8IHVuZGVmaW5lZCwgcHJlZml4OiBzdHJpbmcpOiBzdHJpbmcgfCBudWxsIHtcbiAgaWYgKCFyYXdVcmwgfHwgcmF3VXJsLnRyaW0oKSA9PT0gJycpIHJldHVybiBudWxsO1xuICBpZiAocmF3VXJsLnN0YXJ0c1dpdGgocHJlZml4KSkge1xuICAgIGNvbnN0IHN0cmlwcGVkID0gcmF3VXJsLnNsaWNlKHByZWZpeC5sZW5ndGgpLnRyaW0oKTtcbiAgICByZXR1cm4gc3RyaXBwZWQubGVuZ3RoID4gMCA/IHN0cmlwcGVkIDogbnVsbDtcbiAgfVxuICByZXR1cm4gcmF3VXJsLnRyaW0oKTtcbn1cblxuZnVuY3Rpb24gZW5zdXJlQWJzb2x1dGVQYXRoKHRhcmdldFBhdGg6IHN0cmluZywgcmVwb1Jvb3Q6IHN0cmluZyk6IHN0cmluZyB7XG4gIGlmIChwYXRoLmlzQWJzb2x1dGUodGFyZ2V0UGF0aCkpIHtcbiAgICByZXR1cm4gcGF0aC5ub3JtYWxpemUodGFyZ2V0UGF0aCk7XG4gIH1cblxuICBjb25zdCBub3JtYWxpemVkVGFyZ2V0ID0gdGFyZ2V0UGF0aC5yZXBsYWNlKC9eXFwuXFwvLywgJycpO1xuICBjb25zdCBwb3RlbnRpYWxCYXNlcyA9IFtcbiAgICBwcm9jZXNzLmN3ZCgpLFxuICAgIHJlcG9Sb290LFxuICAgIHBhdGguam9pbihyZXBvUm9vdCwgJ2FwcHMnLCAnYmFja2VuZCcpLFxuICAgIHBhdGguam9pbihyZXBvUm9vdCwgJ2FwcHMnLCAnYmFja2VuZCcsICdwcmlzbWEnKSxcbiAgXTtcblxuICBmb3IgKGNvbnN0IGJhc2Ugb2YgcG90ZW50aWFsQmFzZXMpIHtcbiAgICBjb25zdCBjYW5kaWRhdGUgPSBwYXRoLnJlc29sdmUoYmFzZSwgbm9ybWFsaXplZFRhcmdldCk7XG4gICAgaWYgKGZzLmV4aXN0c1N5bmMocGF0aC5kaXJuYW1lKGNhbmRpZGF0ZSkpKSB7XG4gICAgICByZXR1cm4gY2FuZGlkYXRlO1xuICAgIH1cbiAgfVxuXG4gIC8vIOWmguaenOS7peS4iui3r+W+hOmDveS4jeWtmOWcqO+8jOacgOWQjuS9v+eUqOS7k+W6k+agueebruW9leS4i+eahCBmYWxsYmFjayDot6/lvoRcbiAgcmV0dXJuIHBhdGgucmVzb2x2ZShyZXBvUm9vdCwgbm9ybWFsaXplZFRhcmdldCk7XG59XG4iXSwidmVyc2lvbiI6M30=

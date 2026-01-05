@@ -1,0 +1,303 @@
+.pageContainer {
+  width: min(1600px, 100%);
+  margin: 0 auto;
+  padding: 48px 32px 80px;
+}
+
+.stickyAlert {
+  margin-bottom: 24px;
+}
+
+/* 主网格布局：三列 */
+.mainGrid {
+  display: grid;
+  grid-template-columns: 380px 1fr 1fr;
+  gap: 32px;
+  align-items: flex-start;
+}
+
+/* 左侧区域 */
+.leftColumn {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+/* 创建按钮容器 */
+.createCardContainer {
+  display: flex;
+  justify-content: flex-start;
+  padding: 0;
+}
+
+/* 投资组合列表容器 */
+.portfolioListContainer {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* 投资组合列表 */
+.portfolioList {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* 中间区域 */
+.centerColumn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 500px;
+}
+
+/* 右侧区域 */
+.rightColumn {
+  position: sticky;
+  top: 24px;
+  height: fit-content;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+}
+
+.heroSection {
+  display: grid;
+  grid-template-columns: minmax(320px, 0.95fr) minmax(340px, 1.05fr);
+  gap: 56px;
+  align-items: center;
+  padding: 64px;
+  background: #fdf9f3;
+  border-radius: 28px;
+  margin-bottom: 48px;
+  box-shadow: 0 30px 80px rgba(17, 17, 17, 0.12);
+  position: relative;
+  overflow: hidden;
+}
+
+.heroSection::after {
+  content: '';
+  position: absolute;
+  inset: 32px 48px auto auto;
+  width: 260px;
+  height: 260px;
+  background: radial-gradient(circle, rgba(255, 255, 255, 0.6), transparent 70%);
+  filter: blur(0.5px);
+  pointer-events: none;
+}
+
+.heroContent {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.heroBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  width: fit-content;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.08);
+  font-size: 14px;
+  font-weight: 600;
+  color: #222;
+}
+
+.heroTitle {
+  font-size: 48px;
+  line-height: 1.1;
+  font-weight: 700;
+  color: #111;
+  margin: 0;
+}
+
+.heroSubtitle {
+  font-size: 18px;
+  line-height: 1.6;
+  color: #4b4036;
+  margin: 0 0 8px;
+}
+
+.heroFeatures {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.heroFeatureItem {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  font-size: 16px;
+  color: #2f261d;
+}
+
+.heroFeatureIcon {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.08);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 600;
+}
+
+.heroCreateCard {
+  background: #fff;
+  border: none;
+  border-radius: 20px;
+  box-shadow: 0 18px 40px rgba(0, 0, 0, 0.08);
+}
+
+.heroCreateCard :global(.ant-card-body) {
+  padding: 24px;
+}
+
+.heroCreateButton {
+  background: #121212 !important;
+  border: none !important;
+  border-radius: 10px !important;
+  font-weight: 600 !important;
+  font-size: 16px !important;
+  height: 48px !important;
+  padding: 0 24px !important;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.heroCreateButton:hover {
+  background: #000 !important;
+  transform: translateY(-2px);
+  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.25);
+}
+
+.heroAdvancedButton {
+  align-self: flex-start;
+  border-radius: 10px;
+  height: 46px;
+  padding: 0 20px;
+  font-weight: 500;
+  background: rgba(0, 0, 0, 0.04);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+}
+
+.heroMedia {
+  position: relative;
+  z-index: 1;
+  background: rgba(255, 255, 255, 0.1);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: 24px;
+  padding: 16px;
+}
+
+.heroImage {
+  width: 100%;
+  height: auto;
+  max-height: 600px;
+  object-fit: contain;
+  border-radius: 24px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.heroImageFallback {
+  width: 100%;
+  height: 520px;
+  border-radius: 32px;
+  background: linear-gradient(135deg, #d0d4ff, #f6d5f7);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-end;
+  padding: 32px;
+  color: #1a1a1a;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.18);
+}
+
+.heroImageFallback p {
+  margin: 0;
+  opacity: 0.85;
+}
+
+.portfolioGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 24px;
+}
+
+.portfolioSectionTitle {
+  font-size: 20px;
+  font-weight: 600;
+  margin: 0 0 16px;
+  color: #1a1a1a;
+}
+
+/* 响应式：平板和移动端 */
+@media (max-width: 1200px) {
+  .mainGrid {
+    grid-template-columns: 1fr 1fr;
+    gap: 24px;
+  }
+
+  .centerColumn {
+    order: -1;
+  }
+}
+
+@media (max-width: 768px) {
+  .mainGrid {
+    grid-template-columns: 1fr;
+    gap: 24px;
+  }
+
+  .rightColumn {
+    position: static;
+  }
+
+  .heroImage {
+    max-height: 400px;
+  }
+
+  .heroImageFallback {
+    height: auto;
+    min-height: 300px;
+  }
+}
+
+@media (max-width: 640px) {
+  .pageContainer {
+    padding: 32px 16px 64px;
+  }
+
+  .leftColumn {
+    gap: 20px;
+  }
+
+  .portfolioListContainer {
+    gap: 12px;
+  }
+
+  .heroCreateButton {
+    height: 44px !important;
+    font-size: 14px !important;
+    padding: 0 20px !important;
+  }
+
+  .heroMedia,
+  .heroImage,
+  .heroImageFallback {
+    height: auto;
+    min-height: 260px;
+  }
+}

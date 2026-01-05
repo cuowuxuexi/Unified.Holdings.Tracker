@@ -1,0 +1,137 @@
+# Node
+node_modules/
+**/node_modules/
+
+# Build output
+**/dist/
+**/out/
+**/release/
+**/final-release/
+**/*.tsbuildinfo
+frontend/.vite/
+*.asar
+*.asar.unpacked
+electron/renderer/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+._*
+
+# IDE / Tooling specific
+.vscode/
+.idea/
+.cursor/
+.repomix/
+.specstory/
+
+# Others
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Electron Forge / Electron Builder 缓存或特定输出
+.electron/
+# Windows Installer files (if generated in root)
+*.exe
+*.msi
+
+# User-specific data
+# Ignore backend/data/ directory (moved under apps/)
+apps/backend/data/
+
+# Legacy code (archived for reference)
+docs/legacy-backend/
+
+# SpecStory explanation file
+.specstory/.what-is-this.md
+
+# ============================================
+# 新增：防止临时文件被提交
+# ============================================
+
+# 备份文件
+.backups/
+*.backup
+*.bak
+
+# 临时调试脚本
+test-*.js
+verify-*.js
+check-*.js
+debug-*.js
+analyze-*.js
+trace-*.js
+fix-*.js
+clear-*.js
+*.bat
+*.ps1
+!apps/backend/jest.config.js
+
+# 临时文档（优化记录）
+*_FIX*.md
+*_COMPLETE*.md
+*_INSTRUCTIONS.md
+*_QUICKSTART.md
+*_SUMMARY.md
+URGENT_*.md
+STAGE_*.md
+CHANGELOG_*.md
+TROUBLESHOOTING.md
+HOW_TO_USE_NOW.md
+开发模式使用指南.md
+优化完成报告.md
+
+# 编译产物（packages 下的 JS 文件）
+packages/**/src/**/*.js
+packages/**/src/**/*.js.map
+packages/**/src/**/*.d.ts
+packages/**/src/**/*.d.ts.map
+
+# 数据库文件（只忽略数据文件，不忽略 migrations）
+*.db
+*.db-*
+*.db.backup*
+apps/backend/prisma/dev.db
+apps/backend/prisma/data/*.db*
+
+# ⚠️ 重要：不要忽略 prisma/migrations/ 目录！
+# Prisma Migrations 必须被 Git 跟踪，这样 Git 回退后可以重放迁移历史
+# 正确的做法：migrations/ 目录被 Git 跟踪，.db 文件被忽略
+
+# 临时图片和日志
+Generated*.png
+localhost-*.log
+
+# IDE 临时文件
+.claude/*.html
+.claude/settings.local.json
+.playwright-mcp/*.png
+.serena/
+
+# OpenSpec 临时文件
+openspec/changes/**/README.md
+openspec/changes/**/SUMMARY.md
+openspec/changes/**/FINAL_REPORT.md
+openspec/changes/**/IMPLEMENTATION_COMPLETE.md
+openspec/changes/**/QUICK_START.md
+openspec/changes/**/NEXT_STEPS.md
+
+# 其他临时文件
+agents.md
+batch_import_template.xlsx
+check-backend-logs.md
+
+# Test files
+test_batch_import.csv
+batch_import_template*.csv
+
+# BMad-Method 工作流文件
+.bmad-core/
+.claude/commands/BMad/
+docs/
