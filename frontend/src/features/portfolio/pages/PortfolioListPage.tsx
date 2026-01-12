@@ -1,6 +1,8 @@
 import { useState } from 'react';
-import { Modal, Spin, Alert, Typography } from 'antd';
+import { Modal, Spin, Alert, Typography, Button } from 'antd';
+import { HistoryOutlined } from '@ant-design/icons';
 import { useNavigate } from 'react-router-dom';
+import { ViewArchivesModal } from '../../../components/ViewArchivesModal';
 import { usePortfolios } from '../../../shared/hooks/usePortfolios';
 import { PortfolioList } from '../components/PortfolioList';
 import { CreatePortfolioForm } from '../components/CreatePortfolioForm';
@@ -14,6 +16,8 @@ const { Title } = Typography;
 export function PortfolioListPage() {
   const navigate = useNavigate();
   const [isAdvancedModalVisible, setIsAdvancedModalVisible] = useState(false);
+  const [isViewArchivesModalVisible, setIsViewArchivesModalVisible] =
+    useState(false);
   const [creationSuccessMessage, setCreationSuccessMessage] = useState<
     string | null
   >(null);
@@ -32,6 +36,15 @@ export function PortfolioListPage() {
   const handleAdvancedSuccess = () => {
     handleCreationSuccess();
     setIsAdvancedModalVisible(false);
+  };
+
+  const handleRestoreSuccess = (portfolioId?: string) => {
+    setCreationSuccessMessage('存档恢复成功！');
+    setIsViewArchivesModalVisible(false);
+    if (portfolioId) {
+      // 跳转到恢复的投资组合
+      navigate(`/portfolio/${portfolioId}`);
+    }
   };
 
   if (isLoading) {
@@ -74,6 +87,14 @@ export function PortfolioListPage() {
               onOpenAdvanced={() => setIsAdvancedModalVisible(true)}
               buttonClassName={styles.heroCreateButton}
             />
+            <Button
+              icon={<HistoryOutlined />}
+              onClick={() => setIsViewArchivesModalVisible(true)}
+              size="large"
+              className={styles.heroRestoreButton}
+            >
+              读取存档
+            </Button>
           </div>
           <div className={styles.portfolioListContainer}>
             <PortfolioList
@@ -121,6 +142,13 @@ export function PortfolioListPage() {
       >
         <CreatePortfolioForm onSuccess={handleAdvancedSuccess} />
       </Modal>
+
+      <ViewArchivesModal
+        open={isViewArchivesModalVisible}
+        portfolioId={null}
+        onClose={() => setIsViewArchivesModalVisible(false)}
+        onRestoreSuccess={handleRestoreSuccess}
+      />
     </div>
   );
 }

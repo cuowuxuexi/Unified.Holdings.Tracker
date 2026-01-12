@@ -25,9 +25,9 @@ const { Text } = Typography;
 
 interface ViewArchivesModalProps {
   open: boolean;
-  portfolioId: string | null;
+  portfolioId?: string | null; // 改为可选，支持全局模式
   onClose: () => void;
-  onRestoreSuccess?: () => void;
+  onRestoreSuccess?: (portfolioId?: string) => void; // 添加 portfolioId 参数
 }
 
 /**
@@ -49,11 +49,12 @@ export function ViewArchivesModal({
 
   // 获取备份列表
   const fetchBackups = useCallback(async () => {
-    if (!portfolioId) return;
-
     setLoading(true);
     try {
-      const response = await apiClient.getBackups(portfolioId);
+      // 根据是否有 portfolioId 决定调用哪个 API
+      const response = portfolioId
+        ? await apiClient.getBackups(portfolioId)
+        : await apiClient.getAllBackups();
       setBackups(response.backups || []);
     } catch (error) {
       console.error('获取存档列表失败:', error);
@@ -65,24 +66,34 @@ export function ViewArchivesModal({
 
   // 当对话框打开时获取数据
   useEffect(() => {
-    if (open && portfolioId) {
+    if (open) {
       fetchBackups();
     }
-  }, [open, portfolioId, fetchBackups]);
+  }, [open, fetchBackups]);
 
   // 恢复备份
   const handleRestore = async (backup: BackupIndexEntry) => {
-    if (!portfolioId) return;
-
     setRestoringId(backup.backupId);
     try {
-      const result = await apiClient.restoreBackup(portfolioId, backup.backupId);
+      let result;
+
+      if (portfolioId) {
+        // 有 portfolioId，使用原有的恢复逻辑
+        result = await apiClient.restoreBackup(portfolioId, backup.backupId);
+      } else {
+        // 无 portfolioId，使用智能恢复
+        result = await apiClient.restoreBackupSmart(backup.backupId);
+      }
 
       if (result.success) {
-        messageApi.success(
-          `存档恢复成功！已恢复 ${result.restoredTransactionCount} 条交易记录`
-        );
-        onRestoreSuccess?.();
+        const countInfo = result.restoredTransactionCount
+          ? `已恢复 ${result.restoredTransactionCount} 条交易记录`
+          : '';
+        const newPortfolioInfo = (result as any).isNewPortfolio
+          ? '（已自动创建投资组合）'
+          : '';
+        messageApi.success(`存档恢复成功！${countInfo}${newPortfolioInfo}`);
+        onRestoreSuccess?.((result as any).portfolioId);
         onClose();
       } else {
         messageApi.error(result.message || '恢复存档失败');
@@ -177,6 +188,15 @@ export function ViewArchivesModal({
       defaultSortOrder: 'ascend',
     },
     {
+      title: '投资组合',
+      dataIndex: 'portfolioName',
+      key: 'portfolioName',
+      width: 150,
+      render: (name: string) => <Text>{name}</Text>,
+      // 只在全局模式下显示
+      hidden: !!portfolioId,
+    },
+    {
       title: '交易记录',
       dataIndex: 'transactionCount',
       key: 'transactionCount',
@@ -198,7 +218,9 @@ export function ViewArchivesModal({
       key: 'fileSize',
       width: 100,
       align: 'right',
-      render: (size: number) => <Text type="secondary">{formatFileSize(size)}</Text>,
+      render: (size: number) => (
+        <Text type="secondary">{formatFileSize(size)}</Text>
+      ),
     },
     {
       title: '操作',
@@ -280,7 +302,11 @@ export function ViewArchivesModal({
         open={open}
         onCancel={onClose}
         footer={[
-          <Button key="refresh" icon={<ReloadOutlined />} onClick={fetchBackups}>
+          <Button
+            key="refresh"
+            icon={<ReloadOutlined />}
+            onClick={fetchBackups}
+          >
             刷新
           </Button>,
           <Button key="close" type="primary" onClick={onClose}>
@@ -306,7 +332,7 @@ export function ViewArchivesModal({
               />
             ) : (
               <Table
-                columns={columns}
+                columns={columns.filter((col) => !(col as any).hidden)}
                 dataSource={backups}
                 rowKey="backupId"
                 size="small"

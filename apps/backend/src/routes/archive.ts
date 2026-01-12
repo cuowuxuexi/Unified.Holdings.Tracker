@@ -25,6 +25,52 @@ const asyncHandler =
 // ============================================
 
 /**
+ * GET /api/backups
+ * 列出所有备份（全局，不限定投资组合）
+ */
+router.get(
+  '/backups',
+  asyncHandler(async (_req: Request, res: Response) => {
+    const backups = await backupService.listAllBackups();
+
+    res.json({
+      backups,
+      total: backups.length,
+    });
+  })
+);
+
+/**
+ * POST /api/backup/:backupId/restore
+ * 智能恢复备份（自动创建组合如果不存在）
+ */
+router.post(
+  '/backup/:backupId/restore',
+  asyncHandler(async (req: Request, res: Response) => {
+    const { backupId } = req.params;
+
+    // 执行智能恢复
+    const result = await backupService.restoreBackupSmart(backupId);
+
+    if (!result.success) {
+      return res.status(400).json({
+        success: false,
+        message: result.error || 'Failed to restore backup',
+      });
+    }
+
+    res.json({
+      success: true,
+      message: result.message,
+      restoredTransactionCount: result.restoredTransactionCount,
+      restoredAssetCount: result.restoredAssetCount,
+      portfolioId: result.portfolioId,
+      isNewPortfolio: result.isNewPortfolio,
+    });
+  })
+);
+
+/**
  * POST /api/portfolio/:id/backup
  * 创建投资组合备份
  */
@@ -281,7 +327,11 @@ router.get(
   '/portfolio/:id/archives',
   asyncHandler(async (req: Request, res: Response) => {
     const portfolioId = req.params.id;
-    const { year, limit = 50, offset = 0 } = req.query as {
+    const {
+      year,
+      limit = 50,
+      offset = 0,
+    } = req.query as {
       year?: string;
       limit?: string;
       offset?: string;

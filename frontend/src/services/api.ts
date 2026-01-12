@@ -522,7 +522,10 @@ const apiClient = {
       );
       return response.data;
     } catch (error) {
-      console.error(`Error creating backup for portfolio ${portfolioId}:`, error);
+      console.error(
+        `Error creating backup for portfolio ${portfolioId}:`,
+        error
+      );
       throw error;
     }
   },
@@ -537,7 +540,10 @@ const apiClient = {
       );
       return response.data;
     } catch (error) {
-      console.error(`Error fetching backups for portfolio ${portfolioId}:`, error);
+      console.error(
+        `Error fetching backups for portfolio ${portfolioId}:`,
+        error
+      );
       throw error;
     }
   },
@@ -568,10 +574,13 @@ const apiClient = {
    */
   downloadBackup: async (backupId: string): Promise<Blob> => {
     try {
-      const response = await axios.get(`${API_BASE_URL}/api/backup/${backupId}`, {
-        params: { format: 'download' },
-        responseType: 'blob',
-      });
+      const response = await axios.get(
+        `${API_BASE_URL}/api/backup/${backupId}`,
+        {
+          params: { format: 'download' },
+          responseType: 'blob',
+        }
+      );
       return response.data;
     } catch (error) {
       console.error(`Error downloading backup ${backupId}:`, error);
@@ -587,6 +596,43 @@ const apiClient = {
       await axios.delete(`${API_BASE_URL}/api/backup/${backupId}`);
     } catch (error) {
       console.error(`Error deleting backup ${backupId}:`, error);
+      throw error;
+    }
+  },
+
+  /**
+   * 获取所有备份列表（全局）
+   */
+  getAllBackups: async (): Promise<BackupListResponse> => {
+    try {
+      const response = await axios.get<BackupListResponse>(
+        `${API_BASE_URL}/api/backups`
+      );
+      return response.data;
+    } catch (error) {
+      console.error('Error fetching all backups:', error);
+      throw error;
+    }
+  },
+
+  /**
+   * 智能恢复备份（自动创建组合如果不存在）
+   */
+  restoreBackupSmart: async (
+    backupId: string
+  ): Promise<
+    RestoreBackupResponse & { portfolioId?: string; isNewPortfolio?: boolean }
+  > => {
+    try {
+      const response = await axios.post<
+        RestoreBackupResponse & {
+          portfolioId?: string;
+          isNewPortfolio?: boolean;
+        }
+      >(`${API_BASE_URL}/api/backup/${backupId}/restore`);
+      return response.data;
+    } catch (error) {
+      console.error(`Error smart restoring backup ${backupId}:`, error);
       throw error;
     }
   },

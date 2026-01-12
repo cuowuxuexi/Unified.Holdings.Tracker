@@ -206,8 +206,8 @@ export class BackupService {
         updatedAt: asset.updatedAt.toISOString(),
       }));
 
-      const transactionsData: BackupTransactionData[] = portfolio.transactions.map(
-        (tx) => ({
+      const transactionsData: BackupTransactionData[] =
+        portfolio.transactions.map((tx) => ({
           id: tx.id,
           portfolioId: tx.portfolioId,
           type: tx.type,
@@ -223,8 +223,7 @@ export class BackupService {
           notes: tx.notes ?? undefined,
           createdAt: tx.createdAt.toISOString(),
           updatedAt: tx.updatedAt.toISOString(),
-        })
-      );
+        }));
 
       const backup: PortfolioBackup = {
         metadata,
@@ -277,7 +276,8 @@ export class BackupService {
         filename: '',
         filePath: '',
         metadata: {} as BackupMetadata,
-        error: error instanceof Error ? error.message : 'Failed to create backup',
+        error:
+          error instanceof Error ? error.message : 'Failed to create backup',
       };
     }
   }
@@ -296,6 +296,23 @@ export class BackupService {
         backups.push(entry);
       }
     }
+
+    // 按创建时间降序排序
+    backups.sort(
+      (a, b) =>
+        new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+
+    return backups;
+  }
+
+  /**
+   * 列出所有备份（不限定投资组合）
+   * @returns 所有备份列表
+   */
+  async listAllBackups(): Promise<BackupIndexEntry[]> {
+    const index = this.getIndex();
+    const backups: BackupIndexEntry[] = Object.values(index.backups);
 
     // 按创建时间降序排序
     backups.sort(
@@ -326,7 +343,9 @@ export class BackupService {
     );
 
     if (!backup) {
-      console.log(`[BackupService] Backup file not found: ${entry.relativePath}`);
+      console.log(
+        `[BackupService] Backup file not found: ${entry.relativePath}`
+      );
       return null;
     }
 
@@ -451,6 +470,153 @@ export class BackupService {
         message: 'Backup restored successfully',
         restoredTransactionCount: backup.transactions.length,
         restoredAssetCount: backup.assets.length,
+      };
+    } catch (error) {
+      console.error('[BackupService] Error restoring backup:', error);
+      return {
+        success: false,
+        message: 'Failed to restore backup',
+        error: error instanceof Error ? error.message : 'Unknown error',
+      };
+    }
+  }
+
+  /**
+   * 智能恢复备份
+   * 如果目标组合不存在，自动创建同名组合后恢复
+   * @param backupId 备份 ID
+   * @returns 恢复结果，包含可能新创建的 portfolioId
+   */
+  async restoreBackupSmart(
+    backupId: string
+  ): Promise<
+    RestoreResult & { portfolioId?: string; isNewPortfolio?: boolean }
+  > {
+    console.log(`[BackupService] Smart restoring backup ${backupId}`);
+
+    try {
+      // 获取备份数据
+      const backup = await this.getBackup(backupId);
+      if (!backup) {
+        return {
+          success: false,
+          message: 'Backup not found',
+          error: 'Backup not found',
+        };
+      }
+
+      const originalPortfolioId = backup.metadata.portfolioId;
+      let targetPortfolioId = originalPortfolioId;
+      let isNewPortfolio = false;
+
+      // 检查原投资组合是否存在
+      const existingPortfolio = await prisma.portfolio.findUnique({
+        where: { id: originalPortfolioId },
+      });
+
+      if (!existingPortfolio) {
+        // 创建新投资组合
+        console.log(
+          `[BackupService] Original portfolio not found, creating new one`
+        );
+        const newPortfolio = await prisma.portfolio.create({
+          data: {
+            id: originalPortfolioId, // 使用原始 ID 保持一致性
+            name: backup.portfolio.name,
+            initialCash: backup.portfolio.initialCash,
+            cash: backup.portfolio.cash,
+            leverageTotalAmount: backup.portfolio.leverageTotalAmount,
+            leverageUsedAmount: backup.portfolio.leverageUsedAmount,
+            leverageAvailableAmount: backup.portfolio.leverageAvailableAmount,
+            leverageCostRate: backup.portfolio.leverageCostRate,
+            attentionInfo: backup.portfolio.attentionInfo,
+          },
+        });
+        targetPortfolioId = newPortfolio.id;
+        isNewPortfolio = true;
+        console.log(
+          `[BackupService] Created new portfolio: ${targetPortfolioId}`
+        );
+      }
+
+      // 使用事务执行恢复操作
+      await prisma.$transaction(async (tx) => {
+        // 1. 删除现有的交易记录（如果组合已存在）
+        if (!isNewPortfolio) {
+          await tx.transaction.deleteMany({
+            where: { portfolioId: targetPortfolioId },
+          });
+          console.log(`[BackupService] Deleted existing transactions`);
+
+          // 2. 更新投资组合设置
+          await tx.portfolio.update({
+            where: { id: targetPortfolioId },
+            data: {
+              initialCash: backup.portfolio.initialCash,
+              cash: backup.portfolio.cash,
+              leverageTotalAmount: backup.portfolio.leverageTotalAmount,
+              leverageUsedAmount: backup.portfolio.leverageUsedAmount,
+              leverageAvailableAmount: backup.portfolio.leverageAvailableAmount,
+              leverageCostRate: backup.portfolio.leverageCostRate,
+              attentionInfo: backup.portfolio.attentionInfo,
+            },
+          });
+          console.log(`[BackupService] Updated portfolio settings`);
+        }
+
+        // 3. 确保资产存在（使用 upsert）
+        for (const asset of backup.assets) {
+          await tx.asset.upsert({
+            where: { code: asset.code },
+            update: {
+              name: asset.name,
+              market: asset.market,
+            },
+            create: {
+              code: asset.code,
+              name: asset.name,
+              market: asset.market,
+            },
+          });
+        }
+        console.log(`[BackupService] Ensured ${backup.assets.length} assets`);
+
+        // 4. 导入交易记录（使用新 ID 避免冲突）
+        for (const transaction of backup.transactions) {
+          await tx.transaction.create({
+            data: {
+              id: uuidv4(), // 生成新 ID
+              portfolioId: targetPortfolioId,
+              type: transaction.type,
+              date: new Date(transaction.date),
+              assetCode: transaction.assetCode,
+              quantity: transaction.quantity,
+              price: transaction.price,
+              amount: transaction.amount,
+              commission: transaction.commission,
+              leverageUsed: transaction.leverageUsed,
+              currency: transaction.currency,
+              exchangeRate: transaction.exchangeRate,
+              notes: transaction.notes,
+            },
+          });
+        }
+        console.log(
+          `[BackupService] Imported ${backup.transactions.length} transactions`
+        );
+      });
+
+      console.log(`[BackupService] Backup restored successfully`);
+
+      return {
+        success: true,
+        message: isNewPortfolio
+          ? `Backup restored to new portfolio "${backup.portfolio.name}"`
+          : 'Backup restored successfully',
+        restoredTransactionCount: backup.transactions.length,
+        restoredAssetCount: backup.assets.length,
+        portfolioId: targetPortfolioId,
+        isNewPortfolio,
       };
     } catch (error) {
       console.error('[BackupService] Error restoring backup:', error);
