@@ -9,7 +9,21 @@ module.exports = {
     icon: './assets/icon', // 指定应用图标 (Forge 会自动选择 .ico/.icns)
     name: "Portfolio Tool", // 应用名称 (显示在标题栏等)
     executableName: "PortfolioTool", // Windows 下的可执行文件名
-    extraResource: [] // We use hooks instead for dynamic copying
+    extraResource: [], // We use hooks instead for dynamic copying
+    // 忽略所有 node_modules（运行时依赖在 hook 中手动复制到 asar 内）
+    ignore: (filePath) => {
+      if (!filePath) return false;
+      const normalizedPath = filePath.replace(/\\/g, '/');
+      // 忽略所有 node_modules
+      if (normalizedPath.includes('node_modules')) return true;
+      // 忽略源码
+      if (normalizedPath.includes('/src')) return true;
+      // 仅忽略源码 launcher 目录，保留 dist/launcher（运行时需要）
+      if (normalizedPath.includes('/launcher') && !normalizedPath.includes('/dist/launcher')) return true;
+      if (normalizedPath.endsWith('.ts')) return true;
+      if (normalizedPath.includes('tsconfig')) return true;
+      return false;
+    }
   },
   rebuildConfig: {},
   makers: [
@@ -35,19 +49,21 @@ module.exports = {
     // at package time, before code signing the application
     new FusesPlugin({
       version: FuseVersion.V1,
-      [FuseV1Options.RunAsNode]: false,
+      // 便携版后端使用 ELECTRON_RUN_AS_NODE 启动，无需系统 Node.js
+      [FuseV1Options.RunAsNode]: true,
       [FuseV1Options.EnableCookieEncryption]: true,
       [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
       [FuseV1Options.EnableNodeCliInspectArguments]: false,
-      [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
+      // 关闭嵌入式 ASAR 完整性校验，避免修复打包产物时出现“点击无反应”
+      [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: false,
       [FuseV1Options.OnlyLoadAppFromAsar]: true,
     }),
   ],
   hooks: {
     packageAfterCopy: async (config, buildPath, electronVersion, platform, arch) => {
-      console.log('📦 [Hook] Copying backend resources...');
+      console.log('📦 [Hook] Copying resources...');
       console.log(`  Build Path: ${buildPath}`);
-      
+
       // buildPath is the directory containing the app source (which will be asared)
       // e.g. .../resources/app/
       // We want to put files in .../resources/backend/
@@ -55,14 +71,35 @@ module.exports = {
       let resourcesDir = path.resolve(buildPath, '..');
 
       console.log(`  Target resources directory: ${resourcesDir}`);
-      
+
       const backendDestDir = path.join(resourcesDir, 'backend');
-      
+
       // Ensure backend dir exists
       if (!fs.existsSync(backendDestDir)) {
         fs.mkdirSync(backendDestDir, { recursive: true });
       }
-      
+
+      // ========== 复制主进程运行时依赖到 asar 内 ==========
+      const appNodeModules = path.join(buildPath, 'node_modules');
+      fs.mkdirSync(appNodeModules, { recursive: true });
+
+      // 运行时依赖列表
+      const runtimeDeps = ['node-fetch', 'electron-squirrel-startup'];
+      const electronNodeModules = path.join(__dirname, 'node_modules');
+
+      for (const dep of runtimeDeps) {
+        const depSrc = path.join(electronNodeModules, dep);
+        const depDest = path.join(appNodeModules, dep);
+        if (fs.existsSync(depSrc)) {
+          copyDirectory(depSrc, depDest);
+          console.log(`  ✅ Copied runtime dep: ${dep}`);
+        } else {
+          console.error(`  ❌ Runtime dep not found: ${dep}`);
+          throw new Error(`Runtime dependency ${dep} not found`);
+        }
+      }
+
+      // ========== 复制后端资源 ==========
       // 1. Copy server bundle
       const backendSrc = path.join(__dirname, '../apps/backend/dist/server-bundle.js');
       if (fs.existsSync(backendSrc)) {
@@ -72,7 +109,7 @@ module.exports = {
          console.error('  ❌ server-bundle.js not found at:', backendSrc);
          throw new Error('Backend bundle not found. Did you run npm run build?');
       }
-      
+
       // 2. Copy Prisma Engine (跨平台支持)
       const prismaClientDir = path.join(__dirname, '../node_modules/.prisma/client');
 

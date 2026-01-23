@@ -18,17 +18,7 @@ const DATABASE_FILE_NAME = 'portfolio.db';
 let logStream: fs.WriteStream | null = null;
 
 function initLogSystem() {
-  // 生产模式下不创建日志文件，只输出到控制台
-  if (app.isPackaged) {
-    console.log('='.repeat(80));
-    console.log(`Electron 启动 - ${new Date().toISOString()}`);
-    console.log(`应用版本: ${app.getVersion()}`);
-    console.log('生产模式：日志仅输出到控制台');
-    console.log('='.repeat(80));
-    return;
-  }
-
-  // 开发模式：创建日志文件
+  // 生产/开发模式：都创建日志文件（便于排查“点击无反应”等启动问题）
   const userDataPath = app.getPath('userData');
   const logsDir = path.join(userDataPath, 'logs');
 
@@ -314,35 +304,11 @@ async function startBackend(): Promise<{ url: string; port: number }> {
   try {
     log('\n启动后端子进程...');
 
-    // **关键修复**: 在打包环境下查找并使用系统 Node.js
     if (app.isPackaged) {
-      log('查找系统 Node.js...');
-
-      // 尝试查找系统 Node.js
-      let nodePath: string | null = null;
-      try {
-        const { stdout } = await execAsync('where node');
-        const paths = stdout.trim().split('\n');
-        // 过滤掉 Electron 自己的 node
-        nodePath = paths.find((p) => !p.includes('electron')) || paths[0];
-        log(`✓ 找到 Node.js: ${nodePath}`);
-      } catch (error) {
-        logError('✗ 未找到系统 Node.js');
-        logError('详细错误:', error);
-
-        dialog.showErrorBox(
-          '缺少 Node.js',
-          '未在系统中找到 Node.js。\n\n请安装 Node.js 18 或更高版本后重试。\n\n下载地址: https://nodejs.org/'
-        );
-        throw new Error('Node.js not found in system PATH');
-      }
-
-      if (!nodePath) {
-        throw new Error('Node.js path is empty');
-      }
-
-      log('使用系统 Node.js 启动后端（打包模式）');
-      backendProcess = spawn(nodePath.trim(), [backendEntry], {
+      // 便携版不依赖系统 Node.js：使用 Electron 内置 Node（ELECTRON_RUN_AS_NODE）
+      // 需要开启 FuseV1Options.RunAsNode（见 forge.config.js / 打包产物 fuses）
+      log('使用 Electron 内置 Node 启动后端（打包模式）');
+      backendProcess = spawn(process.execPath, [backendEntry], {
         env,
         stdio: ['ignore', 'pipe', 'pipe'],
         cwd: path.join(process.resourcesPath, 'backend'),
@@ -591,6 +557,15 @@ process.on('uncaughtException', (error) => {
 
   // 根据情况决定是否退出应用
   // app.quit();
+});
+
+process.on('unhandledRejection', (reason) => {
+  logError('未处理的 Promise 拒绝:', reason);
+
+  dialog.showErrorBox(
+    '发生错误',
+    `应用遇到未处理的 Promise 拒绝:\n\n${reason instanceof Error ? reason.message : String(reason)}\n\n请查看日志文件获取详细信息。`
+  );
 });
 
 function configureDatabaseEnv() {

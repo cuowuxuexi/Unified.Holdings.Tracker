@@ -13,7 +13,6 @@ import {
   DownOutlined,
   ExportOutlined,
   SaveOutlined,
-  FolderOpenOutlined,
   HistoryOutlined,
 } from '@ant-design/icons';
 import { useState, useEffect, useCallback } from 'react';
