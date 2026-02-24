@@ -1,6 +1,9 @@
 import { Router, Request, Response, NextFunction } from 'express';
 import { container } from '../container';
-import { getExchangeRate } from '../services/currencyService';
+import {
+  getExchangeRate,
+  getExchangeRateInfo,
+} from '../services/currencyService';
 import {
   Transaction,
   PortfolioDetail,
@@ -61,11 +64,34 @@ router.get(
         getExchangeRate('USD', 'CNY'),
         getExchangeRate('HKD', 'CNY'),
       ]);
+
+      const rateInfoList = [
+        getExchangeRateInfo('USD-CNY'),
+        getExchangeRateInfo('HKD-CNY'),
+      ];
+      let latestRateTimestampMs: number | null = null;
+      for (const rateInfo of rateInfoList) {
+        if (!rateInfo?.timestamp) {
+          continue;
+        }
+        const timestampMs = new Date(rateInfo.timestamp).getTime();
+        if (Number.isNaN(timestampMs)) {
+          continue;
+        }
+        latestRateTimestampMs =
+          latestRateTimestampMs === null
+            ? timestampMs
+            : Math.max(latestRateTimestampMs, timestampMs);
+      }
+
       res.json({
         USD: usdRate,
         HKD: hkdRate,
         CNY: 1.0,
-        updatedAt: new Date().toISOString(),
+        updatedAt:
+          latestRateTimestampMs === null
+            ? new Date().toISOString()
+            : new Date(latestRateTimestampMs).toISOString(),
       });
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {

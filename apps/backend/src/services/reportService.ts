@@ -8,6 +8,7 @@ import {
   Market,
 } from '../types';
 import { fetchQuotes } from './tencentApi';
+import { getExchangeRate, getExchangeRateInfo } from './currencyService';
 
 interface AttentionItemPayload {
   id?: string;
@@ -204,7 +205,7 @@ export class ReportService {
    */
   private generateCoreIndicatorsSection(
     detail: PortfolioDetail,
-    timestamp: string
+    reportTimestamp: string
   ): string {
     const totalDividend = this.calculateTotalDividend(detail.transactions);
     const leverage = detail.leverage;
@@ -214,9 +215,9 @@ export class ReportService {
         ? ((leverage.usedAmount / detail.totalAssets) * 100).toFixed(2)
         : '0.00';
 
-    // 获取汇率信息
-    const usdRate = 7.2886; // 默认汇率，实际应从 API 获取
-    const hkdRate = 0.9394; // 默认汇率，实际应从 API 获取
+    // 获取汇率信息（优先实时缓存，缺失时回退默认值）
+    const { usdRate, hkdRate, updatedAt } =
+      this.getExchangeRateSnapshot(reportTimestamp);
 
     // 计算总市值较昨日变化百分比
     const marketValueChange =
@@ -248,9 +249,55 @@ export class ReportService {
     section += `| 已用杠杆 | ${leverage.usedAmount.toFixed(2)} |  |\n`;
     section += `| 杠杆比例 | ${leverageRatio}% |  |\n\n`;
 
-    section += `*汇率：1 USD = ${usdRate} CNY, 1 HKD = ${hkdRate} CNY（更新时间: ${timestamp}）*\n`;
+    section += `*汇率：1 USD = ${usdRate.toFixed(4)} CNY, 1 HKD = ${hkdRate.toFixed(4)} CNY（更新时间: ${updatedAt}）*\n`;
 
     return section;
+  }
+
+  private getExchangeRateSnapshot(reportTimestamp: string): {
+    usdRate: number;
+    hkdRate: number;
+    updatedAt: string;
+  } {
+    const fallbackUsdRate = 7.2886;
+    const fallbackHkdRate = 0.9394;
+
+    const usdRate = getExchangeRate('USD', 'CNY') ?? fallbackUsdRate;
+    const hkdRate = getExchangeRate('HKD', 'CNY') ?? fallbackHkdRate;
+
+    const rateInfoList = [
+      getExchangeRateInfo('USD-CNY'),
+      getExchangeRateInfo('HKD-CNY'),
+    ];
+
+    let latestRateTimestampMs: number | null = null;
+
+    for (const rateInfo of rateInfoList) {
+      if (!rateInfo?.timestamp) {
+        continue;
+      }
+      const timestampMs = new Date(rateInfo.timestamp).getTime();
+      if (Number.isNaN(timestampMs)) {
+        continue;
+      }
+      latestRateTimestampMs =
+        latestRateTimestampMs === null
+          ? timestampMs
+          : Math.max(latestRateTimestampMs, timestampMs);
+    }
+
+    const updatedAt =
+      latestRateTimestampMs === null
+        ? reportTimestamp
+        : format(new Date(latestRateTimestampMs), 'yyyy/MM/dd HH:mm:ss', {
+            locale: zhCN,
+          });
+
+    return {
+      usdRate,
+      hkdRate,
+      updatedAt,
+    };
   }
 
   /**
@@ -453,10 +500,6 @@ export class ReportService {
       (sum, p) => sum + (p.totalPnl || 0),
       0
     );
-
-    // 货币转换率（用于占比计算）
-    const currencyToCny =
-      currency === 'HKD' ? 0.9394 : currency === 'USD' ? 7.2886 : 1;
 
     let section = `**${sectionNum}. ${title}**\n`;
     section += `*总市值: ${currency === 'CNY' ? '¥' : currency === 'HKD' ? 'HK$' : '$'}${totalMarketValue.toFixed(2)}`;

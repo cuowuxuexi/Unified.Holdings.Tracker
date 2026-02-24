@@ -78,8 +78,37 @@ export function getCommissionInCny(tx: Transaction): number {
   if (!commission) {
     return 0;
   }
+
+  // 当前口径：commission 统一按 CNY 存储。
+  // BUY 兼容历史数据：amount 已含手续费且是 CNY，可据此反推 CNY 手续费。
+  if (tx.type === TransactionType.BUY) {
+    const quantity = Number(tx.quantity ?? 0);
+    const price = Number(tx.price ?? 0);
+    const amount = Number(tx.amount ?? 0);
+    if (quantity > 0 && price > 0 && amount > 0) {
+      const rate = resolveTransactionExchangeRate(tx);
+      const grossCny = quantity * price * rate;
+      const inferredCommission = amount - grossCny;
+      if (inferredCommission >= -EPSILON) {
+        return Math.max(0, inferredCommission);
+      }
+    }
+  }
+
+  return commission;
+}
+
+function getCommissionInLocal(tx: Transaction): number {
+  const commissionCny = getCommissionInCny(tx);
+  if (!commissionCny) {
+    return 0;
+  }
   const rate = resolveTransactionExchangeRate(tx);
-  return commission * rate;
+  const currency = resolveTransactionCurrency(tx);
+  if (currency === 'CNY' || rate <= 0) {
+    return commissionCny;
+  }
+  return commissionCny / rate;
 }
 
 function createEmptyState(
@@ -132,7 +161,7 @@ export class LotTracker {
       );
       return;
     }
-    const commissionLocal = Number(tx.commission ?? 0);
+    const commissionLocal = getCommissionInLocal(tx);
     const rate = resolveTransactionExchangeRate(tx);
     const currency = resolveTransactionCurrency(tx);
 
@@ -316,7 +345,10 @@ export interface DilutedCostState {
 export class DilutedCostTracker {
   private readonly positions = new Map<string, DilutedCostState>();
 
-  private getState(assetCode: string, currency: CurrencyCode): DilutedCostState {
+  private getState(
+    assetCode: string,
+    currency: CurrencyCode
+  ): DilutedCostState {
     const existing = this.positions.get(assetCode);
     if (existing) {
       if (currency && existing.currency !== currency) {
@@ -355,7 +387,7 @@ export class DilutedCostTracker {
       return;
     }
 
-    const commissionLocal = Number(tx.commission ?? 0);
+    const commissionLocal = getCommissionInLocal(tx);
     const rate = resolveTransactionExchangeRate(tx);
     const currency = resolveTransactionCurrency(tx);
 
@@ -401,7 +433,7 @@ export class DilutedCostTracker {
       return;
     }
 
-    const commissionLocal = Number(tx.commission ?? 0);
+    const commissionLocal = getCommissionInLocal(tx);
     const rate = resolveTransactionExchangeRate(tx);
 
     // 卖出收入 = 卖出金额 - 手续费
@@ -490,7 +522,8 @@ export class DilutedCostTracker {
     const { dilutedCostCny, dilutedCostLocal } = this.getDilutedCost(state);
     return {
       costPriceCny: state.quantity > 0 ? dilutedCostCny / state.quantity : 0,
-      costPriceLocal: state.quantity > 0 ? dilutedCostLocal / state.quantity : 0,
+      costPriceLocal:
+        state.quantity > 0 ? dilutedCostLocal / state.quantity : 0,
     };
   }
 
@@ -526,8 +559,10 @@ export class DilutedCostTracker {
     const dilutedPriceCostCny = dilutedCostCny - state.totalDividendCny;
     const dilutedPriceCostLocal = dilutedCostLocal - state.totalDividendLocal;
     return {
-      dilutedPriceCny: state.quantity > 0 ? dilutedPriceCostCny / state.quantity : 0,
-      dilutedPriceLocal: state.quantity > 0 ? dilutedPriceCostLocal / state.quantity : 0,
+      dilutedPriceCny:
+        state.quantity > 0 ? dilutedPriceCostCny / state.quantity : 0,
+      dilutedPriceLocal:
+        state.quantity > 0 ? dilutedPriceCostLocal / state.quantity : 0,
     };
   }
 }

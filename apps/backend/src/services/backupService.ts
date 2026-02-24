@@ -8,8 +8,9 @@ import { v4 as uuidv4 } from 'uuid';
 import path from 'path';
 import fs from 'fs';
 import { dataService } from './dataService';
-import { prisma } from '@uht/infra';
+import { prisma, cacheService } from '@uht/infra';
 import { Market, TransactionType } from '@prisma/client';
+import { portfolioStatsService } from './portfolioStatsService';
 import {
   PortfolioBackup,
   BackupMetadata,
@@ -28,11 +29,19 @@ import {
 const INDEX_VERSION = '1.0.0';
 const BACKUPS_DIR = 'backups';
 const INDEX_FILE = 'backups/index.json';
+const PORTFOLIOS_CACHE_KEY = 'portfolios:list';
+const PORTFOLIO_CACHE_PREFIX = 'portfolio:';
 
 /**
  * 备份服务类
  */
 export class BackupService {
+  private invalidatePortfolioCaches(portfolioId: string): void {
+    cacheService.delete(`${PORTFOLIO_CACHE_PREFIX}${portfolioId}`);
+    cacheService.delete(PORTFOLIOS_CACHE_KEY);
+    portfolioStatsService.clearCache(portfolioId);
+  }
+
   /**
    * 生成备份文件名
    * @param portfolioId 投资组合 ID
@@ -329,6 +338,8 @@ export class BackupService {
    * @returns 备份数据
    */
   async getBackup(backupId: string): Promise<PortfolioBackup | null> {
+    // 备份是低频操作，优先保证读取一致性而不是缓存命中。
+    dataService.clearCache(INDEX_FILE);
     const index = this.getIndex();
     const entry = index.backups[backupId];
 
@@ -337,6 +348,7 @@ export class BackupService {
       return null;
     }
 
+    dataService.clearCache(entry.relativePath);
     const backup = dataService.readJsonFile<PortfolioBackup | null>(
       entry.relativePath,
       null
@@ -462,6 +474,7 @@ export class BackupService {
           `[BackupService] Imported ${backup.transactions.length} transactions`
         );
       });
+      this.invalidatePortfolioCaches(portfolioId);
 
       console.log(`[BackupService] Backup restored successfully`);
 
@@ -605,6 +618,7 @@ export class BackupService {
           `[BackupService] Imported ${backup.transactions.length} transactions`
         );
       });
+      this.invalidatePortfolioCaches(targetPortfolioId);
 
       console.log(`[BackupService] Backup restored successfully`);
 

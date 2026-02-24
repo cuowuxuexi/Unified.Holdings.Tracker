@@ -462,6 +462,7 @@ export async function addTransactionToPortfolio(
       }
 
       newTransaction.amount = totalCostCNY + commissionCNY;
+      newTransaction.commission = commissionCNY;
       newTransaction.exchangeRate = exchangeRate;
       if (normalizedData.currency) {
         newTransaction.currency = normalizedData.currency;
@@ -517,6 +518,7 @@ export async function addTransactionToPortfolio(
 
       // 保存换算后的金额和汇率
       newTransaction.amount = amountCNY;
+      newTransaction.commission = commissionCNY;
       newTransaction.exchangeRate = exchangeRate;
       if (normalizedData.currency) {
         newTransaction.currency = normalizedData.currency;
@@ -757,6 +759,208 @@ export async function addTransactionToPortfolio(
   }
 }
 
+type ReplayLeverageState = {
+  totalAmount: number;
+  usedAmount: number;
+  costRate: number;
+};
+
+function resolveTransactionExchangeRate(tx: Transaction): number {
+  const rate = tx.exchangeRate ?? 1;
+  return typeof rate === 'number' && isFinite(rate) && rate > 0 ? rate : 1;
+}
+
+function resolveTransactionAmountCNY(tx: Transaction): number {
+  if (tx.amount !== undefined && tx.amount !== null) {
+    return Number(tx.amount);
+  }
+  const quantity = tx.quantity ?? 0;
+  const price = tx.price ?? 0;
+  return quantity * price * resolveTransactionExchangeRate(tx);
+}
+
+function resolveTransactionCommissionCNY(tx: Transaction): number {
+  const commission = tx.commission ?? 0;
+  if (commission <= 0) {
+    return 0;
+  }
+
+  // 当前口径：commission 统一以 CNY 落库。
+  // BUY 额外兼容历史数据：若历史 commission 仍为本币，可从 amount 反推 CNY 手续费。
+  if (tx.type === TransactionType.BUY) {
+    const rate = resolveTransactionExchangeRate(tx);
+    const quantity = tx.quantity ?? 0;
+    const price = tx.price ?? 0;
+    if (tx.amount !== undefined && quantity > 0 && price > 0) {
+      const grossCny = quantity * price * rate;
+      const inferredCommission = tx.amount - grossCny;
+      if (inferredCommission >= -epsilon) {
+        return Math.max(0, inferredCommission);
+      }
+    }
+  }
+  return commission;
+}
+
+function inferInitialLeverageTotalFromAllTransactions(
+  portfolio: Portfolio,
+  allTransactions: Transaction[]
+): number {
+  let leverageDelta = 0;
+  for (const tx of allTransactions) {
+    const amountCny = resolveTransactionAmountCNY(tx);
+    if (tx.type === TransactionType.LEVERAGE_ADD) {
+      leverageDelta += amountCny;
+    } else if (tx.type === TransactionType.LEVERAGE_REMOVE) {
+      leverageDelta -= amountCny;
+    }
+  }
+  return Math.max(0, portfolio.leverage.totalAmount - leverageDelta);
+}
+
+function applyTransactionToReplayState(
+  state: { cash: number; leverage: ReplayLeverageState },
+  tx: Transaction
+): void {
+  const amountCny = resolveTransactionAmountCNY(tx);
+  const commissionCny = resolveTransactionCommissionCNY(tx);
+
+  switch (tx.type) {
+    case TransactionType.BUY: {
+      const explicitLeverage = Math.max(0, tx.leverageUsed ?? 0);
+      const availableBeforeExplicit = Math.max(
+        0,
+        state.leverage.totalAmount - state.leverage.usedAmount
+      );
+      const leverageFromExplicit = Math.min(
+        explicitLeverage,
+        availableBeforeExplicit
+      );
+      state.leverage.usedAmount += leverageFromExplicit;
+
+      const cashNeed = Math.max(0, amountCny - leverageFromExplicit);
+      if (state.cash >= cashNeed - epsilon) {
+        state.cash -= cashNeed;
+      } else {
+        const shortfall = Math.max(0, cashNeed - state.cash);
+        const availableAfterExplicit = Math.max(
+          0,
+          state.leverage.totalAmount - state.leverage.usedAmount
+        );
+        const leverageFromShortfall = Math.min(
+          shortfall,
+          availableAfterExplicit
+        );
+        state.leverage.usedAmount += leverageFromShortfall;
+        state.cash = Math.max(0, state.cash - cashNeed + leverageFromShortfall);
+      }
+      break;
+    }
+    case TransactionType.SELL: {
+      const netAmountCny = Math.max(0, amountCny - commissionCny);
+      const repayAmount = Math.min(netAmountCny, state.leverage.usedAmount);
+      state.leverage.usedAmount -= repayAmount;
+      state.cash += netAmountCny - repayAmount;
+      break;
+    }
+    case TransactionType.DEPOSIT:
+      state.cash += amountCny;
+      break;
+    case TransactionType.WITHDRAW:
+      state.cash -= amountCny;
+      break;
+    case TransactionType.DIVIDEND:
+      // amount 已是 CNY，删除/重放时不再重复按汇率转换。
+      state.cash += amountCny;
+      break;
+    case TransactionType.LEVERAGE_ADD:
+      state.leverage.totalAmount += amountCny;
+      break;
+    case TransactionType.LEVERAGE_REMOVE:
+      state.leverage.totalAmount = Math.max(
+        0,
+        state.leverage.totalAmount - amountCny
+      );
+      break;
+    case TransactionType.LEVERAGE_COST:
+      state.cash -= amountCny;
+      break;
+    default: {
+      const exhaustiveCheck: never = tx.type;
+      console.warn(
+        `[storage.prisma] Unhandled transaction type during replay: ${exhaustiveCheck}`
+      );
+    }
+  }
+
+  state.leverage.usedAmount = Math.max(
+    0,
+    Math.min(state.leverage.usedAmount, state.leverage.totalAmount)
+  );
+}
+
+function recalculatePortfolioStateAfterDeletion(
+  portfolio: Portfolio,
+  allTransactions: Transaction[],
+  deletedTransactionId: string
+): {
+  cash: number;
+  leverage: {
+    totalAmount: number;
+    usedAmount: number;
+    availableAmount: number;
+    costRate: number;
+  };
+  remainingTransactions: Transaction[];
+} {
+  const remainingTransactions = allTransactions
+    .filter((tx) => tx.id !== deletedTransactionId)
+    .sort((a, b) => {
+      const dateDiff = new Date(a.date).getTime() - new Date(b.date).getTime();
+      if (dateDiff !== 0) {
+        return dateDiff;
+      }
+      return a.id.localeCompare(b.id);
+    });
+
+  const initialLeverageTotal = inferInitialLeverageTotalFromAllTransactions(
+    portfolio,
+    allTransactions
+  );
+
+  // 组合创建入口固定为 used=0、available=total，重放删除后状态时沿用该初始约束。
+  const replayState = {
+    cash: portfolio.initialCash ?? 0,
+    leverage: {
+      totalAmount: initialLeverageTotal,
+      usedAmount: 0,
+      costRate: portfolio.leverage.costRate,
+    },
+  };
+
+  for (const tx of remainingTransactions) {
+    applyTransactionToReplayState(replayState, tx);
+  }
+
+  const normalizedCash = Math.round(replayState.cash * 100) / 100;
+  const normalizedTotal = Math.max(0, replayState.leverage.totalAmount);
+  const normalizedUsed = Math.max(
+    0,
+    Math.min(replayState.leverage.usedAmount, normalizedTotal)
+  );
+
+  return {
+    cash: normalizedCash,
+    leverage: {
+      totalAmount: normalizedTotal,
+      usedAmount: normalizedUsed,
+      availableAmount: Math.max(0, normalizedTotal - normalizedUsed),
+      costRate: replayState.leverage.costRate,
+    },
+    remainingTransactions,
+  };
+}
+
 export async function deleteTransactionFromPortfolio(
   portfolioId: string,
   transactionId: string
@@ -769,157 +973,11 @@ export async function deleteTransactionFromPortfolio(
   );
   if (transactionIndex === -1) return false;
 
-  const transactionToDelete = portfolio.transactions[transactionIndex];
-  const amount =
-    transactionToDelete.amount ??
-    (transactionToDelete.quantity ?? 0) * (transactionToDelete.price ?? 0);
-
-  switch (transactionToDelete.type) {
-    case TransactionType.BUY: {
-      const commission = transactionToDelete.commission ?? 0;
-      if (portfolio.leverage.usedAmount > 0) {
-        const leverageToReturn = Math.min(
-          amount,
-          portfolio.leverage.usedAmount
-        );
-        portfolio.leverage.usedAmount -= leverageToReturn;
-        portfolio.leverage.availableAmount += leverageToReturn;
-        portfolio.cash += amount - leverageToReturn + commission;
-      } else {
-        portfolio.cash += amount + commission;
-      }
-      break;
-    }
-    case TransactionType.SELL: {
-      // 🔄 添加汇率换算逻辑（撤销卖出交易）
-      const { getExchangeRateForAssetToCNY } = await import(
-        '../providers/currency-service'
-      );
-
-      let exchangeRate = 1.0;
-      if (transactionToDelete.assetCode) {
-        const isForeign =
-          transactionToDelete.assetCode.toLowerCase().startsWith('hk') ||
-          transactionToDelete.assetCode.toLowerCase().startsWith('us');
-        if (isForeign) {
-          try {
-            exchangeRate = await getExchangeRateForAssetToCNY(
-              transactionToDelete.assetCode
-            );
-          } catch (error) {
-            console.error(
-              `[storage.prisma Delete SELL] Failed to get exchange rate for ${transactionToDelete.assetCode}:`,
-              error
-            );
-            // 即使汇率获取失败，也继续处理，使用默认汇率1
-          }
-        }
-      }
-
-      const commission = transactionToDelete.commission ?? 0;
-      const amountCNY = amount * exchangeRate;
-      const commissionCNY = commission * exchangeRate;
-      const netAmountCNY = amountCNY - commissionCNY;
-
-      if (portfolio.cash >= netAmountCNY) {
-        portfolio.cash -= netAmountCNY;
-      } else {
-        const neededLeverage = netAmountCNY - portfolio.cash;
-        if (portfolio.leverage.availableAmount >= neededLeverage) {
-          portfolio.leverage.usedAmount += neededLeverage;
-          portfolio.leverage.availableAmount -= neededLeverage;
-          portfolio.cash = 0;
-        } else {
-          console.error(
-            'Cannot reverse sell transaction: insufficient funds and leverage'
-          );
-          return false;
-        }
-      }
-      break;
-    }
-    case TransactionType.DEPOSIT:
-      if (portfolio.cash >= amount) {
-        portfolio.cash -= amount;
-      } else {
-        console.error('Cannot reverse deposit: insufficient cash');
-        return false;
-      }
-      break;
-
-    case TransactionType.WITHDRAW:
-      portfolio.cash += amount;
-      break;
-
-    case TransactionType.LEVERAGE_ADD:
-      if (portfolio.leverage.totalAmount >= amount) {
-        portfolio.leverage.totalAmount -= amount;
-        portfolio.leverage.availableAmount -= amount;
-      } else {
-        console.error(
-          'Cannot reverse leverage add: amount exceeds total leverage'
-        );
-        return false;
-      }
-      break;
-
-    case TransactionType.LEVERAGE_REMOVE:
-      portfolio.leverage.totalAmount += amount;
-      portfolio.leverage.availableAmount += amount;
-      break;
-
-    case TransactionType.LEVERAGE_COST:
-      portfolio.cash += amount;
-      break;
-
-    case TransactionType.DIVIDEND: {
-      // 🔄 添加汇率换算逻辑（撤销股息交易）
-      const { getExchangeRateForAssetToCNY } = await import(
-        '../providers/currency-service'
-      );
-
-      let exchangeRate = 1.0;
-      if (transactionToDelete.assetCode) {
-        const isForeign =
-          transactionToDelete.assetCode.toLowerCase().startsWith('hk') ||
-          transactionToDelete.assetCode.toLowerCase().startsWith('us');
-        if (isForeign) {
-          try {
-            exchangeRate = await getExchangeRateForAssetToCNY(
-              transactionToDelete.assetCode
-            );
-          } catch (error) {
-            console.error(
-              `[storage.prisma Delete DIVIDEND] Failed to get exchange rate for ${transactionToDelete.assetCode}:`,
-              error
-            );
-            // 即使汇率获取失败，也继续处理，使用默认汇率1
-          }
-        }
-      }
-
-      const amountCNY = amount * exchangeRate;
-      if (portfolio.cash >= amountCNY) {
-        portfolio.cash -= amountCNY;
-      } else {
-        console.error(
-          `[storage.prisma Delete DIVIDEND] Reversing dividend would result in negative cash.`
-        );
-        portfolio.cash -= amountCNY;
-      }
-      break;
-    }
-
-    default: {
-      const exhaustiveCheck: never = transactionToDelete.type;
-      console.warn(
-        `Unhandled transaction type for deletion: ${exhaustiveCheck}`
-      );
-      return false;
-    }
-  }
-
-  portfolio.transactions.splice(transactionIndex, 1);
+  const recalculated = recalculatePortfolioStateAfterDeletion(
+    portfolio,
+    portfolio.transactions,
+    transactionId
+  );
 
   // 更新数据库和缓存
   try {
@@ -933,20 +991,29 @@ export async function deleteTransactionFromPortfolio(
       await tx.portfolio.update({
         where: { id: portfolioId },
         data: {
-          cash: roundCashToDecimal(portfolio.cash), // 舍入到分，避免精度累积
-          leverageTotalAmount: toDecimal(portfolio.leverage.totalAmount),
-          leverageUsedAmount: toDecimal(portfolio.leverage.usedAmount),
+          cash: roundCashToDecimal(recalculated.cash), // 舍入到分，避免精度累积
+          leverageTotalAmount: toDecimal(recalculated.leverage.totalAmount),
+          leverageUsedAmount: toDecimal(recalculated.leverage.usedAmount),
           leverageAvailableAmount: toDecimal(
-            portfolio.leverage.availableAmount
+            recalculated.leverage.availableAmount
           ),
-          leverageCostRate: toDecimal(portfolio.leverage.costRate),
+          leverageCostRate: toDecimal(recalculated.leverage.costRate),
         },
       });
     });
 
     // 更新缓存
     const cacheKey = `${PORTFOLIO_CACHE_PREFIX}${portfolioId}`;
-    cacheService.set(cacheKey, portfolio, CACHE_TTL);
+    cacheService.set(
+      cacheKey,
+      {
+        ...portfolio,
+        cash: recalculated.cash,
+        leverage: recalculated.leverage,
+        transactions: recalculated.remainingTransactions,
+      },
+      CACHE_TTL
+    );
     // 清除列表缓存，确保下次获取时重新加载
     cacheService.delete(PORTFOLIOS_CACHE_KEY);
 

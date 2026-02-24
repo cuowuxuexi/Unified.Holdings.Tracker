@@ -136,7 +136,7 @@ export function calculateLeverageCostByDay(
       } else if (tx.type === 'SELL') {
         // 卖出优先还融资，使用净收入（扣除手续费后）
         const grossAmount = Number(tx.amount || 0);
-        const commission = Number(tx.commission || 0);
+        const commission = getCommissionInCny(tx);
         const netAmount = grossAmount - commission;
         const repay = Math.min(netAmount, currentBalance);
         if (repay > 0) {

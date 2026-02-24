@@ -200,6 +200,16 @@ export class DataService {
   }
 
   /**
+   * 清除指定文件缓存
+   * @param relativePath 相对路径
+   */
+  public clearCache(relativePath: string): void {
+    const cacheKey = this.getCacheKey(relativePath);
+    cacheService.delete(cacheKey);
+    console.log(`[dataService] 已清除文件缓存: ${relativePath}`);
+  }
+
+  /**
    * 清除指定目录的所有缓存
    * @param relativeDirPath 相对目录路径
    */
