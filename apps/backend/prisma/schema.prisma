@@ -13,7 +13,7 @@ datasource db {
 }
 
 model Portfolio {
-  id                      String          @id @default(uuid())
+  id                      String               @id @default(uuid())
   name                    String
   initialCash             Decimal
   cash                    Decimal
@@ -21,11 +21,12 @@ model Portfolio {
   leverageUsedAmount      Decimal
   leverageAvailableAmount Decimal
   leverageCostRate        Decimal
-  createdAt               DateTime        @default(now())
-  updatedAt               DateTime        @updatedAt
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
   attentionInfo           String?
   AttentionItem           AttentionItem[]
   transactions            Transaction[]
+  snapshots               PortfolioSnapshot[]
 }
 
 model Asset {
@@ -82,6 +83,22 @@ model QuoteSnapshot {
   yearChangePercent  Decimal?
   createdAt          DateTime @default(now())
   asset              Asset    @relation(fields: [assetCode], references: [code], onDelete: Cascade)
+}
+
+model PortfolioSnapshot {
+  id               Int      @id @default(autoincrement())
+  portfolioId      String
+  date             String   // 格式 YYYY-MM-DD，每个组合每天只存一条
+  totalMarketValue Decimal  // 总市值（CNY）
+  netAssets        Decimal  // 净资产（CNY）
+  totalPnl         Decimal  // 累计盈亏
+  dailyPnl         Decimal  // 当日盈亏
+  cash             Decimal  // 现金
+  createdAt        DateTime @default(now())
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@unique([portfolioId, date])
 }
 
 model AttentionItem {

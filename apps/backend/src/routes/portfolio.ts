@@ -719,4 +719,45 @@ router.get(
   })
 );
 
+// GET /api/portfolio/:id/snapshots - 查询组合快照
+router.get(
+  '/:id/snapshots',
+  asyncHandler(async (req: Request, res: Response) => {
+    const portfolioId = req.params.id;
+    const from = req.query.from as string | undefined;
+    const to = req.query.to as string | undefined;
+
+    const { getSnapshots } = await import('../services/snapshotService');
+    const snapshots = await getSnapshots(portfolioId, from, to);
+    res.json(snapshots);
+  })
+);
+
+// GET /api/portfolio/:id/weekly-report - 获取周报数据
+router.get(
+  '/:id/weekly-report',
+  asyncHandler(async (req: Request, res: Response) => {
+    const portfolioId = req.params.id;
+    const week = req.query.week as string | undefined;
+
+    const { getWeeklyReport } = await import('../services/snapshotService');
+    const report = await getWeeklyReport(portfolioId, week);
+    res.json(report);
+  })
+);
+
+// POST /api/portfolio/:id/snapshots/trigger - 手动触发组合快照
+router.post(
+  '/:id/snapshots/trigger',
+  asyncHandler(async (req: Request, res: Response) => {
+    const portfolioId = req.params.id;
+
+    const { takeSnapshotForPortfolio } = await import(
+      '../services/snapshotService'
+    );
+    await takeSnapshotForPortfolio(portfolioId);
+    res.json({ message: 'Snapshot triggered successfully.' });
+  })
+);
+
 export default router;

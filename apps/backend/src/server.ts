@@ -13,6 +13,10 @@ import batchRouter from './routes/batch';
 import archiveRouter from './routes/archive';
 import { dataService } from './services/dataService';
 import { initExchangeRates } from './services/currencyService';
+import {
+  startSnapshotScheduler,
+  stopSnapshotScheduler,
+} from './services/snapshotService';
 import { appEnv } from './config/env';
 import { openApiDocument } from './openapi';
 
@@ -240,12 +244,27 @@ async function initializeDatabase() {
           FOREIGN KEY ("portfolioId") REFERENCES "Portfolio"("id") ON DELETE CASCADE
         )
       `,
+      PortfolioSnapshot: `
+        CREATE TABLE IF NOT EXISTS "PortfolioSnapshot" (
+          "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+          "portfolioId" TEXT NOT NULL,
+          "date" TEXT NOT NULL,
+          "totalMarketValue" REAL NOT NULL,
+          "netAssets" REAL NOT NULL,
+          "totalPnl" REAL NOT NULL,
+          "dailyPnl" REAL NOT NULL,
+          "cash" REAL NOT NULL,
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY ("portfolioId") REFERENCES "Portfolio"("id") ON DELETE CASCADE
+        )
+      `,
     };
 
     const indexStatements = [
       `CREATE INDEX IF NOT EXISTS "Transaction_assetCode_idx" ON "Transaction"("assetCode")`,
       `CREATE INDEX IF NOT EXISTS "Transaction_portfolioId_type_idx" ON "Transaction"("portfolioId", "type")`,
       `CREATE INDEX IF NOT EXISTS "Transaction_portfolioId_date_idx" ON "Transaction"("portfolioId", "date")`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS "PortfolioSnapshot_portfolioId_date_key" ON "PortfolioSnapshot"("portfolioId", "date")`,
     ];
 
     const existingTables = new Set(
@@ -304,6 +323,13 @@ const startServer = async () => {
     } catch (error) {
       console.error('Failed to initialize exchange rates:', error);
     }
+
+    // 启动每日快照定时任务
+    try {
+      startSnapshotScheduler();
+    } catch (error) {
+      console.error('Failed to start snapshot scheduler:', error);
+    }
   }
 
   // Zombie Killer: 当作为 Electron 子进程运行时，父进程退出后自动退出
@@ -329,6 +355,7 @@ const startServer = async () => {
 
   const shutdown = (signal: string) => {
     console.log(`Received ${signal}. Shutting down gracefully...`);
+    stopSnapshotScheduler();
     server.close(() => {
       console.log('HTTP server closed');
       process.exit(0);
