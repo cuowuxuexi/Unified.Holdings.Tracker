@@ -2,6 +2,7 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 
+const isElectronBuild = process.env.BUILD_TARGET === 'electron';
 const DEFAULT_PORT = 5173;
 const parsedPort = Number(process.env.VITE_PORT ?? process.env.PORT);
 const devServerPort =
@@ -9,11 +10,10 @@ const devServerPort =
 
 // https://vite.dev/config/
 export default defineConfig({
-  base: './', // 确保在 file:// 协议下资源使用相对路径
+  base: isElectronBuild ? './' : '/',
   plugins: [react()],
   build: {
-    // 将输出目录设置到 electron 目录下的 renderer 文件夹
-    outDir: '../electron/renderer',
+    outDir: isElectronBuild ? '../electron/renderer' : 'dist',
     emptyOutDir: true, // 确保每次构建前清空目录
     // Rollup 选项
     rollupOptions: {
@@ -48,7 +48,7 @@ export default defineConfig({
     port: devServerPort,
     // 端口占用时自动切换，避免因 5173 被占用导致启动失败
     strictPort: false,
-    host: 'localhost',
+    host: true,
     watch: {
       // 使用原生文件系统事件（推荐）
       usePolling: false,

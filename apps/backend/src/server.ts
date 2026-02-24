@@ -88,7 +88,7 @@ export const createApp = (): Express => {
 
   app.use(
     cors({
-      origin: appEnv.frontendUrl,
+      origin: isProduction ? true : appEnv.frontendUrl,
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
       credentials: true,
     })

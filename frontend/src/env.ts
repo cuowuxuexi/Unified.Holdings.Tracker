@@ -7,5 +7,5 @@ const envSchema = z.object({
 const parsed = envSchema.parse(import.meta.env);
 
 export const frontendEnv = {
-  apiBaseUrl: parsed.VITE_API_BASE_URL ?? 'http://localhost:3001/api',
+  apiBaseUrl: parsed.VITE_API_BASE_URL ?? '/api',
 };
