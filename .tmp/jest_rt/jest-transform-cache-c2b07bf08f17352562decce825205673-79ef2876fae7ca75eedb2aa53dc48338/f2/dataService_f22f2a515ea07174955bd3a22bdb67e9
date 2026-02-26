@@ -1,8 +1,0 @@
-64c42320ad959686c9e28ae1bc787594
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.dataService = exports.DataService = void 0;
-var data_service_1 = require("@uht/infra/data/data-service");
-Object.defineProperty(exports, "DataService", { enumerable: true, get: function () { return data_service_1.DataService; } });
-Object.defineProperty(exports, "dataService", { enumerable: true, get: function () { return data_service_1.dataService; } });
-//# sourceMappingURL=data:application/json;charset=utf-8;base64,eyJmaWxlIjoiL21udC9kL1VuaWZpZWQuSG9sZGluZ3MuVHJhY2tlci1tYWluL2FwcHMvYmFja2VuZC9zcmMvc2VydmljZXMvZGF0YVNlcnZpY2UudHMiLCJtYXBwaW5ncyI6Ijs7O0FBQUEsNkRBQXdFO0FBQS9ELDJHQUFBLFdBQVcsT0FBQTtBQUFFLDJHQUFBLFdBQVcsT0FBQSIsIm5hbWVzIjpbXSwic291cmNlcyI6WyIvbW50L2QvVW5pZmllZC5Ib2xkaW5ncy5UcmFja2VyLW1haW4vYXBwcy9iYWNrZW5kL3NyYy9zZXJ2aWNlcy9kYXRhU2VydmljZS50cyJdLCJzb3VyY2VzQ29udGVudCI6WyJleHBvcnQgeyBEYXRhU2VydmljZSwgZGF0YVNlcnZpY2UgfSBmcm9tICdAdWh0L2luZnJhL2RhdGEvZGF0YS1zZXJ2aWNlJztcbiJdLCJ2ZXJzaW9uIjozfQ==

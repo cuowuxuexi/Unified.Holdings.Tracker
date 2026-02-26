@@ -1,1 +1,0 @@
-{"file":"/mnt/d/Unified.Holdings.Tracker-main/packages/application/src/types.ts","mappings":"","names":[],"sources":["/mnt/d/Unified.Holdings.Tracker-main/packages/application/src/types.ts"],"sourcesContent":["export interface UseCase<Input, Output> {\n  execute(input: Input): Promise<Output>;\n}\n"],"version":3}

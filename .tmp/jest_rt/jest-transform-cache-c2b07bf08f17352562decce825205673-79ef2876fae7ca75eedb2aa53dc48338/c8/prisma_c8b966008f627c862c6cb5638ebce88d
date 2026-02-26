@@ -1,7 +1,0 @@
-0eebd79012bbabda17598f24834483b9
-"use strict";
-Object.defineProperty(exports, "__esModule", { value: true });
-exports.prisma = void 0;
-var infra_1 = require("@uht/infra");
-Object.defineProperty(exports, "prisma", { enumerable: true, get: function () { return infra_1.prisma; } });
-//# sourceMappingURL=data:application/json;charset=utf-8;base64,eyJmaWxlIjoiL21udC9kL1VuaWZpZWQuSG9sZGluZ3MuVHJhY2tlci1tYWluL2FwcHMvYmFja2VuZC9zcmMvbGliL3ByaXNtYS50cyIsIm1hcHBpbmdzIjoiOzs7QUFBQSxvQ0FBb0M7QUFBM0IsK0ZBQUEsTUFBTSxPQUFBIiwibmFtZXMiOltdLCJzb3VyY2VzIjpbIi9tbnQvZC9VbmlmaWVkLkhvbGRpbmdzLlRyYWNrZXItbWFpbi9hcHBzL2JhY2tlbmQvc3JjL2xpYi9wcmlzbWEudHMiXSwic291cmNlc0NvbnRlbnQiOlsiZXhwb3J0IHsgcHJpc21hIH0gZnJvbSAnQHVodC9pbmZyYSc7XG4iXSwidmVyc2lvbiI6M30=
