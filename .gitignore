@@ -135,3 +135,12 @@ batch_import_template*.csv
 .bmad-core/
 .claude/commands/BMad/
 docs/
+
+# ============================================
+# 投资数据文件（绝不可上传）
+# ============================================
+portfolio-backup.json
+backup-*.json
+*.csv
+!test_batch_import.csv
+!batch_import_template*.csv

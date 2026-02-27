@@ -1,0 +1,36 @@
+services:
+  backend:
+    build:
+      context: .
+      target: backend
+    container_name: tracker-backend
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - PORT=3001
+      - DATABASE_URL=file:./prisma/data/portfolio.db
+      - API_BASE_PATH=/api
+    volumes:
+      - tracker-data:/app/prisma/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/api/health').then(r=>{if(!r.ok)throw 1})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+  nginx:
+    build:
+      context: .
+      target: nginx
+    container_name: tracker-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  tracker-data:
+    external: true

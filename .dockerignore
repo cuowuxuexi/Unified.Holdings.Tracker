@@ -1,0 +1,75 @@
+# Dependencies
+node_modules/
+**/node_modules/
+
+# Build outputs (will be built inside Docker)
+**/dist/
+**/out/
+**/release/
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+.cursor/
+.claude/
+
+# Electron (not needed for server)
+electron/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Env files (sensitive)
+.env
+.env.*
+!.env.example
+!.env.sample
+
+# Database files (mounted as volume)
+*.db
+*.db-*
+apps/backend/prisma/data/
+
+# Backup & temp files
+*.backup
+*.bak
+.backups/
+*.log
+logs/
+
+# Data caches
+data/
+apps/backend/data/
+
+# Test files
+test-*.js
+verify-*.js
+debug-*.js
+*.bat
+*.ps1
+test_batch_import.csv
+
+# Documentation & meta (not needed in image)
+_bmad/
+.bmad-core/
+docs/
+openspec/
+.specstory/
+.repomix/
+.serena/
+.augment-guidelines
+.cursorindexingignore
+
+# Misc temp files
+portfolio-backup.json
+backup-*.json
+2025.csv
+git存档.txt
+test-output.txt
+image/
+*.png
