@@ -1,14 +1,17 @@
 <!-- OPENSPEC:START -->
+
 # OpenSpec Instructions
 
 These instructions are for AI assistants working in this project.
 
 Always open `@/openspec/AGENTS.md` when the request:
+
 - Mentions planning or proposals (words like proposal, spec, change, plan)
 - Introduces new capabilities, breaking changes, architecture shifts, or big performance/security work
 - Sounds ambiguous and you need the authoritative spec before coding
 
 Use `@/openspec/AGENTS.md` to learn:
+
 - How to create and apply change proposals
 - Spec format and conventions
 - Project structure and guidelines
@@ -24,6 +27,7 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 ## 变更记录 (Changelog)
 
 ### 2025-11-16
+
 - 初始化 AI 上下文文档
 - 生成根级和模块级架构文档
 - 建立模块索引和结构图
@@ -35,6 +39,7 @@ Keep this managed block so 'openspec update' can refresh the instructions.
 Unified Holdings Tracker 是一个基于 Electron + React + Node.js 构建的桌面投资组合管理应用，旨在为个人投资者提供全面的持仓跟踪、交易记录管理、市场数据展示和投资分析功能。
 
 **核心价值**：
+
 - 统一管理多市场（中国A股、港股、美股）投资组合
 - 实时市场数据获取与展示
 - 杠杆成本、分红、手续费等精细化记录
@@ -48,6 +53,7 @@ Unified Holdings Tracker 是一个基于 Electron + React + Node.js 构建的桌
 本项目采用 **Monorepo + 分层架构** 设计：
 
 ### 技术栈
+
 - **桌面框架**：Electron 35+
 - **前端**：React 19 + TypeScript + Vite + Ant Design 5
 - **后端**：Node.js + Express 5 + TypeScript
@@ -56,6 +62,7 @@ Unified Holdings Tracker 是一个基于 Electron + React + Node.js 构建的桌
 - **构建工具**：npm workspaces, Electron Forge, Inno Setup
 
 ### 架构模式
+
 - **DDD 分层**：Domain（领域层）→ Application（应用层）→ Infrastructure（基础设施层）
 - **前后端分离**：后端提供 RESTful API，前端通过 Axios 调用
 - **Electron 集成**：主进程管理窗口和后端服务，渲染进程运行前端应用
@@ -80,32 +87,33 @@ graph TD
     Root --> Electron["electron/"]
     Root --> Docs["docs/"]
 
-    click Backend "d:/optimize-branch-copy/apps/backend/CLAUDE.md" "查看 backend 模块文档"
-    click Domain "d:/optimize-branch-copy/packages/domain/CLAUDE.md" "查看 domain 模块文档"
-    click Application "d:/optimize-branch-copy/packages/application/CLAUDE.md" "查看 application 模块文档"
-    click Infra "d:/optimize-branch-copy/packages/infra/CLAUDE.md" "查看 infra 模块文档"
-    click Frontend "d:/optimize-branch-copy/frontend/CLAUDE.md" "查看 frontend 模块文档"
-    click Electron "d:/optimize-branch-copy/electron/CLAUDE.md" "查看 electron 模块文档"
+    click Backend "d:/Unified.Holdings.Tracker-main/apps/backend/CLAUDE.md" "查看 backend 模块文档"
+    click Domain "d:/Unified.Holdings.Tracker-main/packages/domain/CLAUDE.md" "查看 domain 模块文档"
+    click Application "d:/Unified.Holdings.Tracker-main/packages/application/CLAUDE.md" "查看 application 模块文档"
+    click Infra "d:/Unified.Holdings.Tracker-main/packages/infra/CLAUDE.md" "查看 infra 模块文档"
+    click Frontend "d:/Unified.Holdings.Tracker-main/frontend/CLAUDE.md" "查看 frontend 模块文档"
+    click Electron "d:/Unified.Holdings.Tracker-main/electron/CLAUDE.md" "查看 electron 模块文档"
 ```
 
 ---
 
 ## 模块索引
 
-| 模块路径 | 职责 | 主要技术 | 文档链接 |
-|---------|------|---------|---------|
-| `apps/backend` | 后端 API 服务，提供投资组合、交易、市场数据接口 | Express, Prisma, TypeScript | [查看](d:/optimize-branch-copy/apps/backend/CLAUDE.md) |
-| `packages/domain` | 领域层，定义核心实体、值对象和仓储接口 | TypeScript, DDD | [查看](d:/optimize-branch-copy/packages/domain/CLAUDE.md) |
-| `packages/application` | 应用层，实现业务用例（Use Cases） | TypeScript | [查看](d:/optimize-branch-copy/packages/application/CLAUDE.md) |
-| `packages/infra` | 基础设施层，实现数据访问、缓存、外部 API 调用 | Prisma, Axios, node-cache | [查看](d:/optimize-branch-copy/packages/infra/CLAUDE.md) |
-| `frontend` | 前端 React 应用，提供用户界面 | React 19, Vite, Ant Design, Zustand | [查看](d:/optimize-branch-copy/frontend/CLAUDE.md) |
-| `electron` | Electron 主进程，管理窗口和应用生命周期 | Electron 35, TypeScript | [查看](d:/optimize-branch-copy/electron/CLAUDE.md) |
+| 模块路径               | 职责                                            | 主要技术                            | 文档链接                                                                |
+| ---------------------- | ----------------------------------------------- | ----------------------------------- | ----------------------------------------------------------------------- |
+| `apps/backend`         | 后端 API 服务，提供投资组合、交易、市场数据接口 | Express, Prisma, TypeScript         | [查看](d:/Unified.Holdings.Tracker-main/apps/backend/CLAUDE.md)         |
+| `packages/domain`      | 领域层，定义核心实体、值对象和仓储接口          | TypeScript, DDD                     | [查看](d:/Unified.Holdings.Tracker-main/packages/domain/CLAUDE.md)      |
+| `packages/application` | 应用层，实现业务用例（Use Cases）               | TypeScript                          | [查看](d:/Unified.Holdings.Tracker-main/packages/application/CLAUDE.md) |
+| `packages/infra`       | 基础设施层，实现数据访问、缓存、外部 API 调用   | Prisma, Axios, node-cache           | [查看](d:/Unified.Holdings.Tracker-main/packages/infra/CLAUDE.md)       |
+| `frontend`             | 前端 React 应用，提供用户界面                   | React 19, Vite, Ant Design, Zustand | [查看](d:/Unified.Holdings.Tracker-main/frontend/CLAUDE.md)             |
+| `electron`             | Electron 主进程，管理窗口和应用生命周期         | Electron 35, TypeScript             | [查看](d:/Unified.Holdings.Tracker-main/electron/CLAUDE.md)             |
 
 ---
 
 ## 运行与开发
 
 ### 环境要求
+
 - Node.js 18+ (推荐 LTS 版本)
 - npm 9+
 
@@ -164,6 +172,7 @@ npm run make
 ## 测试策略
 
 ### 后端测试
+
 - **框架**：Jest + ts-jest
 - **覆盖范围**：
   - 服务层单元测试（`apps/backend/src/services/__tests__/`）
@@ -171,6 +180,7 @@ npm run make
 - **运行**：`npm run test:backend`
 
 ### 前端测试
+
 - **框架**：Vitest + React Testing Library
 - **覆盖范围**：
   - 组件单元测试（`frontend/src/components/legacy/__tests__/`）
@@ -178,6 +188,7 @@ npm run make
 - **运行**：`npm run test -w frontend`
 
 ### 测试覆盖率目标
+
 - 核心业务逻辑：80%+
 - 工具函数：90%+
 - UI 组件：60%+（重点测试交互逻辑）
@@ -187,12 +198,14 @@ npm run make
 ## 编码规范
 
 ### TypeScript
+
 - 启用严格模式（`strict: true`）
 - 优先使用接口（interface）定义对象类型
 - 避免使用 `any`，必要时使用 `unknown`
 - 使用 `type` 定义联合类型和工具类型
 
 ### 代码风格
+
 - **格式化**：Prettier（配置见 `.prettierrc`）
 - **检查**：ESLint（配置见 `eslint.config.mjs`）
 - **提交前检查**：Husky + lint-staged
@@ -203,6 +216,7 @@ npm run make
   - 常量：UPPER_SNAKE_CASE（`API_BASE_URL`）
 
 ### Git 工作流
+
 - 主分支：`main`
 - 功能分支：`feature/xxx`
 - 修复分支：`fix/xxx`
@@ -213,6 +227,7 @@ npm run make
 ## AI 使用指引
 
 ### 代码生成建议
+
 1. **优先阅读现有代码**：理解项目架构和编码风格
 2. **遵循分层原则**：
    - Domain 层不依赖外部库
@@ -222,6 +237,7 @@ npm run make
 4. **测试驱动**：为新功能编写测试用例
 
 ### 常见任务
+
 - **添加新 API 端点**：
   1. 在 `apps/backend/src/routes/` 添加路由
   2. 在 `packages/application/src/use-cases/` 添加用例
@@ -238,6 +254,7 @@ npm run make
   3. 使用 Ant Design 组件保持 UI 一致性
 
 ### 文档维护
+
 - 修改架构时更新本文档
 - 添加新模块时创建对应的 `CLAUDE.md`
 - 重要决策记录在 `docs/` 目录
@@ -256,7 +273,7 @@ npm run make
 ## 附录：目录结构
 
 ```
-d:\optimize-branch-copy\
+d:\Unified.Holdings.Tracker-main\
 ├── apps/
 │   └── backend/              # 后端服务
 │       ├── prisma/           # Prisma schema 和迁移

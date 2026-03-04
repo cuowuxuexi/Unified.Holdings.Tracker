@@ -133,8 +133,10 @@ batch_import_template*.csv
 
 # BMad-Method 工作流文件
 .bmad-core/
+_bmad/
 .claude/commands/BMad/
-docs/
+docs/legacy-backend/
+docs/notes/
 
 # ============================================
 # 投资数据文件（绝不可上传）

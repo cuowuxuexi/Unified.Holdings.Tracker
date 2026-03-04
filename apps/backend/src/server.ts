@@ -258,6 +258,20 @@ async function initializeDatabase() {
           FOREIGN KEY ("portfolioId") REFERENCES "Portfolio"("id") ON DELETE CASCADE
         )
       `,
+      PositionSnapshot: `
+        CREATE TABLE IF NOT EXISTS "PositionSnapshot" (
+          "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+          "portfolioId" TEXT NOT NULL,
+          "date" TEXT NOT NULL,
+          "assetCode" TEXT NOT NULL,
+          "quantity" REAL NOT NULL,
+          "currentPrice" REAL NOT NULL,
+          "marketValue" REAL NOT NULL,
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY ("portfolioId") REFERENCES "Portfolio"("id") ON DELETE CASCADE,
+          FOREIGN KEY ("assetCode") REFERENCES "Asset"("code")
+        )
+      `,
     };
 
     const indexStatements = [
@@ -265,6 +279,8 @@ async function initializeDatabase() {
       `CREATE INDEX IF NOT EXISTS "Transaction_portfolioId_type_idx" ON "Transaction"("portfolioId", "type")`,
       `CREATE INDEX IF NOT EXISTS "Transaction_portfolioId_date_idx" ON "Transaction"("portfolioId", "date")`,
       `CREATE UNIQUE INDEX IF NOT EXISTS "PortfolioSnapshot_portfolioId_date_key" ON "PortfolioSnapshot"("portfolioId", "date")`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS "PositionSnapshot_portfolioId_date_assetCode_key" ON "PositionSnapshot"("portfolioId", "date", "assetCode")`,
+      `CREATE INDEX IF NOT EXISTS "PositionSnapshot_lookup_idx" ON "PositionSnapshot"("portfolioId", "date")`,
     ];
 
     const existingTables = new Set(

@@ -9,15 +9,49 @@ import schedule from 'node-schedule';
 import { prisma } from '../lib/prisma';
 import { container } from '../container';
 import { portfolioStatsService } from './portfolioStatsService';
-import { format, startOfWeek, endOfWeek, subWeeks } from 'date-fns';
+import { format, startOfWeek, endOfWeek, subWeeks, subDays } from 'date-fns';
+import { Position } from '@uht/domain';
+
+// ==================== Webhook 告警 ====================
+
+async function sendSnapshotAlert(message: string): Promise<void> {
+  const webhookUrl = process.env.SNAPSHOT_ALERT_WEBHOOK;
+  if (!webhookUrl) return;
+
+  try {
+    await fetch(webhookUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        event: 'snapshot_failure',
+        message,
+        timestamp: new Date().toISOString(),
+        source: 'uht-snapshot-service',
+      }),
+    });
+  } catch (e) {
+    console.error('[SnapshotService] Webhook delivery failed:', e);
+  }
+}
 
 // ==================== 快照存储 ====================
 
 /**
- * 为指定组合拍摄当日快照
- * 使用 upsert 保证幂等：同一组合同一天只有一条
+ * 快照日期 = 前一个日历日（即前一交易日）
+ * 因为快照在早晨 06:30 执行，记录的是昨天的收盘数据
  */
-async function takeSnapshotForPortfolio(portfolioId: string): Promise<void> {
+function getSnapshotDate(): string {
+  return format(subDays(new Date(), 1), 'yyyy-MM-dd');
+}
+
+/**
+ * 为指定组合拍摄当日快照
+ * 使用 upsert 保证幂等：同一组合同一天只有一条记录
+ */
+async function takeSnapshotForPortfolio(
+  portfolioId: string,
+  dateOverride?: string
+): Promise<void> {
   try {
     const portfolio = await container.getPortfolioUseCase.execute({
       portfolioId,
@@ -34,9 +68,9 @@ async function takeSnapshotForPortfolio(portfolioId: string): Promise<void> {
       includePeriods: [],
     });
 
-    const today = format(new Date(), 'yyyy-MM-dd');
+    const snapshotDate = dateOverride || getSnapshotDate();
 
-    // SQLite upsert: INSERT OR REPLACE 基于 unique(portfolioId, date)
+    // 1. 写入组合级快照
     await prisma.$executeRawUnsafe(
       `INSERT INTO "PortfolioSnapshot" ("portfolioId", "date", "totalMarketValue", "netAssets", "totalPnl", "dailyPnl", "cash", "createdAt")
        VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
@@ -48,7 +82,7 @@ async function takeSnapshotForPortfolio(portfolioId: string): Promise<void> {
          "cash"             = excluded."cash",
          "createdAt"        = CURRENT_TIMESTAMP`,
       portfolioId,
-      today,
+      snapshotDate,
       stats.totalMarketValue,
       stats.netAssets,
       stats.totalPnl,
@@ -56,88 +90,134 @@ async function takeSnapshotForPortfolio(portfolioId: string): Promise<void> {
       stats.cash
     );
 
+    // 2. 写入个股快照
+    for (const pos of stats.positions) {
+      await upsertPositionSnapshot(portfolioId, snapshotDate, pos);
+    }
+
     console.log(
-      `[SnapshotService] ✅ Snapshot saved: portfolio=${portfolioId}, date=${today}, netAssets=${stats.netAssets.toFixed(2)}`
+      `[SnapshotService] ✅ Snapshot saved: portfolio=${portfolioId}, date=${snapshotDate}, netAssets=${stats.netAssets.toFixed(2)}`
     );
   } catch (error) {
     console.error(
       `[SnapshotService] ❌ Failed to take snapshot for portfolio ${portfolioId}:`,
       error
     );
+    throw error;
   }
+}
+
+async function upsertPositionSnapshot(
+  portfolioId: string,
+  date: string,
+  pos: Position
+): Promise<void> {
+  await prisma.$executeRawUnsafe(
+    `INSERT INTO "PositionSnapshot"
+       ("portfolioId", "date", "assetCode", "quantity", "currentPrice", "marketValue")
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT ("portfolioId", "date", "assetCode") DO UPDATE SET
+       "quantity"     = excluded."quantity",
+       "currentPrice" = excluded."currentPrice",
+       "marketValue"  = excluded."marketValue"`,
+    portfolioId,
+    date,
+    pos.asset.code,
+    pos.quantity,
+    pos.currentPrice ?? 0,
+    pos.marketValue ?? 0
+  );
 }
 
 /**
  * 为所有组合拍摄快照
  */
-async function takeSnapshotForAll(): Promise<void> {
+async function takeSnapshotForAll(dateOverride?: string): Promise<void> {
   console.log(
     '[SnapshotService] Starting daily snapshot for all portfolios...'
   );
   try {
     const portfolios = await container.listPortfoliosUseCase.execute();
     for (const p of portfolios) {
-      await takeSnapshotForPortfolio(p.id);
+      await takeSnapshotForPortfolio(p.id, dateOverride);
     }
     console.log(
       `[SnapshotService] ✅ Daily snapshot completed for ${portfolios.length} portfolio(s).`
     );
   } catch (error) {
-    console.error(
-      '[SnapshotService] ❌ Failed to take snapshots for all portfolios:',
-      error
-    );
+    const msg = `快照执行失败: ${error instanceof Error ? error.message : String(error)}`;
+    console.error(`[SnapshotService] ❌ ${msg}`);
+    await sendSnapshotAlert(msg);
   }
 }
 
 // ==================== 定时任务 ====================
 
-let cnJob: schedule.Job | null = null;
-let usJob: schedule.Job | null = null;
+let dailyJob: schedule.Job | null = null;
+let verifyJob: schedule.Job | null = null;
 
 /**
  * 启动定时快照任务
- * - A股：每个交易日 15:35（北京时间）
- * - 美股：每个交易日次日 05:30（北京时间）
- *
- * 注意：node-schedule 使用系统时区。
- * 简化处理：周一到周五触发（不排除法定节假日，upsert 保证幂等不会出错）
  */
 export function startSnapshotScheduler(): void {
-  // A股收盘后拍快照: 周一~周五 15:35
-  cnJob = schedule.scheduleJob('35 15 * * 1-5', async () => {
-    console.log(
-      '[SnapshotService] [CN] Cron triggered at',
-      new Date().toISOString()
-    );
-    await takeSnapshotForAll();
-  });
+  // 每日 06:30 北京时间，周二到周六执行
+  // 统一采取三市前一交易日的收盘数据
+  dailyJob = schedule.scheduleJob(
+    { rule: '30 6 * * 2-6', tz: 'Asia/Shanghai' },
+    async () => {
+      const snapshotDate = getSnapshotDate();
+      console.log(
+        `[SnapshotService] Cron triggered at ${new Date().toISOString()}, snapshot date: ${snapshotDate}`
+      );
+      await takeSnapshotForAll();
+    }
+  );
 
-  // 美股收盘后拍快照: 周一~周六 05:30（对应前一天美股交易日）
-  usJob = schedule.scheduleJob('30 5 * * 1-6', async () => {
-    console.log(
-      '[SnapshotService] [US] Cron triggered at',
-      new Date().toISOString()
-    );
-    await takeSnapshotForAll();
-  });
+  // 08:00 校验 + 自动补采 (周二到周六)
+  verifyJob = schedule.scheduleJob(
+    { rule: '0 8 * * 2-6', tz: 'Asia/Shanghai' },
+    async () => {
+      const yesterday = getSnapshotDate();
+
+      // 检查昨日是否已有快照
+      const rows = await prisma.$queryRawUnsafe<{ count: number }[]>(
+        `SELECT COUNT(*) as count FROM "PortfolioSnapshot" WHERE "date" = ?`,
+        yesterday
+      );
+      const count = Number(rows[0]?.count || 0);
+
+      if (count === 0) {
+        console.warn(
+          `[SnapshotService] ⚠️ No snapshot found for ${yesterday}, retrying...`
+        );
+        await sendSnapshotAlert(
+          `06:30 快照未找到数据（${yesterday}），正在自动补采`
+        );
+        await takeSnapshotForAll(yesterday);
+      } else {
+        console.log(
+          `[SnapshotService] ✅ Verify passed: ${count} portfolio(s) snapshotted for ${yesterday}`
+        );
+      }
+    }
+  );
 
   console.log('[SnapshotService] ✅ Snapshot scheduler started.');
-  console.log('  CN: cron "35 15 * * 1-5" (Mon-Fri 15:35)');
-  console.log('  US: cron "30 5 * * 1-6"  (Mon-Sat 05:30)');
+  console.log('  Schedule: "30 6 * * 2-6" (Tue-Sat 06:30 Asia/Shanghai)');
+  console.log('  Verify:   "0 8 * * 2-6"  (Tue-Sat 08:00 Asia/Shanghai)');
 }
 
 /**
  * 停止定时任务（优雅关闭用）
  */
 export function stopSnapshotScheduler(): void {
-  if (cnJob) {
-    cnJob.cancel();
-    cnJob = null;
+  if (dailyJob) {
+    dailyJob.cancel();
+    dailyJob = null;
   }
-  if (usJob) {
-    usJob.cancel();
-    usJob = null;
+  if (verifyJob) {
+    verifyJob.cancel();
+    verifyJob = null;
   }
   console.log('[SnapshotService] Snapshot scheduler stopped.');
 }

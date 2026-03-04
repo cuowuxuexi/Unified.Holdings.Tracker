@@ -13,6 +13,7 @@ import {
 import { correctHistoricalTransactionAmounts } from '../services/storage.prisma';
 import { portfolioStatsService } from '../services/portfolioStatsService';
 import { PeriodCacheBucket } from '@uht/infra/cache/period-cache-service';
+import { periodReportService } from '../services/periodReportService';
 
 const router = Router();
 
@@ -629,6 +630,49 @@ router.get(
         error
       );
       return res.status(404).json({ message: 'Portfolio not found' });
+    }
+  })
+);
+
+// GET /api/portfolio/:id/period-report - 期间报表（周/月/季/年通用）
+router.get(
+  '/:id/period-report',
+  asyncHandler(async (req: Request, res: Response) => {
+    const portfolioId = req.params.id;
+    const { from, to, format } = req.query;
+
+    if (!from || !to || typeof from !== 'string' || typeof to !== 'string') {
+      return res.status(400).json({
+        message: 'Query parameters from and to are required (YYYY-MM-DD)',
+      });
+    }
+
+    try {
+      console.log(
+        `[GET /:id/period-report] Generating report for portfolio ${portfolioId} from ${from} to ${to}`
+      );
+      const report = await periodReportService.getPeriodReport(
+        portfolioId,
+        from,
+        to
+      );
+
+      if (format === 'markdown') {
+        const markdown = periodReportService.formatReportAsMarkdown(report);
+        res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+        res.send(markdown);
+      } else {
+        res.json(report);
+      }
+    } catch (error) {
+      console.error(
+        `Error generating period report for portfolio ${portfolioId}:`,
+        error
+      );
+      res.status(500).json({
+        message: 'Failed to generate period report',
+        error: String(error),
+      });
     }
   })
 );

@@ -27,16 +27,18 @@ model Portfolio {
   AttentionItem           AttentionItem[]
   transactions            Transaction[]
   snapshots               PortfolioSnapshot[]
+  positionSnapshots       PositionSnapshot[]
 }
 
 model Asset {
   code         String          @id
   name         String
   market       Market
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
-  quotes       QuoteSnapshot[]
-  transactions Transaction[]
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  quotes            QuoteSnapshot[]
+  transactions      Transaction[]
+  positionSnapshots PositionSnapshot[]
 }
 
 model Transaction {
@@ -99,6 +101,23 @@ model PortfolioSnapshot {
   portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
 
   @@unique([portfolioId, date])
+}
+
+model PositionSnapshot {
+  id           Int      @id @default(autoincrement())
+  portfolioId  String
+  date         String   // 格式 YYYY-MM-DD
+  assetCode    String   // 股票代码 (如 sh600519)
+  quantity     Decimal  // 持仓数量
+  currentPrice Decimal  // 收盘价（原币种）
+  marketValue  Decimal  // 市值（CNY，含汇率）
+  createdAt    DateTime @default(now())
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+  asset     Asset     @relation(fields: [assetCode], references: [code])
+
+  @@unique([portfolioId, date, assetCode])
+  @@index([portfolioId, date])
 }
 
 model AttentionItem {
