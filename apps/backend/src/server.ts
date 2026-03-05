@@ -176,7 +176,8 @@ async function initializeDatabase() {
           "leverageCostRate" REAL NOT NULL,
           "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
           "updatedAt" DATETIME NOT NULL,
-          "attentionInfo" TEXT
+          "attentionInfo" TEXT,
+          "snapshotEnabled" BOOLEAN NOT NULL DEFAULT 1
         )
       `,
       Asset: `
@@ -311,6 +312,16 @@ async function initializeDatabase() {
 
     for (const statement of indexStatements) {
       await prisma.$executeRawUnsafe(statement);
+    }
+
+    // 字段迁移：给已有 Portfolio 表添加 snapshotEnabled 列（如不存在）
+    try {
+      await prisma.$executeRawUnsafe(
+        `ALTER TABLE "Portfolio" ADD COLUMN "snapshotEnabled" BOOLEAN NOT NULL DEFAULT 1`
+      );
+      console.log('✓ Column added: Portfolio.snapshotEnabled');
+    } catch {
+      // 列已存在，忽略
     }
 
     console.log('✅ Database schema ensured successfully');

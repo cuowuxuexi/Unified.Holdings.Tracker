@@ -130,7 +130,7 @@ async function upsertPositionSnapshot(
 }
 
 /**
- * 为所有组合拍摄快照
+ * 为所有组合拍摄快照（仅 snapshotEnabled 的组合）
  */
 async function takeSnapshotForAll(dateOverride?: string): Promise<void> {
   console.log(
@@ -138,11 +138,27 @@ async function takeSnapshotForAll(dateOverride?: string): Promise<void> {
   );
   try {
     const portfolios = await container.listPortfoliosUseCase.execute();
+    // 查询每个组合的 snapshotEnabled 状态
+    const dbPortfolios = await prisma.portfolio.findMany({
+      select: { id: true, snapshotEnabled: true },
+    });
+    const enabledSet = new Set(
+      dbPortfolios.filter((p: any) => p.snapshotEnabled).map((p: any) => p.id)
+    );
+
+    let count = 0;
     for (const p of portfolios) {
+      if (!enabledSet.has(p.id)) {
+        console.log(
+          `[SnapshotService] ⏭ Skipped (snapshot disabled): ${p.id}`
+        );
+        continue;
+      }
       await takeSnapshotForPortfolio(p.id, dateOverride);
+      count++;
     }
     console.log(
-      `[SnapshotService] ✅ Daily snapshot completed for ${portfolios.length} portfolio(s).`
+      `[SnapshotService] ✅ Daily snapshot completed for ${count}/${portfolios.length} portfolio(s).`
     );
   } catch (error) {
     const msg = `快照执行失败: ${error instanceof Error ? error.message : String(error)}`;

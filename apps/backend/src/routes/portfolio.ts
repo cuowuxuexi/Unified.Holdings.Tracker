@@ -11,6 +11,7 @@ import {
   Market,
 } from '../types';
 import { correctHistoricalTransactionAmounts } from '../services/storage.prisma';
+import { prisma } from '../lib/prisma';
 import { portfolioStatsService } from '../services/portfolioStatsService';
 import { PeriodCacheBucket } from '@uht/infra/cache/period-cache-service';
 import { periodReportService } from '../services/periodReportService';
@@ -627,6 +628,55 @@ router.get(
     } catch (error) {
       console.error(
         `Error recalculating cash for portfolio ${portfolioId}:`,
+        error
+      );
+      return res.status(404).json({ message: 'Portfolio not found' });
+    }
+  })
+);
+
+// GET /api/portfolio/:id/snapshot-enabled - 获取快照开关状态
+router.get(
+  '/:id/snapshot-enabled',
+  asyncHandler(async (req: Request, res: Response) => {
+    const portfolioId = req.params.id;
+    const portfolio = await prisma.portfolio.findUnique({
+      where: { id: portfolioId },
+      select: { snapshotEnabled: true },
+    });
+    if (!portfolio) {
+      return res.status(404).json({ message: 'Portfolio not found' });
+    }
+    res.json({ snapshotEnabled: portfolio.snapshotEnabled });
+  })
+);
+
+// PATCH /api/portfolio/:id/snapshot-enabled - 切换快照开关
+router.patch(
+  '/:id/snapshot-enabled',
+  asyncHandler(async (req: Request, res: Response) => {
+    const portfolioId = req.params.id;
+    const { snapshotEnabled } = req.body;
+
+    if (typeof snapshotEnabled !== 'boolean') {
+      return res
+        .status(400)
+        .json({ message: 'snapshotEnabled must be a boolean' });
+    }
+
+    try {
+      const updated = await prisma.portfolio.update({
+        where: { id: portfolioId },
+        data: { snapshotEnabled },
+        select: { id: true, snapshotEnabled: true },
+      });
+      console.log(
+        `[Portfolio] Snapshot ${snapshotEnabled ? 'enabled' : 'disabled'} for ${portfolioId}`
+      );
+      res.json(updated);
+    } catch (error) {
+      console.error(
+        `Error updating snapshot-enabled for portfolio ${portfolioId}:`,
         error
       );
       return res.status(404).json({ message: 'Portfolio not found' });

@@ -7,6 +7,8 @@ import {
   message,
   Dropdown,
   MenuProps,
+  Switch,
+  Tooltip,
 } from 'antd';
 import {
   GithubOutlined,
@@ -14,6 +16,7 @@ import {
   ExportOutlined,
   SaveOutlined,
   HistoryOutlined,
+  CameraOutlined,
 } from '@ant-design/icons';
 import { useState, useEffect, useCallback } from 'react';
 import { checkBackendConnection } from '../../config';
@@ -29,9 +32,13 @@ export function RootLayout() {
   const [messageApi, contextHolder] = message.useMessage();
   const [isExporting, setIsExporting] = useState(false);
   const selectedPortfolioId = useAppStore((state) => state.selectedPortfolioId);
-  const refreshPortfolioDetail = useAppStore((state) => state.fetchPortfolioDetail);
+  const refreshPortfolioDetail = useAppStore(
+    (state) => state.fetchPortfolioDetail
+  );
   const [createArchiveOpen, setCreateArchiveOpen] = useState(false);
   const [viewArchivesOpen, setViewArchivesOpen] = useState(false);
+  const [snapshotEnabled, setSnapshotEnabled] = useState(true);
+  const [snapshotLoading, setSnapshotLoading] = useState(false);
 
   // 恢复成功后刷新投资组合数据
   const handleRestoreSuccess = useCallback(() => {
@@ -53,6 +60,31 @@ export function RootLayout() {
     const interval = setInterval(checkConnection, 30000);
     return () => clearInterval(interval);
   }, [messageApi]);
+
+  // 获取快照开关状态
+  useEffect(() => {
+    if (!selectedPortfolioId) return;
+    setSnapshotLoading(true);
+    apiClient
+      .getSnapshotEnabled(selectedPortfolioId)
+      .then((data) => setSnapshotEnabled(data.snapshotEnabled))
+      .catch(() => setSnapshotEnabled(true))
+      .finally(() => setSnapshotLoading(false));
+  }, [selectedPortfolioId]);
+
+  const handleSnapshotToggle = async (checked: boolean) => {
+    if (!selectedPortfolioId) return;
+    setSnapshotLoading(true);
+    try {
+      await apiClient.setSnapshotEnabled(selectedPortfolioId, checked);
+      setSnapshotEnabled(checked);
+      messageApi.success(`每日快照已${checked ? '开启' : '关闭'}`);
+    } catch {
+      messageApi.error('切换快照开关失败');
+    } finally {
+      setSnapshotLoading(false);
+    }
+  };
 
   const handleExportPNG = async () => {
     setIsExporting(true);
@@ -225,6 +257,25 @@ export function RootLayout() {
           </span>
         </div>
         <Space>
+          <Tooltip
+            title={snapshotEnabled ? '每日快照：已开启' : '每日快照：已关闭'}
+          >
+            <Space size={4}>
+              <CameraOutlined
+                style={{
+                  color: snapshotEnabled ? '#52c41a' : 'rgba(0,0,0,0.25)',
+                  fontSize: '16px',
+                }}
+              />
+              <Switch
+                size="small"
+                checked={snapshotEnabled}
+                loading={snapshotLoading}
+                disabled={!selectedPortfolioId}
+                onChange={handleSnapshotToggle}
+              />
+            </Space>
+          </Tooltip>
           <Button
             type="text"
             icon={<GithubOutlined />}

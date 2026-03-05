@@ -111,11 +111,15 @@ export function PortfolioList({
   className,
 }: PortfolioListProps) {
   const deletePortfolio = useDeletePortfolio();
-  const [sortedPortfolios, setSortedPortfolios] = useState(portfolios);
+  const [sortedPortfolios, setSortedPortfolios] = useState<Portfolio[]>(
+    Array.isArray(portfolios) ? portfolios : []
+  );
 
   // 当 portfolios prop 变化时，更新排序后的列表
   useEffect(() => {
-    setSortedPortfolios(portfolios);
+    if (Array.isArray(portfolios)) {
+      setSortedPortfolios(portfolios);
+    }
   }, [portfolios]);
 
   const sensors = useSensors(

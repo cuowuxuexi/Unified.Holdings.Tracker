@@ -53,6 +53,12 @@ export default defineConfig({
       // 使用原生文件系统事件（推荐）
       usePolling: false,
     },
+    proxy: {
+      '/api': {
+        target: 'http://localhost:3001',
+        changeOrigin: true,
+      },
+    },
   },
   // 依赖优化配置
   optimizeDeps: {

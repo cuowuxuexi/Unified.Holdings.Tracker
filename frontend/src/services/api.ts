@@ -636,6 +636,45 @@ const apiClient = {
       throw error;
     }
   },
+
+  // 快照开关 API
+  getSnapshotEnabled: async (
+    portfolioId: string
+  ): Promise<{ snapshotEnabled: boolean }> => {
+    try {
+      const response = await axios.get<{ snapshotEnabled: boolean }>(
+        `${API_BASE_URL}/api/portfolio/${portfolioId}/snapshot-enabled`
+      );
+      return response.data;
+    } catch (error) {
+      console.error(
+        `Error fetching snapshot-enabled for portfolio ${portfolioId}:`,
+        error
+      );
+      throw error;
+    }
+  },
+
+  setSnapshotEnabled: async (
+    portfolioId: string,
+    snapshotEnabled: boolean
+  ): Promise<{ id: string; snapshotEnabled: boolean }> => {
+    try {
+      const response = await axios.patch<{
+        id: string;
+        snapshotEnabled: boolean;
+      }>(`${API_BASE_URL}/api/portfolio/${portfolioId}/snapshot-enabled`, {
+        snapshotEnabled,
+      });
+      return response.data;
+    } catch (error) {
+      console.error(
+        `Error setting snapshot-enabled for portfolio ${portfolioId}:`,
+        error
+      );
+      throw error;
+    }
+  },
 };
 
 export default apiClient;

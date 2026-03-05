@@ -24,6 +24,7 @@ model Portfolio {
   createdAt               DateTime             @default(now())
   updatedAt               DateTime             @updatedAt
   attentionInfo           String?
+  snapshotEnabled         Boolean              @default(true)
   AttentionItem           AttentionItem[]
   transactions            Transaction[]
   snapshots               PortfolioSnapshot[]
