@@ -684,27 +684,77 @@ router.patch(
   })
 );
 
-// GET /api/portfolio/:id/period-report - 期间报表（周/月/季/年通用）
+// GET /api/portfolio/:id/period-report - 期间报表（日/周/月/季/年通用）
 router.get(
   '/:id/period-report',
   asyncHandler(async (req: Request, res: Response) => {
     const portfolioId = req.params.id;
-    const { from, to, format } = req.query;
+    const { from: rawFrom, to: rawTo, format, period } = req.query;
 
-    if (!from || !to || typeof from !== 'string' || typeof to !== 'string') {
+    let from: string | undefined =
+      typeof rawFrom === 'string' ? rawFrom : undefined;
+    let to: string | undefined = typeof rawTo === 'string' ? rawTo : undefined;
+    let periodType = 'custom';
+
+    // 如果传了 period 参数，自动计算 from/to
+    if (
+      typeof period === 'string' &&
+      ['daily', 'weekly', 'monthly', 'yearly'].includes(period)
+    ) {
+      periodType = period;
+      const now = new Date();
+      const todayStr = now.toISOString().slice(0, 10);
+
+      if (!to) to = todayStr;
+
+      if (!from) {
+        switch (period) {
+          case 'daily': {
+            // 昨天到今天
+            const yesterday = new Date(now);
+            yesterday.setDate(yesterday.getDate() - 1);
+            from = yesterday.toISOString().slice(0, 10);
+            break;
+          }
+          case 'weekly': {
+            // 本周一到今天
+            const monday = new Date(now);
+            const day = monday.getDay();
+            const diff = day === 0 ? 6 : day - 1;
+            monday.setDate(monday.getDate() - diff);
+            from = monday.toISOString().slice(0, 10);
+            break;
+          }
+          case 'monthly': {
+            // 本月1号到今天
+            from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+            break;
+          }
+          case 'yearly': {
+            // 今年1月1日到今天
+            from = `${now.getFullYear()}-01-01`;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!from || !to) {
       return res.status(400).json({
-        message: 'Query parameters from and to are required (YYYY-MM-DD)',
+        message:
+          'Query parameters from and to are required (YYYY-MM-DD), or use period=daily|weekly|monthly|yearly',
       });
     }
 
     try {
       console.log(
-        `[GET /:id/period-report] Generating report for portfolio ${portfolioId} from ${from} to ${to}`
+        `[GET /:id/period-report] Generating ${periodType} report for portfolio ${portfolioId} from ${from} to ${to}`
       );
       const report = await periodReportService.getPeriodReport(
         portfolioId,
         from,
-        to
+        to,
+        periodType
       );
 
       if (format === 'markdown') {
