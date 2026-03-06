@@ -11,6 +11,8 @@ import { container } from '../container';
 import { portfolioStatsService } from './portfolioStatsService';
 import { format, startOfWeek, endOfWeek, subWeeks, subDays } from 'date-fns';
 import { Position } from '@uht/domain';
+import { fetchKline } from './tencentApi';
+import { getExchangeRateForAssetToCNY } from './currencyService';
 
 // ==================== Webhook 告警 ====================
 
@@ -42,6 +44,199 @@ async function sendSnapshotAlert(message: string): Promise<void> {
  */
 function getSnapshotDate(): string {
   return format(subDays(new Date(), 1), 'yyyy-MM-dd');
+}
+
+function toSafeNumber(value: unknown): number {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : 0;
+}
+
+function isForeignAssetCode(assetCode: string): boolean {
+  const lowerCode = assetCode.toLowerCase();
+  return lowerCode.startsWith('hk') || lowerCode.startsWith('us');
+}
+
+async function resolveSnapshotFxRate(
+  assetCode: string
+): Promise<number | null> {
+  if (!isForeignAssetCode(assetCode)) {
+    return 1;
+  }
+
+  try {
+    const rate = await getExchangeRateForAssetToCNY(assetCode);
+    if (Number.isFinite(rate) && rate > 0) {
+      return rate;
+    }
+  } catch (error) {
+    console.warn(
+      `[SnapshotService] Failed to resolve FX rate for ${assetCode}:`,
+      error
+    );
+  }
+
+  return null;
+}
+
+async function findDailyClosePrice(
+  assetCode: string,
+  snapshotDate: string
+): Promise<number | null> {
+  const points = await fetchKline(
+    assetCode,
+    'daily',
+    snapshotDate,
+    snapshotDate,
+    'none',
+    30
+  );
+
+  const target = points.find((point) => point.date === snapshotDate);
+  const closePrice = target?.close;
+  if (!Number.isFinite(closePrice) || !closePrice || closePrice <= 0) {
+    return null;
+  }
+
+  return closePrice;
+}
+
+async function correctSnapshotWithKline(params: {
+  portfolioId: string;
+  snapshotDate: string;
+}): Promise<void> {
+  const { portfolioId, snapshotDate } = params;
+
+  const snapshotRows = await prisma.$queryRawUnsafe<
+    Array<{
+      cash: unknown;
+      totalMarketValue: unknown;
+      netAssets: unknown;
+    }>
+  >(
+    `SELECT "cash", "totalMarketValue", "netAssets"
+       FROM "PortfolioSnapshot"
+      WHERE "portfolioId" = ? AND "date" = ?
+      LIMIT 1`,
+    portfolioId,
+    snapshotDate
+  );
+
+  const snapshot = snapshotRows[0];
+  if (!snapshot) {
+    console.warn(
+      `[SnapshotService] Missing PortfolioSnapshot while correcting: portfolio=${portfolioId}, date=${snapshotDate}`
+    );
+    return;
+  }
+
+  const positionRows = await prisma.$queryRawUnsafe<
+    Array<{
+      assetCode: string;
+      quantity: unknown;
+      marketValue: unknown;
+    }>
+  >(
+    `SELECT "assetCode", "quantity", "marketValue"
+       FROM "PositionSnapshot"
+      WHERE "portfolioId" = ? AND "date" = ?`,
+    portfolioId,
+    snapshotDate
+  );
+
+  if (positionRows.length === 0) {
+    console.warn(
+      `[SnapshotService] No PositionSnapshot rows to correct: portfolio=${portfolioId}, date=${snapshotDate}`
+    );
+    return;
+  }
+
+  let totalMarketValue = positionRows.reduce(
+    (sum, row) => sum + toSafeNumber(row.marketValue),
+    0
+  );
+
+  let correctedCount = 0;
+
+  for (const row of positionRows) {
+    const assetCode = row.assetCode;
+    const quantity = toSafeNumber(row.quantity);
+    const oldMarketValue = toSafeNumber(row.marketValue);
+
+    let closePrice: number | null = null;
+    try {
+      closePrice = await findDailyClosePrice(assetCode, snapshotDate);
+    } catch (error) {
+      console.warn(
+        `[SnapshotService] K-line fetch failed, keep original snapshot value: portfolio=${portfolioId}, date=${snapshotDate}, asset=${assetCode}`,
+        error
+      );
+      continue;
+    }
+
+    if (closePrice === null) {
+      console.warn(
+        `[SnapshotService] K-line close not found, keep original snapshot value: portfolio=${portfolioId}, date=${snapshotDate}, asset=${assetCode}`
+      );
+      continue;
+    }
+
+    const fxRate = await resolveSnapshotFxRate(assetCode);
+    if (fxRate === null) {
+      console.warn(
+        `[SnapshotService] FX rate unavailable, keep original snapshot value: portfolio=${portfolioId}, date=${snapshotDate}, asset=${assetCode}`
+      );
+      continue;
+    }
+
+    const newMarketValue = closePrice * quantity * fxRate;
+
+    await prisma.$executeRawUnsafe(
+      `UPDATE "PositionSnapshot"
+          SET "currentPrice" = ?,
+              "marketValue" = ?
+        WHERE "portfolioId" = ?
+          AND "date" = ?
+          AND "assetCode" = ?`,
+      closePrice,
+      newMarketValue,
+      portfolioId,
+      snapshotDate,
+      assetCode
+    );
+
+    totalMarketValue = totalMarketValue - oldMarketValue + newMarketValue;
+    correctedCount += 1;
+  }
+
+  if (correctedCount === 0) {
+    console.warn(
+      `[SnapshotService] No position corrected by K-line, keep original PortfolioSnapshot: portfolio=${portfolioId}, date=${snapshotDate}`
+    );
+    return;
+  }
+
+  const cash = toSafeNumber(snapshot.cash);
+  const previousTotalMarketValue = toSafeNumber(snapshot.totalMarketValue);
+  const previousNetAssets = toSafeNumber(snapshot.netAssets);
+  const leverageUsed = previousTotalMarketValue + cash - previousNetAssets;
+  const netAssets = totalMarketValue + cash - leverageUsed;
+
+  await prisma.$executeRawUnsafe(
+    `UPDATE "PortfolioSnapshot"
+        SET "totalMarketValue" = ?,
+            "netAssets" = ?,
+            "createdAt" = CURRENT_TIMESTAMP
+      WHERE "portfolioId" = ?
+        AND "date" = ?`,
+    totalMarketValue,
+    netAssets,
+    portfolioId,
+    snapshotDate
+  );
+
+  console.log(
+    `[SnapshotService] ✅ Snapshot corrected with K-line: portfolio=${portfolioId}, date=${snapshotDate}, correctedPositions=${correctedCount}, totalMarketValue=${totalMarketValue.toFixed(2)}, netAssets=${netAssets.toFixed(2)}`
+  );
 }
 
 /**
@@ -94,6 +289,8 @@ async function takeSnapshotForPortfolio(
     for (const pos of stats.positions) {
       await upsertPositionSnapshot(portfolioId, snapshotDate, pos);
     }
+
+    await correctSnapshotWithKline({ portfolioId, snapshotDate });
 
     console.log(
       `[SnapshotService] ✅ Snapshot saved: portfolio=${portfolioId}, date=${snapshotDate}, netAssets=${stats.netAssets.toFixed(2)}`

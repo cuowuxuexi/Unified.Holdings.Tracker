@@ -15,8 +15,48 @@ import { prisma } from '../lib/prisma';
 import { portfolioStatsService } from '../services/portfolioStatsService';
 import { PeriodCacheBucket } from '@uht/infra/cache/period-cache-service';
 import { periodReportService } from '../services/periodReportService';
+import { fetchQuotes } from '../services/tencentApi';
 
 const router = Router();
+
+async function fillAssetNameAsync(assetCode: string): Promise<void> {
+  try {
+    const normalizedCode = assetCode.trim();
+    if (!normalizedCode) {
+      return;
+    }
+
+    const quotes = await fetchQuotes([normalizedCode]);
+    const quote =
+      quotes.find((item) => item.code === normalizedCode) ?? quotes[0];
+    const assetName = quote?.name?.trim();
+
+    if (!assetName || assetName === normalizedCode) {
+      console.warn(
+        `[AssetNameFill] Skip update due to empty/equal name: code=${normalizedCode}, name=${assetName ?? 'N/A'}`
+      );
+      return;
+    }
+
+    const result = await prisma.asset.updateMany({
+      where: {
+        code: normalizedCode,
+        OR: [{ name: normalizedCode }, { name: '' }],
+      },
+      data: {
+        name: assetName,
+      },
+    });
+
+    if (result.count > 0) {
+      console.log(
+        `[AssetNameFill] Updated asset name: code=${normalizedCode}, name=${assetName}`
+      );
+    }
+  } catch (error) {
+    console.warn(`[AssetNameFill] Failed: code=${assetCode}`, error);
+  }
+}
 
 // Helper function to wrap async route handlers and catch errors
 const asyncHandler =
@@ -38,6 +78,171 @@ const getMarketFromCode = (code: string): Market | null => {
   );
   return null;
 };
+
+const PERIOD_SHORTCUTS = ['daily', 'weekly', 'monthly', 'yearly'] as const;
+
+type PeriodShortcut = (typeof PERIOD_SHORTCUTS)[number];
+
+type NormalizedPeriodReportQuery = {
+  from: string;
+  to: string;
+  format?: string;
+  periodType: PeriodShortcut | 'custom';
+};
+
+function isPeriodShortcut(value: string): value is PeriodShortcut {
+  return PERIOD_SHORTCUTS.includes(value as PeriodShortcut);
+}
+
+function normalizePeriodReportQuery(
+  query: Request['query']
+): NormalizedPeriodReportQuery | null {
+  const { from: rawFrom, to: rawTo, format: rawFormat, period } = query;
+
+  let from: string | undefined =
+    typeof rawFrom === 'string' ? rawFrom : undefined;
+  let to: string | undefined = typeof rawTo === 'string' ? rawTo : undefined;
+  let periodType: PeriodShortcut | 'custom' = 'custom';
+
+  if (typeof period === 'string' && isPeriodShortcut(period)) {
+    periodType = period;
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+
+    if (!to) to = todayStr;
+
+    if (!from) {
+      switch (period) {
+        case 'daily': {
+          const yesterday = new Date(now);
+          yesterday.setDate(yesterday.getDate() - 1);
+          from = yesterday.toISOString().slice(0, 10);
+          break;
+        }
+        case 'weekly': {
+          const monday = new Date(now);
+          const day = monday.getDay();
+          const diff = day === 0 ? 6 : day - 1;
+          monday.setDate(monday.getDate() - diff);
+          from = monday.toISOString().slice(0, 10);
+          break;
+        }
+        case 'monthly':
+          from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
+          break;
+        case 'yearly':
+          from = `${now.getFullYear()}-01-01`;
+          break;
+      }
+    }
+  }
+
+  if (!from || !to) {
+    return null;
+  }
+
+  return {
+    from,
+    to,
+    format: typeof rawFormat === 'string' ? rawFormat : undefined,
+    periodType,
+  };
+}
+
+async function resolveLegacyPeriodReportPortfolioId(
+  query: Request['query'],
+  from: string,
+  to: string
+): Promise<
+  | { portfolioId: string }
+  | {
+      statusCode: 400 | 404;
+      body: Record<string, unknown>;
+    }
+> {
+  const explicitPortfolioId =
+    typeof query.portfolioId === 'string'
+      ? query.portfolioId
+      : typeof query.id === 'string'
+        ? query.id
+        : undefined;
+
+  if (explicitPortfolioId) {
+    return { portfolioId: explicitPortfolioId };
+  }
+
+  const portfolios = await container.listPortfoliosUseCase.execute();
+  if (portfolios.length === 0) {
+    return {
+      statusCode: 404,
+      body: {
+        message: 'No portfolio found',
+      },
+    };
+  }
+
+  if (portfolios.length === 1) {
+    return { portfolioId: portfolios[0].id };
+  }
+
+  const snapshotCandidates = await prisma.portfolioSnapshot.findMany({
+    where: {
+      portfolioId: {
+        in: portfolios.map(({ id }) => id),
+      },
+      date: {
+        gte: from,
+        lte: to,
+      },
+    },
+    select: {
+      portfolioId: true,
+    },
+    distinct: ['portfolioId'],
+  });
+
+  if (snapshotCandidates.length === 1) {
+    return { portfolioId: snapshotCandidates[0].portfolioId };
+  }
+
+  return {
+    statusCode: 400,
+    body: {
+      message:
+        'Query parameter portfolioId is required when multiple portfolios match the requested report period',
+      from,
+      to,
+      candidates: portfolios.map(({ id, name }) => ({ id, name })),
+    },
+  };
+}
+
+async function sendPeriodReport(
+  res: Response,
+  portfolioId: string,
+  query: NormalizedPeriodReportQuery,
+  routeLabel: string
+): Promise<void> {
+  console.log(
+    `[GET ${routeLabel}] Generating ${query.periodType} report for portfolio ${portfolioId} from ${query.from} to ${query.to}`
+  );
+
+  const report = await periodReportService.getPeriodReport(
+    portfolioId,
+    query.from,
+    query.to,
+    query.periodType
+  );
+
+  if (query.format === 'markdown') {
+    const markdown = periodReportService.formatReportAsMarkdown(report);
+    res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
+    res.send(markdown);
+    return;
+  }
+
+  res.json(report);
+}
 
 // ========== 使用 Use Cases 的路由 ==========
 
@@ -116,6 +321,50 @@ router.get(
         });
       }
       next(error);
+    }
+  })
+);
+
+// GET /api/portfolio/period-report - 旧版兼容入口（优先传 portfolioId）
+router.get(
+  '/period-report',
+  asyncHandler(async (req: Request, res: Response) => {
+    const reportQuery = normalizePeriodReportQuery(req.query);
+    if (!reportQuery) {
+      return res.status(400).json({
+        message:
+          'Query parameters from and to are required (YYYY-MM-DD), or use period=daily|weekly|monthly|yearly',
+      });
+    }
+
+    const resolution = await resolveLegacyPeriodReportPortfolioId(
+      req.query,
+      reportQuery.from,
+      reportQuery.to
+    );
+
+    if ('statusCode' in resolution) {
+      return res.status(resolution.statusCode).json(resolution.body);
+    }
+
+    res.setHeader('X-UHT-Resolved-Portfolio-Id', resolution.portfolioId);
+
+    try {
+      await sendPeriodReport(
+        res,
+        resolution.portfolioId,
+        reportQuery,
+        '/period-report'
+      );
+    } catch (error) {
+      console.error(
+        `Error generating legacy period report for portfolio ${resolution.portfolioId}:`,
+        error
+      );
+      res.status(500).json({
+        message: 'Failed to generate period report',
+        error: String(error),
+      });
     }
   })
 );
@@ -386,6 +635,12 @@ router.post(
 
       portfolioStatsService.clearCache(portfolioId);
       res.status(201).json(newTransaction);
+
+      if (newTransaction?.assetCode) {
+        setImmediate(() => {
+          void fillAssetNameAsync(newTransaction.assetCode as string);
+        });
+      }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       console.error(
@@ -689,57 +944,9 @@ router.get(
   '/:id/period-report',
   asyncHandler(async (req: Request, res: Response) => {
     const portfolioId = req.params.id;
-    const { from: rawFrom, to: rawTo, format, period } = req.query;
+    const reportQuery = normalizePeriodReportQuery(req.query);
 
-    let from: string | undefined =
-      typeof rawFrom === 'string' ? rawFrom : undefined;
-    let to: string | undefined = typeof rawTo === 'string' ? rawTo : undefined;
-    let periodType = 'custom';
-
-    // 如果传了 period 参数，自动计算 from/to
-    if (
-      typeof period === 'string' &&
-      ['daily', 'weekly', 'monthly', 'yearly'].includes(period)
-    ) {
-      periodType = period;
-      const now = new Date();
-      const todayStr = now.toISOString().slice(0, 10);
-
-      if (!to) to = todayStr;
-
-      if (!from) {
-        switch (period) {
-          case 'daily': {
-            // 昨天到今天
-            const yesterday = new Date(now);
-            yesterday.setDate(yesterday.getDate() - 1);
-            from = yesterday.toISOString().slice(0, 10);
-            break;
-          }
-          case 'weekly': {
-            // 本周一到今天
-            const monday = new Date(now);
-            const day = monday.getDay();
-            const diff = day === 0 ? 6 : day - 1;
-            monday.setDate(monday.getDate() - diff);
-            from = monday.toISOString().slice(0, 10);
-            break;
-          }
-          case 'monthly': {
-            // 本月1号到今天
-            from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`;
-            break;
-          }
-          case 'yearly': {
-            // 今年1月1日到今天
-            from = `${now.getFullYear()}-01-01`;
-            break;
-          }
-        }
-      }
-    }
-
-    if (!from || !to) {
+    if (!reportQuery) {
       return res.status(400).json({
         message:
           'Query parameters from and to are required (YYYY-MM-DD), or use period=daily|weekly|monthly|yearly',
@@ -747,23 +954,12 @@ router.get(
     }
 
     try {
-      console.log(
-        `[GET /:id/period-report] Generating ${periodType} report for portfolio ${portfolioId} from ${from} to ${to}`
-      );
-      const report = await periodReportService.getPeriodReport(
+      await sendPeriodReport(
+        res,
         portfolioId,
-        from,
-        to,
-        periodType
+        reportQuery,
+        '/:id/period-report'
       );
-
-      if (format === 'markdown') {
-        const markdown = periodReportService.formatReportAsMarkdown(report);
-        res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
-        res.send(markdown);
-      } else {
-        res.json(report);
-      }
     } catch (error) {
       console.error(
         `Error generating period report for portfolio ${portfolioId}:`,

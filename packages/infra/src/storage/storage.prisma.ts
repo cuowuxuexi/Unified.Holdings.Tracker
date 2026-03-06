@@ -695,7 +695,8 @@ export async function addTransactionToPortfolio(
           await tx.asset.create({
             data: {
               code: assetCode,
-              name: assetCode, // 默认使用代码作为名称
+              // 保持最小可写：先用代码兜底，真实名称由 backend 在交易成功后异步补全
+              name: assetCode,
               market: market,
             },
           });
