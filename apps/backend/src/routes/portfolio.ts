@@ -15,8 +15,47 @@ import { prisma } from '../lib/prisma';
 import { portfolioStatsService } from '../services/portfolioStatsService';
 import { PeriodCacheBucket } from '@uht/infra/cache/period-cache-service';
 import { periodReportService } from '../services/periodReportService';
+import { fetchQuotes } from '../services/tencentApi';
 
 const router = Router();
+
+async function fillAssetNameAsync(assetCode: string): Promise<void> {
+  try {
+    const normalizedCode = assetCode.trim();
+    if (!normalizedCode) {
+      return;
+    }
+
+    const quotes = await fetchQuotes([normalizedCode]);
+    const quote = quotes.find((item) => item.code === normalizedCode) ?? quotes[0];
+    const assetName = quote?.name?.trim();
+
+    if (!assetName || assetName === normalizedCode) {
+      console.warn(
+        `[AssetNameFill] Skip update due to empty/equal name: code=${normalizedCode}, name=${assetName ?? 'N/A'}`
+      );
+      return;
+    }
+
+    const result = await prisma.asset.updateMany({
+      where: {
+        code: normalizedCode,
+        OR: [{ name: normalizedCode }, { name: '' }],
+      },
+      data: {
+        name: assetName,
+      },
+    });
+
+    if (result.count > 0) {
+      console.log(
+        `[AssetNameFill] Updated asset name: code=${normalizedCode}, name=${assetName}`
+      );
+    }
+  } catch (error) {
+    console.warn(`[AssetNameFill] Failed: code=${assetCode}`, error);
+  }
+}
 
 // Helper function to wrap async route handlers and catch errors
 const asyncHandler =
@@ -386,6 +425,12 @@ router.post(
 
       portfolioStatsService.clearCache(portfolioId);
       res.status(201).json(newTransaction);
+
+      if (newTransaction?.assetCode) {
+        setImmediate(() => {
+          void fillAssetNameAsync(newTransaction.assetCode as string);
+        });
+      }
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       console.error(
