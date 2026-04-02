@@ -343,6 +343,137 @@ export const openApiDocument: OpenAPIV3.Document = {
         },
       },
     },
+    '/portfolio/{id}/period-report': {
+      get: {
+        tags: ['Portfolio'],
+        summary: '生成期间报告',
+        description:
+          '根据指定的起止日期或周期，生成投资组合的期间概览和详细报表数据。',
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+          {
+            name: 'from',
+            in: 'query',
+            description: '起始日期 (YYYY-MM-DD)',
+            schema: { type: 'string', format: 'date' },
+          },
+          {
+            name: 'to',
+            in: 'query',
+            description: '结束日期 (YYYY-MM-DD)',
+            schema: { type: 'string', format: 'date' },
+          },
+          {
+            name: 'period',
+            in: 'query',
+            description:
+              '快捷周期选择。如果提供了此参数，可以省略 from 和 to。',
+            schema: {
+              type: 'string',
+              enum: ['daily', 'weekly', 'monthly', 'yearly'],
+            },
+          },
+          {
+            name: 'format',
+            in: 'query',
+            description: '输出格式，支持 json 和 markdown',
+            schema: { type: 'string', enum: ['json', 'markdown'] },
+          },
+        ],
+        responses: {
+          '200': {
+            description: '成功返回报告内容',
+            content: {
+              'application/json': {
+                schema: { type: 'object', additionalProperties: true },
+              },
+              'text/markdown': {
+                schema: { type: 'string' },
+              },
+            },
+          },
+          '400': {
+            description: '缺少必要的日期或周期参数',
+          },
+          '404': {
+            description: '组合未找到',
+          },
+        },
+      },
+    },
+    '/portfolio/period-report': {
+      get: {
+        tags: ['Portfolio'],
+        summary: '生成期间报告 (兼容模式)',
+        description:
+          '根据指定的起止日期或周期，自动探测或通过 query 参数生成投资组合的报表。如果存在多个投资组合，则必须在 query 中指定 portfolioId',
+        parameters: [
+          {
+            name: 'from',
+            in: 'query',
+            description: '起始日期 (YYYY-MM-DD)',
+            schema: { type: 'string', format: 'date' },
+          },
+          {
+            name: 'to',
+            in: 'query',
+            description: '结束日期 (YYYY-MM-DD)',
+            schema: { type: 'string', format: 'date' },
+          },
+          {
+            name: 'period',
+            in: 'query',
+            description: '快捷周期选择',
+            schema: {
+              type: 'string',
+              enum: ['daily', 'weekly', 'monthly', 'yearly'],
+            },
+          },
+          {
+            name: 'format',
+            in: 'query',
+            description: '输出格式，支持 json 和 markdown',
+            schema: { type: 'string', enum: ['json', 'markdown'] },
+          },
+          {
+            name: 'portfolioId',
+            in: 'query',
+            description: '显式指定组合 ID',
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          '200': {
+            description: '成功返回报告内容',
+            headers: {
+              'X-UHT-Resolved-Portfolio-Id': {
+                schema: { type: 'string', format: 'uuid' },
+                description: '自动解析使用的组合 ID',
+              },
+            },
+            content: {
+              'application/json': {
+                schema: { type: 'object', additionalProperties: true },
+              },
+              'text/markdown': {
+                schema: { type: 'string' },
+              },
+            },
+          },
+          '400': {
+            description: '需要指定组合或缺少日期参数',
+          },
+          '404': {
+            description: '没有任何组合',
+          },
+        },
+      },
+    },
     '/portfolio/{id}/cash-recalc': {
       get: {
         tags: ['Portfolio'],
