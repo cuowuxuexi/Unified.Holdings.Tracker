@@ -118,7 +118,7 @@ sudo mkdir -p /opt/uht
 sudo chown $USER:$USER /opt/uht
 
 # 克隆 server 分支
-git clone -b server https://github.com/cuowuxuexi/Unified.Holdings.Tracker.git /opt/uht
+git clone -b main https://github.com/cuowuxuexi/Unified.Holdings.Tracker.git /opt/uht
 cd /opt/uht
 ```
 
@@ -321,7 +321,7 @@ sudo ufw allow 443/tcp  # 如果后续启用 HTTPS
 
 ```bash
 cd /opt/uht
-git pull origin server
+git pull origin main
 npm install              # 如果依赖有变更
 npm run deploy:build     # 重新构建
 pm2 restart uht-backend  # 重启后端
@@ -459,7 +459,7 @@ pm2 status  # 应该只有 1 个 uht-backend
 如果你希望跳过手动步骤，可以直接执行：
 
 ```bash
-git clone -b server https://github.com/cuowuxuexi/Unified.Holdings.Tracker.git /opt/uht
+git clone -b main https://github.com/cuowuxuexi/Unified.Holdings.Tracker.git /opt/uht
 cd /opt/uht
 bash deploy/setup.sh
 ```
