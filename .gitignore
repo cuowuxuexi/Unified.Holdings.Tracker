@@ -111,8 +111,11 @@ localhost-*.log
 # IDE 临时文件
 .claude/*.html
 .claude/settings.local.json
-.playwright-mcp/*.png
+.playwright-mcp/
 .serena/
+.agents/
+.tmp/
+_tmp/
 
 # OpenSpec 临时文件
 openspec/changes/**/README.md
@@ -126,6 +129,15 @@ openspec/changes/**/NEXT_STEPS.md
 agents.md
 batch_import_template.xlsx
 check-backend-logs.md
+base-price-old.ts
+cloud-detail.json
+local-detail.json
+test-quotes.ts
+*.jpeg
+*.jpg
+!frontend/src/**/*.jpg
+!frontend/src/**/*.jpeg
+UHT与世尊*.md
 
 # Test files
 test_batch_import.csv
