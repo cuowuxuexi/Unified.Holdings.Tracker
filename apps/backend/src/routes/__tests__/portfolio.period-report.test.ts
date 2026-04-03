@@ -31,7 +31,6 @@ jest.mock('../../lib/prisma', () => ({
 jest.mock('../../services/periodReportService', () => ({
   periodReportService: {
     getPeriodReport: jest.fn(),
-    formatReportAsMarkdown: jest.fn(),
   },
 }));
 
@@ -75,9 +74,6 @@ describe('portfolio period-report compatibility', () => {
     (periodReportService.getPeriodReport as jest.Mock).mockResolvedValue({
       portfolioId: 'p1',
     });
-    (periodReportService.formatReportAsMarkdown as jest.Mock).mockReturnValue(
-      '# report'
-    );
   });
 
   afterEach(() => {
@@ -88,13 +84,16 @@ describe('portfolio period-report compatibility', () => {
     (container.listPortfoliosUseCase.execute as jest.Mock).mockResolvedValue([
       { id: 'p1', name: '主组合' },
     ]);
+    (periodReportService.getPeriodReport as jest.Mock).mockResolvedValue({
+      portfolioId: 'p1',
+    });
 
     const response = await request(createTestApp()).get(
-      '/api/portfolio/period-report?period=daily&format=markdown'
+      '/api/portfolio/period-report?period=daily'
     );
 
     expect(response.status).toBe(200);
-    expect(response.text).toBe('# report');
+    expect(response.body).toEqual({ portfolioId: 'p1' });
     expect(response.headers['x-uht-resolved-portfolio-id']).toBe('p1');
     expect(periodReportService.getPeriodReport).toHaveBeenCalledWith(
       'p1',

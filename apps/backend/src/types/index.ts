@@ -30,7 +30,7 @@ export interface PeriodStat {
    */
   totalValueChange?: number | null;
   /**
-   * 净值变化率（小数形式）
+   * 净値变化率（百分比数値形式，如 1.02 表示 1.02%）
    */
   totalValueChangePercent?: number | null;
   baseDate?: string | null;

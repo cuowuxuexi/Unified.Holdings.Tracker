@@ -34,19 +34,15 @@ export { calculateRealtimePnl, validatePositionData } from './realtime-pnl';
 // ============================================================================
 // 周期统计
 // ============================================================================
-export {
-  calculatePeriodStats,
-  calculateIndexPeriodChanges,
-} from './period-stats';
+export { calculatePeriodStats } from './period-stats';
 
 // ============================================================================
-// 基准价格获取
+// 基准价格获取（周/月/年）
 // ============================================================================
 export {
-  getBasePrice,
-  getYearBasePrice,
-  getMonthBasePrice,
   getWeekBasePrice,
+  getMonthBasePrice,
+  getYearBasePrice,
 } from './base-price';
 
 // ============================================================================

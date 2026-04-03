@@ -234,13 +234,6 @@ async function sendPeriodReport(
     query.periodType
   );
 
-  if (query.format === 'markdown') {
-    const markdown = periodReportService.formatReportAsMarkdown(report);
-    res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
-    res.send(markdown);
-    return;
-  }
-
   res.json(report);
 }
 
@@ -973,89 +966,47 @@ router.get(
   })
 );
 
-// GET /api/portfolio/:id/export/markdown - 导出 Markdown 报表
+// GET /api/portfolio/:id/export - 导出组合结构化数据（JSON）
 router.get(
-  '/:id/export/markdown',
+  '/:id/export',
   asyncHandler(async (req: Request, res: Response) => {
     const portfolioId = req.params.id;
 
-    try {
-      console.log(
-        `[GET /:id/export/markdown] Generating markdown report for portfolio ${portfolioId}`
-      );
+    const portfolio = await container.getPortfolioUseCase.execute({
+      portfolioId,
+    });
 
-      // 获取投资组合详情
-      const portfolio = await container.getPortfolioUseCase.execute({
-        portfolioId,
-      });
-
-      if (!portfolio) {
-        return res.status(404).json({ message: 'Portfolio not found' });
-      }
-
-      const stats = await portfolioStatsService.getFullStats(portfolio, {
-        includePeriods: ['total', 'weekly', 'monthly', 'yearly'],
-        includeQuotes: true,
-      });
-
-      const netDeposit = stats.netDepositedCash;
-
-      // 构建 PortfolioDetail（字段含义与 /portfolio/:id、/portfolio/:id/stats 对齐）
-      const portfolioDetail: PortfolioDetail = {
-        ...portfolio,
-        positions: stats.positions,
-        totalMarketValue: stats.totalMarketValue,
-        totalPnl: stats.totalPnl,
-        totalAssets: stats.totalAssets,
-        netAssets: stats.netAssets,
-        netDepositedCash: netDeposit,
-        totalCommission: stats.totalCommission,
-        leverageCost: stats.leverageCost,
-        dailyPnl: stats.dailyPnl,
-        totalPnlPercent:
-          netDeposit > 0 ? (stats.totalPnl / netDeposit) * 100 : 0,
-        realizedPnl: stats.realizedPnl,
-        unrealizedPnl: stats.unrealizedPnl,
-        weeklyStats: stats.weeklyStats,
-        monthlyStats: stats.monthlyStats,
-        yearlyStats: stats.yearlyStats,
-      };
-
-      // 导入 reportService
-      const { reportService } = await import('../services/reportService');
-
-      // 生成 Markdown
-      const markdown = await reportService.generateMarkdownReport(
-        portfolioDetail,
-        true
-      );
-
-      // 设置响应头
-      const timestamp = new Date()
-        .toISOString()
-        .replace(/[-:T.]/g, '')
-        .slice(0, 14);
-      const filename = `投资组合报表_${portfolio.name}_${timestamp}.md`;
-
-      res.setHeader('Content-Type', 'text/markdown; charset=utf-8');
-      res.setHeader(
-        'Content-Disposition',
-        `attachment; filename*=UTF-8''${encodeURIComponent(filename)}`
-      );
-
-      res.send(markdown);
-      console.log(
-        `[GET /:id/export/markdown] Successfully generated markdown report for ${portfolioId}`
-      );
-    } catch (error) {
-      console.error(
-        `Error generating markdown report for portfolio ${portfolioId}:`,
-        error
-      );
-      return res
-        .status(500)
-        .json({ message: 'Failed to generate markdown report' });
+    if (!portfolio) {
+      return res.status(404).json({ message: 'Portfolio not found' });
     }
+
+    const stats = await portfolioStatsService.getFullStats(portfolio, {
+      includePeriods: ['total', 'weekly', 'monthly', 'yearly'],
+      includeQuotes: true,
+    });
+
+    const netDeposit = stats.netDepositedCash;
+
+    const portfolioDetail: PortfolioDetail = {
+      ...portfolio,
+      positions: stats.positions,
+      totalMarketValue: stats.totalMarketValue,
+      totalPnl: stats.totalPnl,
+      totalAssets: stats.totalAssets,
+      netAssets: stats.netAssets,
+      netDepositedCash: netDeposit,
+      totalCommission: stats.totalCommission,
+      leverageCost: stats.leverageCost,
+      dailyPnl: stats.dailyPnl,
+      totalPnlPercent: netDeposit > 0 ? (stats.totalPnl / netDeposit) * 100 : 0,
+      realizedPnl: stats.realizedPnl,
+      unrealizedPnl: stats.unrealizedPnl,
+      weeklyStats: stats.weeklyStats,
+      monthlyStats: stats.monthlyStats,
+      yearlyStats: stats.yearlyStats,
+    };
+
+    res.json(portfolioDetail);
   })
 );
 

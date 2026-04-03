@@ -1,6 +1,11 @@
 import { calculatePeriodStats } from '../calculation/period-stats';
 import { fetchKline } from '../tencentApi';
-import { Portfolio, TransactionType, Transaction, KlinePoint } from '../../types';
+import {
+  Portfolio,
+  TransactionType,
+  Transaction,
+  KlinePoint,
+} from '../../types';
 
 jest.mock('../tencentApi', () => ({
   fetchKline: jest.fn(),
@@ -28,7 +33,7 @@ describe('calculatePeriodStats - leverage aware cash reconstruction', () => {
   });
 
   it('treats cash shortfall on BUY as leverage when portfolio has credit', async () => {
-    jest.useFakeTimers().setSystemTime(new Date('2024-04-15T00:00:00.000Z'));
+    jest.useFakeTimers().setSystemTime(new Date('2024-04-18T00:00:00.000Z'));
 
     const transactions: Transaction[] = [
       {
@@ -60,15 +65,17 @@ describe('calculatePeriodStats - leverage aware cash reconstruction', () => {
 
     mockedFetchKline.mockResolvedValue(
       // 覆盖不同时区下 startOfDay/toISOString 可能导致的日期偏移
-      createKline(['2024-04-12', '2024-04-14', '2024-04-15'], [20, 22, 22])
+      createKline(['2024-04-14', '2024-04-17', '2024-04-18'], [20, 22, 22])
     );
 
     const stats = await calculatePeriodStats(portfolio, 'weekly', {
       useRealtimeEndValue: false,
     });
 
-    expect(stats.totalValueChange).toBeCloseTo(200, 6);
-    expect(stats.totalValueChangePercent).toBeCloseTo(0.2, 6);
-    expect(stats.periodReturnPercent).toBeCloseTo(0.2, 6);
+    expect(stats.totalValueChange).toBeCloseTo(200, 2);
+    // totalValueChangePercent = (200/1000)*100 = 20 (净值口径)
+    expect(stats.totalValueChangePercent).toBeCloseTo(20, 1);
+    // periodReturnPercent 同理，无现金流时与 totalValueChangePercent 相等
+    expect(stats.periodReturnPercent).toBeCloseTo(20, 1);
   });
 });

@@ -91,11 +91,11 @@ export function calculateRealtimePnl(
       }
       updatedPosition.dailyChangePercent = quote.changePercent ?? undefined;
       updatedPosition.weeklyChangePercent =
-        quote.weekChangePercent ?? undefined;
+        quote.weeklyChangePercent ?? undefined;
       updatedPosition.monthlyChangePercent =
-        quote.monthChangePercent ?? undefined;
+        quote.monthlyChangePercent ?? undefined;
       updatedPosition.yearlyChangePercent =
-        quote.yearChangePercent ?? undefined;
+        quote.yearlyChangePercent ?? undefined;
     } else {
       // Handle cases where quote is missing or doesn't have price
       console.warn(

@@ -1,6 +1,6 @@
 import { Quote, KlinePoint } from '../entities/quote';
 
-export type KlinePeriod = 'daily' | 'weekly' | 'monthly';
+export type KlinePeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 export interface KlineRequestOptions {
   period?: KlinePeriod;

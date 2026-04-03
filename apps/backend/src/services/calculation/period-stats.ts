@@ -1,9 +1,4 @@
-import {
-  Portfolio,
-  TransactionType,
-  KlinePoint,
-  Quote,
-} from '../../types';
+import { Portfolio, TransactionType, KlinePoint, Quote } from '../../types';
 import { fetchKline } from '../tencentApi';
 import {
   getUnixTime,
@@ -26,7 +21,6 @@ import {
   getLastWeekSaturdayDate,
   getFirstDayOfCurrentMonth,
   getFirstDayOfCurrentYear,
-  findClosestKlinePoint,
 } from './utils';
 import {
   PeriodStatsOptions,
@@ -98,7 +92,9 @@ export async function calculatePeriodStats(
           // 本周一作为周度起始日（周度收益 = 本周至今的表现）
           // 周一时起始日是今天，期初会使用 prevClosePrice（昨收价）
           startDate = startOfDay(getLastWeekSaturdayDate(endDate));
-          console.log(`[calculatePeriodStats] weekly: 起始日=${formatDate(startDate)}（本周一）`);
+          console.log(
+            `[calculatePeriodStats] weekly: 起始日=${formatDate(startDate)}（本周一）`
+          );
           break;
         case 'monthly':
           // 本月1日作为月度起始日
@@ -126,10 +122,10 @@ export async function calculatePeriodStats(
 
     // 🔧 改进：记录每笔现金流的时间和金额，用于精确的 Modified Dietz 计算
     interface CashFlowWithTime {
-      amount: number;      // 现金流金额（入金为正，出金为负）
-      timestamp: number;   // 发生时间戳
-      date: string;        // 日期（用于日志）
-      type: string;        // 类型（用于日志）
+      amount: number; // 现金流金额（入金为正，出金为负）
+      timestamp: number; // 发生时间戳
+      date: string; // 日期（用于日志）
+      type: string; // 类型（用于日志）
     }
 
     const cashFlowsWithTime: CashFlowWithTime[] = [];
@@ -168,7 +164,10 @@ export async function calculatePeriodStats(
      *   - true: 用于期末，包含当天交易（截止到当天收盘）
      *   - false: 用于期初，不包含当天交易（截止到前一天收盘）
      */
-    function reconstructPortfolioState(atDate: Date, includeTargetDay: boolean = true) {
+    function reconstructPortfolioState(
+      atDate: Date,
+      includeTargetDay: boolean = true
+    ) {
       const tracker = new LotTracker();
       let cash = portfolio.initialCash || 0;
       let usedLeverage = 0;
@@ -177,8 +176,8 @@ export async function calculatePeriodStats(
       // 🔧 修复：期初不应包含起始日当天的交易
       // 例如：月度期初（12-01）应该是 11-30 收盘时的状态
       const targetTimestamp = includeTargetDay
-        ? getUnixTime(endOfDay(atDate))           // 包含当天：截止到当天 23:59:59
-        : getUnixTime(startOfDay(atDate)) - 1;    // 不包含当天：截止到当天 00:00:00 前一秒
+        ? getUnixTime(endOfDay(atDate)) // 包含当天：截止到当天 23:59:59
+        : getUnixTime(startOfDay(atDate)) - 1; // 不包含当天：截止到当天 00:00:00 前一秒
 
       for (const tx of sortedTransactions) {
         const txTimestamp = getUnixTime(new Date(tx.date));
@@ -364,14 +363,22 @@ export async function calculatePeriodStats(
         const exchangeRate = getExchangeRateForAssetToCNY(code);
 
         // 🔧 期末：使用实时价格 currentPrice
-        if (allowRealtimeEnd && quote && typeof quote.currentPrice === 'number') {
+        if (
+          allowRealtimeEnd &&
+          quote &&
+          typeof quote.currentPrice === 'number'
+        ) {
           value += posState.quantity * quote.currentPrice * exchangeRate;
           continue;
         }
 
         // 🔧 期初（仅当期初是今天）：使用昨收价 prevClosePrice
         // 适用场景：周一计算周度，期初是今天，用昨收价代表开盘前状态
-        if (allowPreCloseStart && quote && typeof quote.prevClosePrice === 'number') {
+        if (
+          allowPreCloseStart &&
+          quote &&
+          typeof quote.prevClosePrice === 'number'
+        ) {
           value += posState.quantity * quote.prevClosePrice * exchangeRate;
           console.log(
             `[calcValue] ${code} 期初使用 prevClosePrice: ${quote.prevClosePrice}（昨收价，因为期初是今天）`
@@ -442,8 +449,8 @@ export async function calculatePeriodStats(
 
     // 重建期初和期末状态
     // 🔧 修复：期初不包含起始日当天交易，期末包含当天交易
-    const startState = reconstructPortfolioState(startDate, false);  // 期初：不含当天
-    const endState = reconstructPortfolioState(endDate, true);       // 期末：含当天
+    const startState = reconstructPortfolioState(startDate, false); // 期初：不含当天
+    const endState = reconstructPortfolioState(endDate, true); // 期末：含当天
 
     // 计算期初和期末估值
     // 🔧 修复：期初价格日期的处理
@@ -455,9 +462,17 @@ export async function calculatePeriodStats(
     const isStartToday = startDateStr === todayStr;
 
     // 期初价格日期：今天则用今天（触发 prevClosePrice），否则用前一天
-    const actualStartPriceDate = isStartToday ? todayStr : formatDate(subDays(startDate, 1));
-    console.log(`[calculatePeriodStats] 周期=${period}, startDate=${startDateStr}, 期初价格日期=${actualStartPriceDate}, isStartToday=${isStartToday}`);
-    const startResult = await calcValue(startState, actualStartPriceDate, 'start');
+    const actualStartPriceDate = isStartToday
+      ? todayStr
+      : formatDate(subDays(startDate, 1));
+    console.log(
+      `[calculatePeriodStats] 周期=${period}, startDate=${startDateStr}, 期初价格日期=${actualStartPriceDate}, isStartToday=${isStartToday}`
+    );
+    const startResult = await calcValue(
+      startState,
+      actualStartPriceDate,
+      'start'
+    );
     const endResult = await calcValue(endState, endKlineDate, 'end');
     // 口径：按"净资产/净值"估值，避免融资买入导致的总资产虚增被误判为收益
     // 净值 = 总资产(现金+市值) - 已用杠杆
@@ -479,7 +494,7 @@ export async function calculatePeriodStats(
     // 5.1 净值变化（简单收益率）
     const totalValueChange = endValue - startValue;
     const totalValueChangePercent =
-      startValue > 0 ? totalValueChange / startValue : null;
+      startValue > 0 ? (totalValueChange / startValue) * 100 : null;
 
     // 5.2 投资收益率（Modified Dietz - 精确时间加权版本）
     // 计算加权现金流：每笔现金流 × 该现金流在周期内的权重
@@ -504,7 +519,9 @@ export async function calculatePeriodStats(
         const numerator = amountCents * BigInt(safeRemainingSeconds);
         const halfDenominator = periodDurationSecondsBig / 2n;
         const adjustedNumerator =
-          numerator >= 0n ? numerator + halfDenominator : numerator - halfDenominator;
+          numerator >= 0n
+            ? numerator + halfDenominator
+            : numerator - halfDenominator;
         weightedAmountCents = adjustedNumerator / periodDurationSecondsBig;
         weightedCashFlowsCents += weightedAmountCents;
       }
@@ -532,10 +549,10 @@ export async function calculatePeriodStats(
     const denominator = startValue + weightedCashFlows;
     if (Math.abs(denominator) > 1e-9) {
       periodReturnPercent =
-        (endValue - startValue - totalCashFlows) / denominator;
+        ((endValue - startValue - totalCashFlows) / denominator) * 100;
       console.log(
         `[Modified Dietz] 期初=${startValue.toFixed(2)}, 期末=${endValue.toFixed(2)}, ` +
-          `分母=${denominator.toFixed(2)}, 收益率=${(periodReturnPercent * 100).toFixed(4)}%`
+          `分母=${denominator.toFixed(2)}, 收益率=${periodReturnPercent.toFixed(4)}%`
       );
     }
 
@@ -562,71 +579,4 @@ export async function calculatePeriodStats(
     );
     return { periodReturnPercent: null, periodPnl: null };
   }
-}
-
-/**
- * 计算指数年初至今涨幅（YTD），基于日K线推算基准日。
- * @param indexCode 指数代码
- * @param klineData 日K线数据，需包含年初基准日
- * @param currentQuote 当前实时报价
- * @returns 包含 yearChangePercent 字段
- */
-export function calculateIndexPeriodChanges(
-  indexCode: string,
-  klineData: KlinePoint[],
-  currentQuote: Quote | null
-): { yearChangePercent?: number; yearChangeBaseDate?: string } {
-  const results: { yearChangePercent?: number; yearChangeBaseDate?: string } =
-    {};
-
-  // 输入验证
-  if (
-    !klineData ||
-    klineData.length === 0 ||
-    !currentQuote ||
-    currentQuote.currentPrice == null
-  ) {
-    console.warn(
-      `[calculateIndexPeriodChanges] Insufficient data for ${indexCode}. Kline length: ${klineData?.length}, Current Price: ${currentQuote?.currentPrice}`
-    );
-    return results;
-  }
-
-  const effectiveCurrentPrice = currentQuote.currentPrice;
-  if (effectiveCurrentPrice == null) {
-    console.warn(
-      `[calculateIndexPeriodChanges] Current price from quote is null for ${indexCode}.`
-    );
-    return results;
-  }
-
-  const today = new Date();
-
-  // --- Yearly Change (Year-to-Date) ---
-  const thisYear = today.getFullYear();
-  const firstDayOfThisYear = new Date(thisYear, 0, 1)
-    .toISOString()
-    .slice(0, 10); // YYYY-01-01
-  const yearChangeBasePoint = findClosestKlinePoint(
-    klineData,
-    firstDayOfThisYear
-  );
-
-  if (
-    yearChangeBasePoint &&
-    yearChangeBasePoint.close != null &&
-    yearChangeBasePoint.close !== 0
-  ) {
-    // 返回小数形式（0-1范围），前端会乘以100显示
-    const change =
-      (effectiveCurrentPrice - yearChangeBasePoint.close) /
-      yearChangeBasePoint.close;
-    results.yearChangePercent = parseFloat(change.toFixed(4));
-    results.yearChangeBaseDate = yearChangeBasePoint.date;
-  } else {
-    results.yearChangePercent = undefined;
-    results.yearChangeBaseDate = undefined;
-  }
-
-  return results;
 }

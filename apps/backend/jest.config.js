@@ -17,4 +17,5 @@ module.exports = {
   moduleNameMapper: pathsToModuleNameMapper(compilerOptions.paths || {}, {
     prefix: '<rootDir>/../../',
   }),
+  forceExit: true,
 };

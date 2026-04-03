@@ -1,5 +1,5 @@
-import { subDays, parseISO } from 'date-fns';
-import { Transaction, KlinePoint } from '../../types';
+import { subDays } from 'date-fns';
+import { Transaction } from '../../types';
 import crypto from 'crypto';
 
 /**
@@ -42,7 +42,9 @@ export function getLastWeekSaturdayDate(today: Date): Date {
   // 周六(6)→5天前
   // 周日(0)→6天前
   const daysToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
-  console.log(`[getLastWeekSaturdayDate] today=${today.toISOString()}, dayOfWeek=${dayOfWeek}, daysToMonday=${daysToMonday}`);
+  console.log(
+    `[getLastWeekSaturdayDate] today=${today.toISOString()}, dayOfWeek=${dayOfWeek}, daysToMonday=${daysToMonday}`
+  );
   return subDays(today, daysToMonday);
 }
 
@@ -81,46 +83,6 @@ export function getLastDayOfPreviousYear(today: Date): Date {
 }
 
 /**
- * Finds the closest K-line point on or before a target date.
- * @param klineData Array of K-line points.
- * @param targetDate The target date string (YYYY-MM-DD).
- * @returns The closest KlinePoint or null if none found.
- */
-export function findClosestKlinePoint(
-  klineData: KlinePoint[],
-  targetDate: string
-): KlinePoint | null {
-  if (!klineData || klineData.length === 0) return null;
-  const targetDateTime = parseISO(targetDate).getTime();
-  let closestPoint: KlinePoint | null = null;
-  let closestDiff = Number.MAX_SAFE_INTEGER;
-  for (let i = 0; i < klineData.length; i++) {
-    const point = klineData[i];
-    const pointDateStr = point.date;
-    const pointDate = parseISO(pointDateStr);
-    const pointDateTime = pointDate.getTime();
-    // 调试日志：打印每个K线点与目标日期的对比
-    console.log(
-      `[DEBUG] K线点: ${pointDateStr}, 目标: ${targetDate}, 解析: ${pointDateTime}, 目标: ${targetDateTime}, 差值: ${targetDateTime - pointDateTime}`
-    );
-    if (pointDateTime <= targetDateTime) {
-      const diff = targetDateTime - pointDateTime;
-      if (diff < closestDiff) {
-        closestDiff = diff;
-        closestPoint = point;
-      }
-    }
-  }
-  // 额外日志：最终选中的K线点
-  if (closestPoint) {
-    console.log(`[DEBUG] 最终选中的K线点: ${closestPoint.date}`);
-  } else {
-    console.log('[DEBUG] 未找到合适的K线点');
-  }
-  return closestPoint;
-}
-
-/**
  * 生成交易记录的内容哈希值（用于缓存键）
  *
  * @description
@@ -143,7 +105,7 @@ export function hashTransactions(transactions: Transaction[]): string {
 
   // 收集所有交易ID并排序（确保稳定性）
   const txIds = transactions
-    .map(tx => tx.id)
+    .map((tx) => tx.id)
     .filter(Boolean)
     .sort();
 

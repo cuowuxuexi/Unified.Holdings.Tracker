@@ -226,9 +226,9 @@ async function initializeDatabase() {
           "prevClosePrice" REAL,
           "marketCap" REAL,
           "peRatio" REAL,
-          "weekChangePercent" REAL,
-          "monthChangePercent" REAL,
-          "yearChangePercent" REAL,
+          "weeklyChangePercent" REAL,
+          "monthlyChangePercent" REAL,
+          "yearlyChangePercent" REAL,
           "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY ("assetCode") REFERENCES "Asset"("code") ON DELETE CASCADE
         )
@@ -322,6 +322,22 @@ async function initializeDatabase() {
       console.log('✓ Column added: Portfolio.snapshotEnabled');
     } catch {
       // 列已存在，忽略
+    }
+
+    // 字段迁移：QuoteSnapshot 列名统一为 weeklyChangePercent 风格
+    for (const [oldCol, newCol] of [
+      ['weekChangePercent', 'weeklyChangePercent'],
+      ['monthChangePercent', 'monthlyChangePercent'],
+      ['yearChangePercent', 'yearlyChangePercent'],
+    ]) {
+      try {
+        await prisma.$executeRawUnsafe(
+          `ALTER TABLE "QuoteSnapshot" RENAME COLUMN "${oldCol}" TO "${newCol}"`
+        );
+        console.log(`✓ Column renamed: QuoteSnapshot.${oldCol} → ${newCol}`);
+      } catch {
+        // 列已是新名或不存在，忽略
+      }
     }
 
     console.log('✅ Database schema ensured successfully');

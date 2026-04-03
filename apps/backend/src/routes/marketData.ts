@@ -38,6 +38,7 @@ router.get(
       | 'daily'
       | 'weekly'
       | 'monthly'
+      | 'yearly'
       | undefined;
     const startDate = req.query.startDate as string | undefined;
     const endDate = req.query.endDate as string | undefined;

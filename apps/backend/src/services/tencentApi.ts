@@ -1,14 +1,13 @@
 import axios from 'axios';
 import iconv from 'iconv-lite';
 import pLimit from 'p-limit';
-// Import calculation service and types
-import {
-  getYearBasePrice,
-  getMonthBasePrice,
-  getWeekBasePrice,
-} from './calculation';
 import { KlinePoint, Quote } from '../types'; // Import KlinePoint from central types
 import { cacheService } from '@uht/infra/cache/cache-service'; // K线缓存服务
+import {
+  getWeekBasePrice,
+  getMonthBasePrice,
+  getYearBasePrice,
+} from './calculation/base-price';
 
 // Removed local Quote interface definition
 
@@ -63,11 +62,11 @@ function parseQuoteLine(line: string): Quote | null {
         quote.highPrice = parseFloat(dataParts[33]);
         quote.lowPrice = parseFloat(dataParts[34]);
         quote.changeAmount = parseFloat(dataParts[31]);
-        // 腾讯API返回的是百分比形式（如2.5表示2.5%），需转换为小数形式
-        quote.changePercent = parseFloat(dataParts[32]) / 100;
+        quote.changePercent = parseFloat(dataParts[32]);
         quote.turnover = parseFloat(dataParts[37]); // 单位：万元
         quote.peRatio = parseFloat(dataParts[39]) || undefined; // 市盈率(动)
         quote.marketCap = parseFloat(dataParts[45]) || undefined; // 总市值 (亿)
+
         // 时间戳在 dataParts[30] 格式如 20240101150000，可以解析
         const timeStr = dataParts[30];
         if (timeStr && timeStr.length === 14) {
@@ -108,9 +107,10 @@ function parseQuoteLine(line: string): Quote | null {
         quote.volume = parseFloat(dataParts[6]); // Corrected index: 6 (成交量 - 股)
         quote.turnover = parseFloat(dataParts[11]); // 确认索引: 11 (港元)
         quote.changeAmount = parseFloat(dataParts[31]); // 确认索引: 31
-        // 腾讯API返回的是百分比形式（如2.5表示2.5%），需转换为小数形式
-        quote.changePercent = parseFloat(dataParts[32]) / 100; // 确认索引: 32
-        quote.peRatio = parseFloat(dataParts[38]) || undefined; // 确认索引: 38
+        quote.changePercent = parseFloat(dataParts[32]); // 确认索引: 32
+
+        // 修正: HK的PE根据实测应为 39， 38为0
+        quote.peRatio = parseFloat(dataParts[39]) || undefined;
         quote.marketCap = parseFloat(dataParts[44]) || undefined; // 确认索引: 44 (亿港元?)
 
         // 时间戳在 dataParts[30] 格式: "YYYY/MM/DD HH:MM:SS"
@@ -157,8 +157,7 @@ function parseQuoteLine(line: string): Quote | null {
         quote.highPrice = parseFloat(dataParts[33]); // "212.94"
         quote.lowPrice = parseFloat(dataParts[34]); // "201.16"
         quote.changeAmount = parseFloat(dataParts[31]); // "4.37"
-        // 腾讯API返回的是百分比形式（如2.21表示2.21%），需转换为小数形式
-        quote.changePercent = parseFloat(dataParts[32]) / 100; // "2.21" -> 0.0221
+        quote.changePercent = parseFloat(dataParts[32]);
         quote.turnover = parseFloat(dataParts[37]); // "20819141533" (单位: 美元?) - 需要确认
         quote.peRatio = parseFloat(dataParts[39]) || undefined; // "32.15"
         quote.marketCap = parseFloat(dataParts[45]) || undefined; // "30405.56540" (单位: 亿?) - 需要确认
@@ -291,8 +290,7 @@ export async function fetchQuotes(codes: string[]): Promise<Quote[]> {
       .map(parseQuoteLine)
       .filter((q) => q !== null);
 
-    // Process indices to add period changes using NEW logic (并行优化)
-    // 性能优化：将串行改为并行批量处理
+    // 通过 K线基准价格并行计算周/月/年涨跌幅（与云端逻辑一致）
     const quotesWithPrices = parsedQuotes.filter(
       (q) => q && q.currentPrice != null
     );
@@ -302,7 +300,6 @@ export async function fetchQuotes(codes: string[]): Promise<Quote[]> {
         `[fetchQuotes] 并行计算 ${quotesWithPrices.length} 个资产的周期变动...`
       );
 
-      // 并行获取所有资产的基准价格
       const basePricePromises = quotesWithPrices.map((quote) =>
         basePriceLimiter(async () => {
           const [weekResult, monthResult, yearResult] = await Promise.all([
@@ -316,98 +313,74 @@ export async function fetchQuotes(codes: string[]): Promise<Quote[]> {
 
       const basePriceResults = await Promise.all(basePricePromises);
 
-      // 辅助函数：验证基准价格合理性
       const validateBasePrice = (
         quote: Quote,
         basePrice: number | null,
         periodName: string
       ): boolean => {
         if (!basePrice || basePrice <= 0) {
-          console.warn(
-            `[fetchQuotes] ${quote.code} ${periodName}基准价格异常: ${basePrice}（<= 0），跳过计算`
-          );
           return false;
         }
-
-        // 验证基准价格不能小于0.1元（可能是数据错误）
         if (basePrice < 0.1) {
           console.warn(
-            `[fetchQuotes] ${quote.code} ${periodName}基准价格异常小: ${basePrice}（< 0.1），可能是数据错误，跳过计算`
+            `[fetchQuotes] ${quote.code} ${periodName}基准价格异常小: ${basePrice}，跳过计算`
           );
           return false;
         }
-
-        // 验证基准价格不能与当前价格相差过大（不超过50倍）
         const currentPrice = quote.currentPrice!;
         const ratio =
           Math.max(currentPrice, basePrice) / Math.min(currentPrice, basePrice);
-
         if (ratio > 50) {
           console.warn(
-            `[fetchQuotes] ${quote.code} ${periodName}基准价格与当前价格相差过大: 基准=${basePrice}, 当前=${currentPrice}, 比率=${ratio.toFixed(2)}，可能是数据错误，跳过计算`
+            `[fetchQuotes] ${quote.code} ${periodName}基准价格与当前价格相差过大: 基准=${basePrice}, 当前=${currentPrice}，跳过计算`
           );
           return false;
         }
-
         return true;
       };
 
-      // 计算并设置周期变动
       for (const {
         quote,
         weekResult,
         monthResult,
         yearResult,
       } of basePriceResults) {
-        // 周线涨跌幅
         if (
+          weekResult &&
           weekResult.price &&
           validateBasePrice(quote, weekResult.price, '周')
         ) {
           const weekChange =
             ((quote.currentPrice! - weekResult.price) / weekResult.price) * 100;
-          quote.weekChangePercent = parseFloat(weekChange.toFixed(2));
-          console.log(
-            `[fetchQuotes] ${quote.code} 周线计算: 当前=${quote.currentPrice}, 基准=${weekResult.price}(${weekResult.date}), 涨跌=${quote.weekChangePercent}%`
-          );
+          quote.weeklyChangePercent = parseFloat(weekChange.toFixed(2));
         } else {
-          quote.weekChangePercent = undefined;
+          quote.weeklyChangePercent = undefined;
         }
 
-        // 月线涨跌幅
         if (
+          monthResult &&
           monthResult.price &&
           validateBasePrice(quote, monthResult.price, '月')
         ) {
           const monthChange =
             ((quote.currentPrice! - monthResult.price) / monthResult.price) *
             100;
-          quote.monthChangePercent = parseFloat(monthChange.toFixed(2));
-          console.log(
-            `[fetchQuotes] ${quote.code} 月线计算: 当前=${quote.currentPrice}, 基准=${monthResult.price}(${monthResult.date}), 涨跌=${quote.monthChangePercent}%`
-          );
+          quote.monthlyChangePercent = parseFloat(monthChange.toFixed(2));
         } else {
-          quote.monthChangePercent = undefined;
+          quote.monthlyChangePercent = undefined;
         }
 
-        // 年线涨跌幅
         if (
+          yearResult &&
           yearResult.price &&
           validateBasePrice(quote, yearResult.price, '年')
         ) {
           const yearChange =
             ((quote.currentPrice! - yearResult.price) / yearResult.price) * 100;
-          quote.yearChangePercent = parseFloat(yearChange.toFixed(2));
-          console.log(
-            `[fetchQuotes] ${quote.code} 年线计算: 当前=${quote.currentPrice}, 基准=${yearResult.price}(${yearResult.date}), 涨跌=${quote.yearChangePercent}%`
-          );
+          quote.yearlyChangePercent = parseFloat(yearChange.toFixed(2));
         } else {
-          quote.yearChangePercent = undefined;
+          quote.yearlyChangePercent = undefined;
         }
-
-        console.log(
-          `[fetchQuotes] Period Changes for ${quote.code}: W=${quote.weekChangePercent}%, M=${quote.monthChangePercent}%, Y=${quote.yearChangePercent}%`
-        );
       }
     }
 
@@ -480,7 +453,7 @@ const TENCENT_KLINE_BASE_URL = 'https://web.ifzq.gtimg.cn/appstock/app';
  */
 export async function fetchKline(
   code: string,
-  period: 'daily' | 'weekly' | 'monthly' = 'daily',
+  period: 'daily' | 'weekly' | 'monthly' | 'yearly' = 'daily',
   startDate?: string, // YYYY-MM-DD
   endDate?: string, // YYYY-MM-DD
   fq: 'qfq' | 'hfq' | 'none' = 'qfq', // 前复权, 后复权, 不复权
@@ -558,6 +531,9 @@ export async function fetchKline(
       break;
     case 'monthly':
       apiPeriod = 'month';
+      break;
+    case 'yearly':
+      apiPeriod = 'year';
       break;
     case 'daily':
     default:
@@ -696,14 +672,19 @@ export async function fetchKline(
       // 根据复权类型和周期构建可能的字段名
       if (effectiveFq === 'qfq') {
         // 使用 effectiveFq
-        possibleFieldKeys.push(`qfq${apiPeriod}`); // 首选前复权字段: qfqday, qfqweek, qfqmonth
+        // 特殊处理年K：A股 /fqkline/get 返回 'year' 而非 'qfqyear'，港股/美股返回 'qfqyear'
+        if (apiPeriod === 'year' && (market === 'sh' || market === 'sz')) {
+          possibleFieldKeys.push('year'); // A股年K前复权键名为 year
+        } else {
+          possibleFieldKeys.push(`qfq${apiPeriod}`); // 首选前复权字段: qfqday, qfqweek, qfqmonth, qfqyear
+        }
       } else if (effectiveFq === 'hfq') {
         // 使用 effectiveFq
         possibleFieldKeys.push(`hfq_${apiPeriod}`); // 首选后复权字段: hfq_day, hfq_week, hfq_month
       }
 
       // 始终将非复权字段作为备选
-      possibleFieldKeys.push(apiPeriod); // 备选非复权字段: day, week, month
+      possibleFieldKeys.push(apiPeriod); // 备选非复权字段: day, week, month, year
 
       // 依次尝试所有可能的字段路径
       console.log(
@@ -879,3 +860,5 @@ export async function fetchKline(
   );
   return [];
 }
+
+export const fetchMarketQuotes = fetchQuotes;
