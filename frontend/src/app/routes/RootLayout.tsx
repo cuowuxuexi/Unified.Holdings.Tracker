@@ -135,65 +135,11 @@ export function RootLayout() {
     }
   };
 
-  const handleExportMarkdown = async () => {
-    if (!selectedPortfolioId) {
-      messageApi.warning('请先选择一个投资组合');
-      return;
-    }
-
-    setIsExporting(true);
-    messageApi.loading({
-      content: '正在生成 Markdown 报表...',
-      key: 'exporting',
-      duration: 0,
-    });
-
-    try {
-      const blob = await apiClient.exportPortfolioMarkdown(selectedPortfolioId);
-      const url = window.URL.createObjectURL(blob);
-      const link = document.createElement('a');
-
-      // 使用默认文件名
-      const filename = `投资组合报表_${selectedPortfolioId}_${new Date().toISOString().slice(0, 10)}.md`;
-
-      link.download = filename;
-      link.href = url;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      window.URL.revokeObjectURL(url);
-
-      messageApi.success({
-        content: 'Markdown 报表已成功导出！',
-        key: 'exporting',
-        duration: 2,
-      });
-    } catch (error) {
-      console.error('导出 Markdown 报表时出错:', error);
-      messageApi.error({
-        content: '导出 Markdown 报表失败，请查看控制台了解详情。',
-        key: 'exporting',
-        duration: 3,
-      });
-    } finally {
-      setIsExporting(false);
-    }
-  };
-
   const exportMenuItems: MenuProps['items'] = [
     {
       key: 'png',
       label: '导出界面快照 (PNG)',
       onClick: handleExportPNG,
-    },
-    {
-      key: 'markdown',
-      label: '导出数据报表 (Markdown)',
-      onClick: handleExportMarkdown,
-      disabled: !selectedPortfolioId,
-    },
-    {
-      type: 'divider',
     },
     {
       key: 'create-archive',

@@ -759,9 +759,9 @@ const MarketIndices: React.FC = () => {
                         lineHeight: '1.2',
                       }}
                     >
-                      {renderPeriodChangeTag('W', index.weekChangePercent)}
-                      {renderPeriodChangeTag('M', index.monthChangePercent)}
-                      {renderPeriodChangeTag('Y', index.yearChangePercent)}
+                      {renderPeriodChangeTag('W', index.weeklyChangePercent)}
+                      {renderPeriodChangeTag('M', index.monthlyChangePercent)}
+                      {renderPeriodChangeTag('Y', index.yearlyChangePercent)}
                     </div>
                   </div>
                 </Card>

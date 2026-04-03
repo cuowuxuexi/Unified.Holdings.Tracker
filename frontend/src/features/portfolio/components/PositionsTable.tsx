@@ -1,5 +1,9 @@
 import { Table, Tag } from 'antd';
-import { formatCurrency, formatNumber, formatPercent } from '../../../shared/utils/formatters';
+import {
+  formatCurrency,
+  formatNumber,
+  formatPercent,
+} from '../../../shared/utils/formatters';
 
 interface Position {
   asset?: {
@@ -54,7 +58,10 @@ export function PositionsTable({ positions }: PositionsTableProps) {
       key: 'market',
       width: 80,
       render: (market: string) => {
-        const marketInfo = marketMap[market] || { text: market, color: 'default' };
+        const marketInfo = marketMap[market] || {
+          text: market,
+          color: 'default',
+        };
         return <Tag color={marketInfo.color}>{marketInfo.text}</Tag>;
       },
     },
@@ -139,7 +146,7 @@ export function PositionsTable({ positions }: PositionsTableProps) {
         const denominator =
           typeof record.totalBuyCost === 'number'
             ? record.totalBuyCost
-            : record.totalCost ?? 0;
+            : (record.totalCost ?? 0);
         const pnlPercent =
           typeof record.totalPnlPercent === 'number'
             ? record.totalPnlPercent
@@ -148,13 +155,23 @@ export function PositionsTable({ positions }: PositionsTableProps) {
               : 0;
         return (
           <div>
-            <div style={{ color: pnl >= 0 ? '#52c41a' : '#ff4d4f', fontWeight: 'bold' }}>
+            <div
+              style={{
+                color: pnl >= 0 ? '#52c41a' : '#ff4d4f',
+                fontWeight: 'bold',
+              }}
+            >
               {pnl >= 0 ? '+' : ''}
               {formatCurrency(pnl)}
             </div>
-            <div style={{ fontSize: '12px', color: pnl >= 0 ? '#52c41a' : '#ff4d4f' }}>
+            <div
+              style={{
+                fontSize: '12px',
+                color: pnl >= 0 ? '#52c41a' : '#ff4d4f',
+              }}
+            >
               {pnl >= 0 ? '+' : ''}
-              {formatPercent(pnlPercent)}
+              {formatPercent(pnlPercent * 100)}
             </div>
           </div>
         );
@@ -182,13 +199,18 @@ export function PositionsTable({ positions }: PositionsTableProps) {
       }
     });
 
-    const hasFullBuyCost = totalBuyCostCount === pageData.length && totalBuyCostCount > 0;
+    const hasFullBuyCost =
+      totalBuyCostCount === pageData.length && totalBuyCostCount > 0;
     const summaryDenominator = hasFullBuyCost ? totalBuyCost : totalCost;
-    const summaryPercent = summaryDenominator ? totalPnl / summaryDenominator : 0;
+    const summaryPercent = summaryDenominator
+      ? totalPnl / summaryDenominator
+      : 0;
 
     return (
       <Table.Summary fixed>
-        <Table.Summary.Row style={{ fontWeight: 'bold', backgroundColor: '#fafafa' }}>
+        <Table.Summary.Row
+          style={{ fontWeight: 'bold', backgroundColor: '#fafafa' }}
+        >
           <Table.Summary.Cell index={0} colSpan={5} align="right">
             合计
           </Table.Summary.Cell>
@@ -200,7 +222,9 @@ export function PositionsTable({ positions }: PositionsTableProps) {
             {formatCurrency(totalMarketValue)}
           </Table.Summary.Cell>
           <Table.Summary.Cell index={8} align="right">
-            <span style={{ color: totalDailyChange >= 0 ? '#52c41a' : '#ff4d4f' }}>
+            <span
+              style={{ color: totalDailyChange >= 0 ? '#52c41a' : '#ff4d4f' }}
+            >
               {totalDailyChange >= 0 ? '+' : ''}
               {formatCurrency(totalDailyChange)}
             </span>
@@ -210,9 +234,14 @@ export function PositionsTable({ positions }: PositionsTableProps) {
               {totalPnl >= 0 ? '+' : ''}
               {formatCurrency(totalPnl)}
             </div>
-            <div style={{ fontSize: '12px', color: totalPnl >= 0 ? '#52c41a' : '#ff4d4f' }}>
+            <div
+              style={{
+                fontSize: '12px',
+                color: totalPnl >= 0 ? '#52c41a' : '#ff4d4f',
+              }}
+            >
               {totalPnl >= 0 ? '+' : ''}
-              {formatPercent(summaryPercent)}
+              {formatPercent(summaryPercent * 100)}
             </div>
           </Table.Summary.Cell>
         </Table.Summary.Row>

@@ -16,9 +16,9 @@ export interface Quote {
   peRatio?: number;
   marketCap?: number;
   // Add period change fields returned by the backend /quotes endpoint
-  yearChangePercent?: number | null;
-  weekChangePercent?: number | null;
-  monthChangePercent?: number | null;
+  yearlyChangePercent?: number | null;
+  weeklyChangePercent?: number | null;
+  monthlyChangePercent?: number | null;
 }
 
 export interface KlinePoint {
@@ -204,9 +204,9 @@ export interface PositionWithStats extends Position {
   dailyChangeLocal?: number;
 
   /**
-   * 当日盈亏百分比（小数形式，0-1 范围）
-   * - 例如：0.05 表示 5%，-0.03 表示 -3%
-   * - 前端显示时需要乘以 100
+   * 当日盈亏百分比（百分比数值形式）
+   * - 例如：5.0 表示 5%，-3.0 表示 -3%
+   * - 前端显示时无需乘以 100
    */
   dailyChangePercent?: number;
 

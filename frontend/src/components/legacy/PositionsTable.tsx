@@ -39,9 +39,7 @@ const getLocalCostPrice = (record: PositionWithStats): number | undefined => {
   return undefined;
 };
 
-const getLocalMarketValue = (
-  record: PositionWithStats
-): number | undefined => {
+const getLocalMarketValue = (record: PositionWithStats): number | undefined => {
   const data = record as any;
   const marketValueLocal = toNumber(data.marketValueLocal);
   if (marketValueLocal !== undefined) {
@@ -53,9 +51,7 @@ const getLocalMarketValue = (
   return undefined;
 };
 
-const getLocalTotalCost = (
-  record: PositionWithStats
-): number | undefined => {
+const getLocalTotalCost = (record: PositionWithStats): number | undefined => {
   const data = record as any;
   const totalCostLocal = toNumber(data.totalCostLocal);
   if (totalCostLocal !== undefined) {
@@ -76,25 +72,18 @@ const getLocalTotalPnl = (record: PositionWithStats): number | undefined => {
   }
   const marketValueLocal = getLocalMarketValue(record);
   const totalCostLocal = getLocalTotalCost(record);
-  if (
-    marketValueLocal !== undefined &&
-    totalCostLocal !== undefined
-  ) {
+  if (marketValueLocal !== undefined && totalCostLocal !== undefined) {
     return marketValueLocal - totalCostLocal;
   }
   return undefined;
 };
 
-const getLocalDailyChange = (
-  record: PositionWithStats
-): number | undefined => {
+const getLocalDailyChange = (record: PositionWithStats): number | undefined => {
   const data = record as any;
   return toNumber(data.dailyChangeLocal);
 };
 
-const getDisplayCostPrice = (
-  record: PositionWithStats
-): number | undefined => {
+const getDisplayCostPrice = (record: PositionWithStats): number | undefined => {
   if (shouldUseLocalCurrency(record)) {
     const local = getLocalCostPrice(record);
     if (local !== undefined) {
@@ -141,9 +130,7 @@ const getDisplayDailyChange = (
   return record.dailyChange;
 };
 
-const getDisplayTotalPnl = (
-  record: PositionWithStats
-): number | undefined => {
+const getDisplayTotalPnl = (record: PositionWithStats): number | undefined => {
   if (shouldUseLocalCurrency(record)) {
     const local = getLocalTotalPnl(record);
     if (local !== undefined) {
@@ -179,15 +166,13 @@ const getCostBaseForPercent = (
   return undefined;
 };
 
-const getDisplayPnlPercent = (
-  record: PositionWithStats
-): number => {
+const getDisplayPnlPercent = (record: PositionWithStats): number => {
   const pnl = getDisplayTotalPnl(record);
   const base = getCostBaseForPercent(record);
   if (pnl !== undefined && base) {
-    return base !== 0 ? pnl / base : 0;
+    return base !== 0 ? (pnl / base) * 100 : 0;
   }
-  return record.totalPnlPercent ?? 0;
+  return (record.totalPnlPercent ?? 0) * 100;
 };
 
 interface PositionsTableProps {
@@ -202,9 +187,8 @@ const PositionsTable: React.FC<PositionsTableProps> = React.memo(
       (value: number | undefined | null, isPercent = false) => {
         if (value === undefined || value === null) return '-'; // Match TransactionList 'N/A' style
         const color = value > 0 ? 'red' : value < 0 ? 'green' : 'default'; // Use Antd Tag colors
-        // 修复：后端返回小数形式（0-1范围），需要乘以100转换为百分比
         const formattedValue = isPercent
-          ? `${(value * 100).toFixed(2)}%`
+          ? `${value.toFixed(2)}%`
           : value.toFixed(2);
         return (
           <Tag color={color} className="pnl-tag">
@@ -249,7 +233,7 @@ const PositionsTable: React.FC<PositionsTableProps> = React.memo(
           return `${period}涨幅: ${v.toFixed(2)}%`;
         };
 
-        // 优先读取 weekChangePercent/monthChangePercent/yearChangePercent 字段
+        // 优先读取 weeklyChangePercent/monthlyChangePercent/yearlyChangePercent 字段
         const week = format('W', record.weeklyChangePercent);
         const month = format('M', record.monthlyChangePercent);
         const year = format('Y', record.yearlyChangePercent);

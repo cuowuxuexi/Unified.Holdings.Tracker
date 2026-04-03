@@ -1,6 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { Card, Typography, Spin, Button, Modal, Input, Space, Select } from 'antd'; // 添加更多 UI 组件
-import { SettingOutlined, PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons'; // 添加图标
+import {
+  Card,
+  Typography,
+  Spin,
+  Button,
+  Modal,
+  Input,
+  Space,
+  Select,
+} from 'antd'; // 添加更多 UI 组件
+import {
+  SettingOutlined,
+  PlusOutlined,
+  DeleteOutlined,
+  EditOutlined,
+} from '@ant-design/icons'; // 添加图标
 import TransactionList from './legacy/TransactionList';
 import PositionsTable from './legacy/PositionsTable';
 import { fetchExchangeRates } from '../services/api'; // Correctly import fetchExchangeRates
@@ -8,8 +22,22 @@ import apiClient from '../services/api'; // 添加 apiClient 导入
 import { PositionWithStats, PortfolioStats } from '../store/types'; // Import PositionWithStats type
 import useAppStore from '../store'; // 导入 store
 import useMessageApi from '../hooks/useMessageApi';
-import { DndContext, closestCenter, KeyboardSensor, PointerSensor, useSensor, useSensors, DragEndEvent } from '@dnd-kit/core';
-import { arrayMove, SortableContext, sortableKeyboardCoordinates, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+  useSortable,
+} from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import type { MarketConfig } from '../store/types';
 
@@ -30,7 +58,9 @@ const inferPositionCurrency = (position: PositionWithStats): string => {
 const shouldDisplayLocalCurrency = (position: PositionWithStats) =>
   inferPositionCurrency(position) !== 'CNY';
 
-const getMarketValueInDisplayCurrency = (position: PositionWithStats): number => {
+const getMarketValueInDisplayCurrency = (
+  position: PositionWithStats
+): number => {
   if (shouldDisplayLocalCurrency(position)) {
     // For non-CNY assets, use currentPrice * quantity for local currency display
     if (typeof position.currentPrice === 'number') {
@@ -40,7 +70,6 @@ const getMarketValueInDisplayCurrency = (position: PositionWithStats): number =>
   // Otherwise use the CNY market value from backend
   return position.marketValue ?? 0;
 };
-
 
 interface MarketSummary {
   totalMarketValueLocal: number;
@@ -52,11 +81,29 @@ interface MarketSummary {
 }
 
 // 汇率展示组件
-const ExchangeRateBar: React.FC<{ rates: Record<string, number>; updatedAt: string; error?: boolean }> = ({ rates, updatedAt, error }) => (
-  <div style={{ marginBottom: 24, padding: '12px 16px', background: '#f5f5f5', borderRadius: '8px', fontSize: 14, color: error ? '#cf1322' : '#666' }}>
-    <Text strong>汇率：</Text>1 USD = {rates.USD.toFixed(4)} CNY，1 HKD = {rates.HKD.toFixed(4)} CNY
-    <span style={{ marginLeft: 16, fontSize: 12, color: '#999' }}>更新时间：{updatedAt}</span>
-    {error && <span style={{ marginLeft: 16, color: '#cf1322' }}>已使用上次数据</span>}
+const ExchangeRateBar: React.FC<{
+  rates: Record<string, number>;
+  updatedAt: string;
+  error?: boolean;
+}> = ({ rates, updatedAt, error }) => (
+  <div
+    style={{
+      marginBottom: 24,
+      padding: '12px 16px',
+      background: '#f5f5f5',
+      borderRadius: '8px',
+      fontSize: 14,
+      color: error ? '#cf1322' : '#666',
+    }}
+  >
+    <Text strong>汇率：</Text>1 USD = {rates.USD.toFixed(4)} CNY，1 HKD ={' '}
+    {rates.HKD.toFixed(4)} CNY
+    <span style={{ marginLeft: 16, fontSize: 12, color: '#999' }}>
+      更新时间：{updatedAt}
+    </span>
+    {error && (
+      <span style={{ marginLeft: 16, color: '#cf1322' }}>已使用上次数据</span>
+    )}
   </div>
 );
 
@@ -66,19 +113,19 @@ const MarketTitle: React.FC<{
   summary: MarketSummary;
 }> = ({ marketName, summary }) => {
   // 固定宽度样式，确保所有市场标题整齐对齐
-  const labelStyle: React.CSSProperties = { 
-    fontWeight: 600, 
-    fontSize: 16, 
-    width: '60px', 
-    textAlign: 'left' 
+  const labelStyle: React.CSSProperties = {
+    fontWeight: 600,
+    fontSize: 16,
+    width: '60px',
+    textAlign: 'left',
   };
-  
+
   const labelValueStyle: React.CSSProperties = {
     fontWeight: 500,
     fontSize: 15,
     display: 'inline-block',
     marginRight: 12,
-    minWidth: '200px'
+    minWidth: '200px',
   };
 
   const shouldShowApprox = summary.currencyCode !== 'CNY';
@@ -94,28 +141,48 @@ const MarketTitle: React.FC<{
       <span style={labelStyle}>{marketName}</span>
       <div style={{ display: 'flex', flex: 1 }}>
         <div style={{ display: 'flex', alignItems: 'center', marginLeft: 40 }}>
-          <Text strong style={{ width: 70, textAlign: 'right' }}>总市值：</Text>
+          <Text strong style={{ width: 70, textAlign: 'right' }}>
+            总市值：
+          </Text>
           <Text style={labelValueStyle}>
             {formatWithSymbol(summary.totalMarketValueLocal)}
             {shouldShowApprox && (
-              <Text type="secondary" style={{ fontSize: '12px', marginLeft: '4px' }}>
-                (约 ¥{summary.totalMarketValueCNY.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+              <Text
+                type="secondary"
+                style={{ fontSize: '12px', marginLeft: '4px' }}
+              >
+                (约 ¥
+                {summary.totalMarketValueCNY.toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+                )
               </Text>
             )}
           </Text>
         </div>
         <div style={{ display: 'flex', alignItems: 'center' }}>
-          <Text strong style={{ width: 70, textAlign: 'right' }}>总盈亏：</Text>
-          <Text 
+          <Text strong style={{ width: 70, textAlign: 'right' }}>
+            总盈亏：
+          </Text>
+          <Text
             style={{
               ...labelValueStyle,
-              color: summary.totalPnlLocal >= 0 ? '#f5222d' : '#52c41a'
+              color: summary.totalPnlLocal >= 0 ? '#f5222d' : '#52c41a',
             }}
           >
             {formatWithSymbol(summary.totalPnlLocal)}
             {shouldShowApprox && (
-              <Text type="secondary" style={{ fontSize: '12px', marginLeft: '4px' }}>
-                (约 ¥{summary.totalPnlCNY.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })})
+              <Text
+                type="secondary"
+                style={{ fontSize: '12px', marginLeft: '4px' }}
+              >
+                (约 ¥
+                {summary.totalPnlCNY.toLocaleString(undefined, {
+                  minimumFractionDigits: 2,
+                  maximumFractionDigits: 2,
+                })}
+                )
               </Text>
             )}
           </Text>
@@ -142,15 +209,22 @@ interface EnhancedPosition extends PositionWithStats {
   costValueCNY?: number;
   pnlCNY?: number;
   pnlRateCNY?: number;
-  weekChangePercent?: number | null;
-  monthChangePercent?: number | null;
-  yearChangePercent?: number | null;
 }
 
 // 可排序市场配置项组件
-const SortableMarketItem: React.FC<{ market: MarketConfig; children: React.ReactNode }> = ({ market, children }) => {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
-    id: market.key
+const SortableMarketItem: React.FC<{
+  market: MarketConfig;
+  children: React.ReactNode;
+}> = ({ market, children }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: market.key,
   });
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -171,13 +245,20 @@ const MarketAssetsPanel: React.FC<{
   transactions: any[];
   stats?: PortfolioStats | null;
 }> = ({ portfolioId, positions, transactions, stats }) => {
-  console.log('[MarketAssetsPanel] Received positions prop:', JSON.stringify(positions)); // Log received positions
+  console.log(
+    '[MarketAssetsPanel] Received positions prop:',
+    JSON.stringify(positions)
+  ); // Log received positions
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const [rates, setRates] = useState<{ USD: number; HKD: number; CNY: number } | null>(null); // Use specific type or Record<string, number>
+  const [rates, setRates] = useState<{
+    USD: number;
+    HKD: number;
+    CNY: number;
+  } | null>(null); // Use specific type or Record<string, number>
   const [updatedAt, setUpdatedAt] = useState('');
   const [loadingRates, setLoadingRates] = useState(true); // Add loading state
   const [rateError, setRateError] = useState(false);
-  
+
   // 添加行情数据状态
   const [quoteMap, setQuoteMap] = useState<Record<string, any>>({});
   const [loadingQuotes, setLoadingQuotes] = useState(false);
@@ -225,18 +306,18 @@ const MarketAssetsPanel: React.FC<{
           setUpdatedAt(new Date(fetchedData.updatedAt).toLocaleString());
         }
       } catch (err) {
-         console.error("Error in loadRates (MarketAssetsPanel):", err);
-         setRateError(true);
-         setRates({ USD: 7.25, HKD: 0.92, CNY: 1.0 }); // Use fallback
-         setUpdatedAt(new Date().toLocaleString());
-         messageApi.error('获取实时汇率时发生错误，使用默认值。');
+        console.error('Error in loadRates (MarketAssetsPanel):', err);
+        setRateError(true);
+        setRates({ USD: 7.25, HKD: 0.92, CNY: 1.0 }); // Use fallback
+        setUpdatedAt(new Date().toLocaleString());
+        messageApi.error('获取实时汇率时发生错误，使用默认值。');
       } finally {
         setLoadingRates(false);
       }
     };
     loadRates();
   }, [messageApi]); // Fetch rates on mount
-  
+
   // 加载行情数据
   useEffect(() => {
     const loadQuotes = async () => {
@@ -247,30 +328,48 @@ const MarketAssetsPanel: React.FC<{
 
       try {
         // 提取所有持仓的股票代码
-        const positionCodes = positions.map(p => p.asset?.code).filter(Boolean);
-        
+        const positionCodes = positions
+          .map((p) => p.asset?.code)
+          .filter(Boolean);
+
         // 从交易记录中提取股票代码
-        const transactionCodes = transactions.map(t => t.assetCode).filter(Boolean);
-        
+        const transactionCodes = transactions
+          .map((t) => t.assetCode)
+          .filter(Boolean);
+
         // 合并并去重所有股票代码
-        const allRelevantCodes = Array.from(new Set([...positionCodes, ...transactionCodes]));
-        
+        const allRelevantCodes = Array.from(
+          new Set([...positionCodes, ...transactionCodes])
+        );
+
         if (!allRelevantCodes.length) return;
 
-        console.log('[MarketAssetsPanel DEBUG] Codes sent to fetchQuotes:', JSON.stringify(allRelevantCodes));
+        console.log(
+          '[MarketAssetsPanel DEBUG] Codes sent to fetchQuotes:',
+          JSON.stringify(allRelevantCodes)
+        );
 
         // 使用完整的代码列表调用行情接口获取数据
         const quotes = await apiClient.fetchQuotes(allRelevantCodes);
-        console.log('[MarketAssetsPanel DEBUG] Quotes received from API:', JSON.stringify(quotes));
+        console.log(
+          '[MarketAssetsPanel DEBUG] Quotes received from API:',
+          JSON.stringify(quotes)
+        );
 
         // 创建以股票代码为键的映射表
-        const newQuoteMap = quotes.reduce((acc, quote) => {
-          acc[quote.code] = quote;
-          return acc;
-        }, {} as Record<string, any>);
+        const newQuoteMap = quotes.reduce(
+          (acc, quote) => {
+            acc[quote.code] = quote;
+            return acc;
+          },
+          {} as Record<string, any>
+        );
 
         setQuoteMap(newQuoteMap);
-        console.log('[MarketAssetsPanel DEBUG] Final quoteMap passed to TransactionList:', JSON.stringify(newQuoteMap));
+        console.log(
+          '[MarketAssetsPanel DEBUG] Final quoteMap passed to TransactionList:',
+          JSON.stringify(newQuoteMap)
+        );
       } catch (err) {
         console.error('[MarketAssetsPanel] 加载行情数据失败:', err);
         setQuoteError(true);
@@ -285,11 +384,15 @@ const MarketAssetsPanel: React.FC<{
 
   // 市场配置管理函数
   const handleAddMarket = () => {
-    if (!newMarketKey.trim() || !newMarketLabel.trim() || !newMarketPrefix.trim()) {
+    if (
+      !newMarketKey.trim() ||
+      !newMarketLabel.trim() ||
+      !newMarketPrefix.trim()
+    ) {
       messageApi.error('请填写所有必填字段');
       return;
     }
-    if (marketConfigs.some(m => m.key === newMarketKey)) {
+    if (marketConfigs.some((m) => m.key === newMarketKey)) {
       messageApi.error('市场标识已存在');
       return;
     }
@@ -298,7 +401,10 @@ const MarketAssetsPanel: React.FC<{
       label: newMarketLabel,
       currency: newMarketCurrency,
       symbol: newMarketSymbol,
-      codePrefix: newMarketPrefix.split(',').map(s => s.trim()).filter(Boolean),
+      codePrefix: newMarketPrefix
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
       visible: true,
     };
     setMarketConfigs([...marketConfigs, newMarket]);
@@ -312,33 +418,39 @@ const MarketAssetsPanel: React.FC<{
   };
 
   const handleUpdateMarket = (key: string, updates: Partial<MarketConfig>) => {
-    setMarketConfigs(marketConfigs.map(m => m.key === key ? { ...m, ...updates } : m));
+    setMarketConfigs(
+      marketConfigs.map((m) => (m.key === key ? { ...m, ...updates } : m))
+    );
     messageApi.success('市场配置已更新');
   };
 
   const handleDeleteMarket = (key: string) => {
     Modal.confirm({
       title: '确认删除',
-      content: `确定要删除市场 "${marketConfigs.find(m => m.key === key)?.label}" 吗？`,
+      content: `确定要删除市场 "${marketConfigs.find((m) => m.key === key)?.label}" 吗？`,
       okText: '删除',
       okType: 'danger',
       cancelText: '取消',
       onOk: () => {
-        setMarketConfigs(marketConfigs.filter(m => m.key !== key));
+        setMarketConfigs(marketConfigs.filter((m) => m.key !== key));
         messageApi.success('市场已删除');
       },
     });
   };
 
   const handleToggleMarketVisible = (key: string) => {
-    setMarketConfigs(marketConfigs.map(m => m.key === key ? { ...m, visible: !m.visible } : m));
+    setMarketConfigs(
+      marketConfigs.map((m) =>
+        m.key === key ? { ...m, visible: !m.visible } : m
+      )
+    );
   };
 
   const handleDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (over && active.id !== over.id) {
-      const oldIndex = marketConfigs.findIndex(m => m.key === active.id);
-      const newIndex = marketConfigs.findIndex(m => m.key === over.id);
+      const oldIndex = marketConfigs.findIndex((m) => m.key === active.id);
+      const newIndex = marketConfigs.findIndex((m) => m.key === over.id);
       if (oldIndex !== -1 && newIndex !== -1) {
         const newOrder = arrayMove(marketConfigs, oldIndex, newIndex);
         setMarketConfigs(newOrder);
@@ -364,7 +476,10 @@ const MarketAssetsPanel: React.FC<{
       label: newMarketLabel,
       currency: newMarketCurrency,
       symbol: newMarketSymbol,
-      codePrefix: newMarketPrefix.split(',').map(s => s.trim()).filter(Boolean),
+      codePrefix: newMarketPrefix
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean),
     });
     setEditingMarket(null);
     setNewMarketKey('');
@@ -386,7 +501,7 @@ const MarketAssetsPanel: React.FC<{
   // 将原始持仓转换为含人民币价值和周期涨幅
   // 注意：后端返回的 marketValue, costPrice, totalCost 等字段已经是人民币金额
   // 不需要再次乘以汇率，否则会导致数据错误
-  const positionsWithCny: EnhancedPosition[] = positions.map(p => {
+  const positionsWithCny: EnhancedPosition[] = positions.map((p) => {
     // 从行情数据中获取周期涨幅
     const quote = p.asset?.code ? quoteMap[p.asset.code] : null;
 
@@ -394,12 +509,13 @@ const MarketAssetsPanel: React.FC<{
 
     // 后端已经将所有数据转换为人民币，这里直接使用即可
     // 不要再次乘以汇率！
-    const marketValue = p.marketValue || (p.currentPrice ?? 0) * (p.quantity ?? 0);
+    const marketValue =
+      p.marketValue || (p.currentPrice ?? 0) * (p.quantity ?? 0);
     const costValue = (p.costPrice ?? 0) * (p.quantity ?? 0);
 
     // ✅ 修复：直接使用后端返回的人民币数据，不再乘以汇率
-    const marketValueCNY = marketValue;  // 后端已是人民币
-    const costValueCNY = costValue;      // 后端已是人民币
+    const marketValueCNY = marketValue; // 后端已是人民币
+    const costValueCNY = costValue; // 后端已是人民币
     const pnlCNY = marketValueCNY - costValueCNY;
 
     return {
@@ -407,53 +523,62 @@ const MarketAssetsPanel: React.FC<{
       marketValueCNY,
       costValueCNY,
       pnlCNY,
-      pnlRateCNY: costValueCNY > 0 ? pnlCNY / costValueCNY * 100 : 0,
+      pnlRateCNY: costValueCNY > 0 ? (pnlCNY / costValueCNY) * 100 : 0,
       // 添加周期涨幅字段，优先使用行情数据
-      // 使用 PositionsTable 期望的键名
-      weeklyChangePercent: quote?.weekChangePercent ?? p.weeklyChangePercent,
-      monthlyChangePercent: quote?.monthChangePercent ?? p.monthlyChangePercent,
-      yearlyChangePercent: quote?.yearChangePercent ?? p.yearlyChangePercent
+      weeklyChangePercent:
+        quote?.weeklyChangePercent ?? p.weeklyChangePercent ?? undefined,
+      monthlyChangePercent:
+        quote?.monthlyChangePercent ?? p.monthlyChangePercent ?? undefined,
+      yearlyChangePercent:
+        quote?.yearlyChangePercent ?? p.yearlyChangePercent ?? undefined,
     };
   });
 
   // 计算各市场汇总（使用可配置的市场）
-  const marketSummaries = marketConfigs.reduce((acc, market) => {
-    // Filter positions based on assetCode prefix for market grouping
-    const marketPositions = positionsWithCny.filter(p => {
-        if (!p.asset?.code) return false;  // 如果没有 code，直接过滤掉
-        return market.codePrefix.some(prefix => p.asset.code.startsWith(prefix));
-    });
-    const totalMarketValueLocal = marketPositions.reduce(
-      (sum, p) => sum + getMarketValueInDisplayCurrency(p),
-      0
-    );
-    const totalMarketValueCNY = marketPositions.reduce(
-      (sum, p) => sum + (p.marketValue ?? p.marketValueCNY ?? 0),
-      0
-    );
-    const totalPnlCNY = marketPositions.reduce(
-      (sum, p) => sum + (p.totalPnl ?? (p as any).pnlCNY ?? 0),
-      0
-    );
+  const marketSummaries = marketConfigs.reduce(
+    (acc, market) => {
+      // Filter positions based on assetCode prefix for market grouping
+      const marketPositions = positionsWithCny.filter((p) => {
+        if (!p.asset?.code) return false; // 如果没有 code，直接过滤掉
+        return market.codePrefix.some((prefix) =>
+          p.asset.code.startsWith(prefix)
+        );
+      });
+      const totalMarketValueLocal = marketPositions.reduce(
+        (sum, p) => sum + getMarketValueInDisplayCurrency(p),
+        0
+      );
+      const totalMarketValueCNY = marketPositions.reduce(
+        (sum, p) => sum + (p.marketValue ?? p.marketValueCNY ?? 0),
+        0
+      );
+      const totalPnlCNY = marketPositions.reduce(
+        (sum, p) => sum + (p.totalPnl ?? (p as any).pnlCNY ?? 0),
+        0
+      );
 
-    // 将CNY盈亏转换为本地货币
-    // 对于港股/美股：盈亏CNY / 汇率 = 盈亏本地货币
-    // 对于A股：盈亏CNY = 盈亏本地货币
-    const exchangeRate = rates?.[market.currency as 'USD' | 'HKD' | 'CNY'] ?? 1.0;
-    const totalPnlLocal = market.currency === 'CNY' ? totalPnlCNY : totalPnlCNY / exchangeRate;
+      // 将CNY盈亏转换为本地货币
+      // 对于港股/美股：盈亏CNY / 汇率 = 盈亏本地货币
+      // 对于A股：盈亏CNY = 盈亏本地货币
+      const exchangeRate =
+        rates?.[market.currency as 'USD' | 'HKD' | 'CNY'] ?? 1.0;
+      const totalPnlLocal =
+        market.currency === 'CNY' ? totalPnlCNY : totalPnlCNY / exchangeRate;
 
-    return {
-      ...acc,
-      [market.key]: {
-        totalMarketValueLocal,
-        totalMarketValueCNY,
-        totalPnlLocal,
-        totalPnlCNY,
-        currencySymbol: market.symbol,
-        currencyCode: market.currency,
-      }
-    };
-  }, {} as Record<string, MarketSummary>);
+      return {
+        ...acc,
+        [market.key]: {
+          totalMarketValueLocal,
+          totalMarketValueCNY,
+          totalPnlLocal,
+          totalPnlCNY,
+          currencySymbol: market.symbol,
+          currencyCode: market.currency,
+        },
+      };
+    },
+    {} as Record<string, MarketSummary>
+  );
 
   // 新增：根据 positionsWithCny 汇总全局统计
   const toggleMarket = (market: string) => {
@@ -464,23 +589,29 @@ const MarketAssetsPanel: React.FC<{
   const cardStyle = {
     marginBottom: 20,
     boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-    borderRadius: '8px'
+    borderRadius: '8px',
   };
 
   const cardHeadStyle = {
     borderBottom: 0,
     background: '#fafafa',
     padding: '12px 24px',
-    height: '60px'
+    height: '60px',
   };
 
   return (
     <div>
       {/* 市场配置按钮 */}
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
-        <Button 
-          type="text" 
-          icon={<SettingOutlined />} 
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          marginBottom: '16px',
+        }}
+      >
+        <Button
+          type="text"
+          icon={<SettingOutlined />}
           onClick={() => setIsConfigModalVisible(true)}
         >
           管理市场分类
@@ -488,17 +619,40 @@ const MarketAssetsPanel: React.FC<{
       </div>
 
       {/* 添加行情数据加载状态指示 */}
-      {loadingQuotes && <div style={{ margin: '10px 0' }}><Spin size="small" /> 加载行情数据中...</div>}
-      {quoteError && <div style={{ margin: '10px 0', color: '#ff4d4f' }}>行情数据加载失败，周期涨幅可能无法正确显示。</div>}
+      {loadingQuotes && (
+        <div style={{ margin: '10px 0' }}>
+          <Spin size="small" /> 加载行情数据中...
+        </div>
+      )}
+      {quoteError && (
+        <div style={{ margin: '10px 0', color: '#ff4d4f' }}>
+          行情数据加载失败，周期涨幅可能无法正确显示。
+        </div>
+      )}
 
       {/* Pass loading state to potentially show a spinner or placeholder */}
-      {loadingRates
-        ? <Spin tip="加载汇率中..."><div style={{ height: '36px', marginBottom: '20px' }}><ExchangeRateBar rates={{ USD: 0, HKD: 0, CNY: 1 }} updatedAt="-" error={true} /></div></Spin> 
-        : <ExchangeRateBar rates={rates ?? { USD: 0, HKD: 0, CNY: 1 }} updatedAt={updatedAt} error={rateError} />}
-      
-      {marketConfigs.filter(m => m.visible).map((market) => {
-        const summary =
-          marketSummaries[market.key] ?? {
+      {loadingRates ? (
+        <Spin tip="加载汇率中...">
+          <div style={{ height: '36px', marginBottom: '20px' }}>
+            <ExchangeRateBar
+              rates={{ USD: 0, HKD: 0, CNY: 1 }}
+              updatedAt="-"
+              error={true}
+            />
+          </div>
+        </Spin>
+      ) : (
+        <ExchangeRateBar
+          rates={rates ?? { USD: 0, HKD: 0, CNY: 1 }}
+          updatedAt={updatedAt}
+          error={rateError}
+        />
+      )}
+
+      {marketConfigs
+        .filter((m) => m.visible)
+        .map((market) => {
+          const summary = marketSummaries[market.key] ?? {
             totalMarketValueLocal: 0,
             totalMarketValueCNY: 0,
             totalPnlLocal: 0,
@@ -506,49 +660,58 @@ const MarketAssetsPanel: React.FC<{
             currencySymbol: market.symbol,
             currencyCode: market.currency,
           };
-        // Filter positions for the current market before logging and rendering
-        const marketPositions = positionsWithCny.filter((p) => {
-          if (!p.asset?.code) return false;  // 如果没有 code，直接过滤掉
+          // Filter positions for the current market before logging and rendering
+          const marketPositions = positionsWithCny.filter((p) => {
+            if (!p.asset?.code) return false; // 如果没有 code，直接过滤掉
 
-          // 开启日志以便调试
-          console.log(`[MarketAssetsPanel] 检查持仓: market=${market.key}, code=${p.asset.code}`);
+            // 开启日志以便调试
+            console.log(
+              `[MarketAssetsPanel] 检查持仓: market=${market.key}, code=${p.asset.code}`
+            );
 
-          const match = market.codePrefix.some(prefix => p.asset.code.startsWith(prefix));
-          console.log(`[MarketAssetsPanel] 过滤结果: match=${match}`);
-          return match;
-        });
+            const match = market.codePrefix.some((prefix) =>
+              p.asset.code.startsWith(prefix)
+            );
+            console.log(`[MarketAssetsPanel] 过滤结果: match=${match}`);
+            return match;
+          });
 
-        return (
-          <Card
-            key={market.key}
-            title={<MarketTitle marketName={market.label} summary={summary} />}
-            extra={
-              <a onClick={() => toggleMarket(market.key)} style={{ fontSize: 13 }}>
-                {collapsed[market.key] ? '展开' : '折叠'}
-              </a>
-            }
-            style={cardStyle}
-            bodyStyle={{
-              display: collapsed[market.key] ? 'none' : 'block',
-              padding: 0,
-              borderTop: '1px solid #f0f0f0'
-            }}
-            headStyle={cardHeadStyle}
-          >
-            <PositionsTable 
-              positions={marketPositions} // Pass the filtered positions
-              totalMarketValue={stats?.totalMarketValue} // 传递后端计算的总市值
-            />
-          </Card>
-        );
-      })}
-      
-      <Card 
-        title="全部交易记录" 
+          return (
+            <Card
+              key={market.key}
+              title={
+                <MarketTitle marketName={market.label} summary={summary} />
+              }
+              extra={
+                <a
+                  onClick={() => toggleMarket(market.key)}
+                  style={{ fontSize: 13 }}
+                >
+                  {collapsed[market.key] ? '展开' : '折叠'}
+                </a>
+              }
+              style={cardStyle}
+              bodyStyle={{
+                display: collapsed[market.key] ? 'none' : 'block',
+                padding: 0,
+                borderTop: '1px solid #f0f0f0',
+              }}
+              headStyle={cardHeadStyle}
+            >
+              <PositionsTable
+                positions={marketPositions} // Pass the filtered positions
+                totalMarketValue={stats?.totalMarketValue} // 传递后端计算的总市值
+              />
+            </Card>
+          );
+        })}
+
+      <Card
+        title="全部交易记录"
         style={{ ...cardStyle, marginTop: 32 }}
         headStyle={cardHeadStyle}
       >
-        <TransactionList 
+        <TransactionList
           transactions={transactions}
           portfolioId={portfolioId}
           assetQuoteMap={quoteMap}
@@ -564,10 +727,13 @@ const MarketAssetsPanel: React.FC<{
           handleCancelEdit();
         }}
         footer={[
-          <Button key="close" onClick={() => {
-            setIsConfigModalVisible(false);
-            handleCancelEdit();
-          }}>
+          <Button
+            key="close"
+            onClick={() => {
+              setIsConfigModalVisible(false);
+              handleCancelEdit();
+            }}
+          >
             关闭
           </Button>,
         ]}
@@ -575,54 +741,63 @@ const MarketAssetsPanel: React.FC<{
       >
         {/* 已有市场列表 */}
         <div style={{ marginBottom: 24 }}>
-          <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 15 }}>已配置市场（拖拽排序）</div>
+          <div style={{ fontWeight: 600, marginBottom: 12, fontSize: 15 }}>
+            已配置市场（拖拽排序）
+          </div>
           <DndContext
             sensors={sensors}
             collisionDetection={closestCenter}
             onDragEnd={handleDragEnd}
           >
             <SortableContext
-              items={marketConfigs.map(m => m.key)}
+              items={marketConfigs.map((m) => m.key)}
               strategy={verticalListSortingStrategy}
             >
               {marketConfigs.map((market) => (
                 <SortableMarketItem key={market.key} market={market}>
-                  <Card 
-                    size="small" 
-                    style={{ 
-                      marginBottom: 8, 
+                  <Card
+                    size="small"
+                    style={{
+                      marginBottom: 8,
                       cursor: 'move',
                       background: market.visible ? '#fff' : '#f5f5f5',
                       opacity: market.visible ? 1 : 0.6,
                     }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                      }}
+                    >
                       <div style={{ flex: 1 }}>
                         <div style={{ fontWeight: 600, marginBottom: 4 }}>
                           {market.label} ({market.key})
                         </div>
                         <div style={{ fontSize: 12, color: '#666' }}>
-                          货币: {market.currency} {market.symbol} | 代码前缀: {market.codePrefix.join(', ')}
+                          货币: {market.currency} {market.symbol} | 代码前缀:{' '}
+                          {market.codePrefix.join(', ')}
                         </div>
                       </div>
                       <Space>
-                        <Button 
-                          size="small" 
+                        <Button
+                          size="small"
                           type={market.visible ? 'default' : 'primary'}
                           onClick={() => handleToggleMarketVisible(market.key)}
                         >
                           {market.visible ? '隐藏' : '显示'}
                         </Button>
-                        <Button 
-                          size="small" 
+                        <Button
+                          size="small"
                           icon={<EditOutlined />}
                           onClick={() => handleEditMarket(market)}
                         >
                           编辑
                         </Button>
-                        <Button 
-                          size="small" 
-                          danger 
+                        <Button
+                          size="small"
+                          danger
                           icon={<DeleteOutlined />}
                           onClick={() => handleDeleteMarket(market.key)}
                         >
@@ -647,14 +822,14 @@ const MarketAssetsPanel: React.FC<{
               <Input
                 placeholder="市场标识 (唯一键，如: 日股)"
                 value={newMarketKey}
-                onChange={e => setNewMarketKey(e.target.value)}
+                onChange={(e) => setNewMarketKey(e.target.value)}
                 disabled={!!editingMarket}
               />
             )}
             <Input
               placeholder="显示名称 (如: 日本股票)"
               value={newMarketLabel}
-              onChange={e => setNewMarketLabel(e.target.value)}
+              onChange={(e) => setNewMarketLabel(e.target.value)}
             />
             <Space.Compact style={{ width: '100%' }}>
               <Select
@@ -674,18 +849,18 @@ const MarketAssetsPanel: React.FC<{
                 style={{ width: '50%' }}
                 placeholder="货币符号 (如: ¥)"
                 value={newMarketSymbol}
-                onChange={e => setNewMarketSymbol(e.target.value)}
+                onChange={(e) => setNewMarketSymbol(e.target.value)}
               />
             </Space.Compact>
             <Input
               placeholder="代码前缀 (多个用逗号分隔，如: jp, nikkei)"
               value={newMarketPrefix}
-              onChange={e => setNewMarketPrefix(e.target.value)}
+              onChange={(e) => setNewMarketPrefix(e.target.value)}
             />
             {editingMarket ? (
               <Space>
-                <Button 
-                  type="primary" 
+                <Button
+                  type="primary"
                   icon={<EditOutlined />}
                   onClick={handleSaveEdit}
                 >
@@ -694,8 +869,8 @@ const MarketAssetsPanel: React.FC<{
                 <Button onClick={handleCancelEdit}>取消</Button>
               </Space>
             ) : (
-              <Button 
-                type="primary" 
+              <Button
+                type="primary"
                 icon={<PlusOutlined />}
                 onClick={handleAddMarket}
                 block
@@ -710,4 +885,4 @@ const MarketAssetsPanel: React.FC<{
   );
 };
 
-export default MarketAssetsPanel; 
+export default MarketAssetsPanel;

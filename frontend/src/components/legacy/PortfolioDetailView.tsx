@@ -5,23 +5,19 @@ import {
   Alert,
   Typography,
   Empty,
-  Card,
   Button,
   Modal,
   Input,
   Space,
 } from 'antd'; // 将 Spin 替换为 Skeleton
 import useAppStore from '../../store'; // Adjust path if needed
-import PortfolioSummary from '../PortfolioSummary';
 import { fetchExchangeRates } from '../../services/api'; // Correctly import fetchExchangeRates
 import useMessageApi from '../../hooks/useMessageApi';
 import { usePortfolioStats } from '../../hooks/usePortfolioStats';
+import MarketIndices from '../MarketIndices';
+import DashboardGrid from '../DashboardGrid';
 
 const { Title } = Typography;
-
-import MarketIndices from '../MarketIndices';
-import MarketAssetsPanel from '../MarketAssetsPanel';
-import { ErrorBoundary } from '../ErrorBoundary';
 
 const detailPagePadding = '0 32px';
 
@@ -259,10 +255,7 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({
       style={{ width: '100%', padding: detailPagePadding }}
       id="portfolio-report-area"
     >
-      {' '}
       {/* Added ID for screenshot targeting */}
-      {/* 顶部放置大盘指数，始终可见 */}
-      <MarketIndices />
       {/* 标题和操作按钮 */}
       <div
         style={{
@@ -278,7 +271,6 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({
           <Button
             type="primary"
             onClick={() => {
-              // 触发打开添加交易记录的抽屉
               const event = new CustomEvent('openAddTransaction', {
                 detail: { portfolioId },
               });
@@ -289,7 +281,6 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({
           </Button>
           <Button
             onClick={() => {
-              // 触发打开批量导入的抽屉
               const event = new CustomEvent('openBatchImport', {
                 detail: { portfolioId },
               });
@@ -298,14 +289,7 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({
           >
             批量导入
           </Button>
-          <Button
-            onClick={() => {
-              // 返回主界面
-              navigate('/');
-            }}
-          >
-            返回主界面
-          </Button>
+          <Button onClick={() => navigate('/')}>返回主界面</Button>
         </Space>
       </div>
       {/* 删除确认弹窗 */}
@@ -333,60 +317,18 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({
           onPressEnter={() => deleteInput === '确定' && handleConfirmDelete()}
         />
       </Modal>
-      {/* 投资组合标题和摘要信息 */}
-      <Card
-        title={
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-            }}
-          >
-            <span>投资组合概览(按汇率折算CNY)</span>
-          </div>
-        }
-        style={{ width: '100%', marginBottom: '16px' }}
-        styles={{ header: { fontSize: '20px', fontWeight: 'bold' } }}
-      >
-        <ErrorBoundary
-          fallback={
-            <Alert
-              type="error"
-              showIcon
-              message="概览渲染失败"
-              description="刷新页面或稍后重试。"
-            />
-          }
-        >
-          <PortfolioSummary
-            portfolio={selectedPortfolioDetail}
-            stats={stats} // 直接传递从后端获取的 stats
-            isLoading={isStatsLoading && !stats}
-            isRefetching={isStatsFetching && Boolean(stats)}
-            onRefresh={() => refetchStats()}
-            lastUpdated={stats?.timestamp}
-          />
-        </ErrorBoundary>
-      </Card>
-      {/* 资产明细分市场分组卡片式UI */}
-      <ErrorBoundary
-        fallback={
-          <Alert
-            type="error"
-            showIcon
-            message="资产面板渲染失败"
-            description="请刷新页面或检查控制台日志。"
-          />
-        }
-      >
-        <MarketAssetsPanel
-          portfolioId={portfolioId}
-          positions={mappedPositions}
-          transactions={selectedPortfolioDetail.transactions}
-          stats={stats}
-        />
-      </ErrorBoundary>
+      {/* 仪表盘：大盘指数 + 概览卡片 + 资产明细 */}
+      <DashboardGrid
+        portfolioId={portfolioId}
+        portfolio={selectedPortfolioDetail}
+        stats={stats}
+        isLoading={isStatsLoading && !stats}
+        isRefetching={isStatsFetching && Boolean(stats)}
+        onRefresh={() => refetchStats()}
+        lastUpdated={stats?.timestamp}
+        mappedPositions={mappedPositions}
+        transactions={selectedPortfolioDetail.transactions}
+      />
     </div>
   );
 };

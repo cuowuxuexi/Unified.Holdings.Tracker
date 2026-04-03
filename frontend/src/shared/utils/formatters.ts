@@ -46,7 +46,7 @@ export const formatNumber = (
 
 /**
  * 格式化数字为百分比字符串
- * @param num 输入数字 (例如 0.1 表示 10%)
+ * @param num 输入数字，百分比数值形式 (例如 10.5 表示 10.5%)
  * @param decimals 保留小数位数，默认为 2
  * @returns 格式化后的百分比字符串，如果输入无效则返回 'N/A'
  */
@@ -59,7 +59,7 @@ export const formatPercent = (
   }
   try {
     return (
-      (num * 100).toLocaleString(undefined, {
+      num.toLocaleString(undefined, {
         minimumFractionDigits: decimals,
         maximumFractionDigits: decimals,
       }) + '%'
@@ -96,4 +96,3 @@ export const formatCurrency = (
     return '¥0.00';
   }
 };
-

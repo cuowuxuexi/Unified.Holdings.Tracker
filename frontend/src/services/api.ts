@@ -376,24 +376,6 @@ const apiClient = {
     }
   },
 
-  exportPortfolioMarkdown: async (portfolioId: string): Promise<Blob> => {
-    try {
-      const response = await axios.get<Blob>(
-        `${API_BASE_URL}/api/portfolio/${portfolioId}/export/markdown`,
-        {
-          responseType: 'blob',
-        }
-      );
-      return response.data;
-    } catch (error) {
-      console.error(
-        `Error exporting markdown report for portfolio ${portfolioId} from API client:`,
-        error
-      );
-      throw error;
-    }
-  },
-
   previewBatchImport: async (formData: FormData): Promise<ImportPreview> => {
     try {
       const response = await axios.post<ImportPreview>(
