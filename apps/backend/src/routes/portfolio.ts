@@ -234,6 +234,12 @@ async function sendPeriodReport(
     query.periodType
   );
 
+  if (query.format === 'markdown') {
+    const md = periodReportService.formatReportAsMarkdown(report);
+    res.type('text/markdown').send(md);
+    return;
+  }
+
   res.json(report);
 }
 
