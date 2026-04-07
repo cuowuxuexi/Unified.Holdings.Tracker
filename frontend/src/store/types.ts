@@ -222,9 +222,9 @@ export interface PositionWithStats extends Position {
   totalPnlLocal?: number;
 
   /**
-   * 累计盈亏百分比（小数形式，0-1 范围）
-   * - 例如：1.5 表示 150%，-0.2 表示 -20%
-   * - 前端显示时需要乘以 100
+   * 累计盈亏百分比（百分比数值形式）
+   * - 例如：9.67 表示 9.67%，-20.0 表示 -20%
+   * - 前端显示时无需乘以 100
    */
   totalPnlPercent?: number;
 
@@ -240,7 +240,9 @@ export interface PositionWithStats extends Position {
   floatingPnlLocal?: number;
 
   /**
-   * 浮动盈亏百分比（小数形式）
+   * 浮动盈亏百分比（百分比数值形式）
+   * - 例如：8.02 表示 8.02%，-5.0 表示 -5%
+   * - 前端显示时无需乘以 100
    */
   floatingPnlPercent?: number;
 

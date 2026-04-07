@@ -168,7 +168,7 @@ export interface PortfolioDetail extends Portfolio {
   dailyPnl?: number; // 组合当日盈亏
   dailyPnlPercent?: number; // 组合当日盈亏率
   totalPnl?: number; // 组合累计盈亏
-  totalPnlPercent?: number; // 组合累计盈亏率 (相对初始投入或考虑现金流入流出)
+  totalPnlPercent?: number; // 组合累计盈亏率（百分比形式，9.67 = 9.67%）
   realizedPnl?: number; // 已实现盈亏
   unrealizedPnl?: number; // 未实现盈亏（浮动盈亏）
   /**

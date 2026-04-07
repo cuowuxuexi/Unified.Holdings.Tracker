@@ -11,7 +11,7 @@ import { getCurrencyForAsset } from '../portfolioReplay';
  * - totalCost = 累计买入 - 累计卖出（可为负数）
  * - totalBuyCost = 累计买入成本（只增不减，用于收益率分母）
  * - totalPnl = 当前市值 - 摊薄成本
- * - totalPnlPercent = totalPnl / totalBuyCost（分母永远为正，避免负成本导致计算错误）
+ * - totalPnlPercent = (totalPnl / totalBuyCost) * 100（百分比形式，分母永远为正）
  *
  * @param positions - Array of current positions.
  * @param quotes - A map of stock codes to their latest quotes.
@@ -73,12 +73,14 @@ export function calculateRealtimePnl(
 
       // 计算盈亏百分比：使用 totalBuyCost（累计买入成本）作为分母
       // 这样即使摊薄成本为负数，收益率计算也不会出错
-      // 公式：totalPnlPercent = totalPnl / totalBuyCost
+      // 公式：totalPnlPercent = (totalPnl / totalBuyCost) * 100（百分比形式）
       const denominator = position.totalBuyCost ?? position.totalCost ?? 0;
       updatedPosition.totalPnlPercent =
-        denominator !== 0 ? updatedPosition.totalPnl / denominator : 0;
+        denominator !== 0 ? (updatedPosition.totalPnl / denominator) * 100 : 0;
       updatedPosition.floatingPnlPercent =
-        denominator !== 0 ? updatedPosition.floatingPnl / denominator : 0;
+        denominator !== 0
+          ? (updatedPosition.floatingPnl / denominator) * 100
+          : 0;
 
       // Calculate daily PnL based on changeAmount if available
       if (quote.changeAmount != null) {
@@ -142,9 +144,9 @@ export function validatePositionData(position: Position): {
     position.totalPnlPercent !== null
   ) {
     const percentValue = Math.abs(position.totalPnlPercent);
-    if (percentValue > 10) {
+    if (percentValue > 1000) {
       warnings.push(
-        `${position.asset.code}: 总盈亏%异常 (${(position.totalPnlPercent * 100).toFixed(2)}%)，` +
+        `${position.asset.code}: 总盈亏%异常 (${position.totalPnlPercent.toFixed(2)}%)，` +
           `成本价=${position.costPrice?.toFixed(4)}, 市值=${position.marketValue?.toFixed(2)}`
       );
     }

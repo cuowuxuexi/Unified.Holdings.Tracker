@@ -28,9 +28,9 @@ function validatePositionData(position: Position): {
     position.totalPnlPercent !== null
   ) {
     const percentValue = Math.abs(position.totalPnlPercent);
-    if (percentValue > 10) {
+    if (percentValue > 1000) {
       warnings.push(
-        `${position.asset.code}: 总盈亏%异常 (${(position.totalPnlPercent * 100).toFixed(2)}%)，` +
+        `${position.asset.code}: 总盈亏%异常 (${position.totalPnlPercent.toFixed(2)}%)，` +
           `可能是成本价过小或数据错误。成本价=${position.costPrice?.toFixed(4)}, 市值=${position.marketValue?.toFixed(2)}`
       );
     }

@@ -151,7 +151,7 @@ export function PositionsTable({ positions }: PositionsTableProps) {
           typeof record.totalPnlPercent === 'number'
             ? record.totalPnlPercent
             : denominator !== 0
-              ? pnl / denominator
+              ? (pnl / denominator) * 100
               : 0;
         return (
           <div>
@@ -171,7 +171,7 @@ export function PositionsTable({ positions }: PositionsTableProps) {
               }}
             >
               {pnl >= 0 ? '+' : ''}
-              {formatPercent(pnlPercent * 100)}
+              {formatPercent(pnlPercent)}
             </div>
           </div>
         );

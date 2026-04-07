@@ -172,7 +172,7 @@ const getDisplayPnlPercent = (record: PositionWithStats): number => {
   if (pnl !== undefined && base) {
     return base !== 0 ? (pnl / base) * 100 : 0;
   }
-  return (record.totalPnlPercent ?? 0) * 100;
+  return record.totalPnlPercent ?? 0;
 };
 
 interface PositionsTableProps {

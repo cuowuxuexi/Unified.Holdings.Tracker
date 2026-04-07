@@ -116,11 +116,9 @@ function checkExchangeRateIssues(position: Position): VerificationIssue | null {
   // 检查2：盈亏百分比是否异常（绝对值超过1000%）
   if (totalPnlPercent !== undefined && totalPnlPercent !== null) {
     const percentValue = Math.abs(totalPnlPercent);
-    if (percentValue > 10) {
-      // 10 表示 1000%
-      issues.push(
-        `总盈亏%异常 (${(totalPnlPercent * 100).toFixed(2)}%)，远超正常范围`
-      );
+    if (percentValue > 1000) {
+      // 1000 表示 1000%
+      issues.push(`总盈亏%异常 (${totalPnlPercent.toFixed(2)}%)，远超正常范围`);
     }
   }
 
@@ -316,7 +314,7 @@ function generateMarkdownReport(results: VerificationResult[]): string {
           report += `- 总盈亏: ${issue.details.totalPnl.toFixed(2)} CNY\n`;
         }
         if (issue.details.totalPnlPercent !== undefined) {
-          report += `- 总盈亏%: ${(issue.details.totalPnlPercent * 100).toFixed(2)}%\n`;
+          report += `- 总盈亏%: ${issue.details.totalPnlPercent.toFixed(2)}%\n`;
         }
         report += `\n`;
       }
