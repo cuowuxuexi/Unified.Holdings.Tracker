@@ -19,6 +19,7 @@ import {
 } from 'date-fns';
 import type { Portfolio, Position } from '../types';
 import { calculateLeverageCostByDay } from './calculation';
+import { calculatePeriodStats } from './calculation/period-stats';
 import { fetchKline, fetchQuotes } from './tencentApi';
 import {
   getExchangeRateForAssetToCNY,
@@ -574,6 +575,206 @@ async function tryWriteOptionalQuoteSnapshots(
   }
 }
 
+/**
+ * Phase 4: 重跑 Modified Dietz 周度/月度（K 线 only，不使用实时报价）
+ * 确保周期收益字段与 K 线收盘价对齐。
+ */
+async function correctPeriodStatsWithKline(params: {
+  portfolioId: string;
+  snapshotDate: string;
+}): Promise<void> {
+  const { portfolioId, snapshotDate } = params;
+  try {
+    const portfolio = await container.getPortfolioUseCase.execute({
+      portfolioId,
+    });
+    if (!portfolio) {
+      console.warn(
+        `[SnapshotService] correctPeriodStatsWithKline: portfolio not found ${portfolioId}`
+      );
+      return;
+    }
+
+    const [weeklyStats, monthlyStats] = await Promise.all([
+      calculatePeriodStats(portfolio, 'weekly', {
+        useRealtimeEndValue: false,
+        usePreCloseStartValue: false,
+      }),
+      calculatePeriodStats(portfolio, 'monthly', {
+        useRealtimeEndValue: false,
+        usePreCloseStartValue: false,
+      }),
+    ]);
+
+    await prisma.$executeRawUnsafe(
+      `UPDATE "PortfolioSnapshot"
+          SET "weeklyReturnPercent"  = ?,
+              "weeklyReturnValue"    = ?,
+              "weeklyBaseDate"       = ?,
+              "monthlyReturnPercent" = ?,
+              "monthlyReturnValue"   = ?,
+              "monthlyBaseDate"      = ?
+        WHERE "portfolioId" = ?
+          AND "date" = ?`,
+      weeklyStats.periodReturnPercent ?? null,
+      weeklyStats.totalValueChange ?? weeklyStats.periodPnl ?? null,
+      weeklyStats.baseDate ?? null,
+      monthlyStats.periodReturnPercent ?? null,
+      monthlyStats.totalValueChange ?? monthlyStats.periodPnl ?? null,
+      monthlyStats.baseDate ?? null,
+      portfolioId,
+      snapshotDate
+    );
+
+    console.log(
+      `[SnapshotService] ✅ Period stats corrected (K-line only): portfolio=${portfolioId}, date=${snapshotDate}, ` +
+        `weekly=${weeklyStats.periodReturnPercent?.toFixed(2)}%, monthly=${monthlyStats.periodReturnPercent?.toFixed(2)}%`
+    );
+  } catch (error) {
+    console.warn(
+      `[SnapshotService] correctPeriodStatsWithKline failed (non-fatal): portfolio=${portfolioId}, date=${snapshotDate}`,
+      error
+    );
+  }
+}
+
+/**
+ * Phase 5: IndexSnapshot K 线修正
+ * 用 K 线收盘价替换 IndexSnapshot 中的实时报价字段。
+ */
+async function correctIndexSnapshotWithKline(
+  snapshotDate: string
+): Promise<void> {
+  const prevDate = format(
+    subDays(new Date(`${snapshotDate}T12:00:00+08:00`), 1),
+    'yyyy-MM-dd'
+  );
+  const yearStart = format(
+    new Date(`${snapshotDate.slice(0, 4)}-01-01`),
+    'yyyy-MM-dd'
+  );
+  // 月初：当月1日
+  const monthStart = `${snapshotDate.slice(0, 8)}01`;
+  // 上周收盘日（周五）：最简单的近似是取 snapshotDate 前7天内的最近 K 线
+  const weekLookback = format(
+    subDays(new Date(`${snapshotDate}T12:00:00+08:00`), 7),
+    'yyyy-MM-dd'
+  );
+
+  for (const indexCode of INDEX_CODES) {
+    try {
+      const klineToday = await fetchKline(
+        indexCode,
+        'daily',
+        snapshotDate,
+        snapshotDate,
+        'none',
+        5
+      );
+      const closeToday = klineToday.find((k) => k.date === snapshotDate)?.close;
+      if (!closeToday || closeToday <= 0) {
+        console.warn(
+          `[SnapshotService] IndexSnapshot K-line not found for ${indexCode} on ${snapshotDate}, keeping original`
+        );
+        continue;
+      }
+
+      const klinePrev = await fetchKline(
+        indexCode,
+        'daily',
+        prevDate,
+        snapshotDate,
+        'none',
+        5
+      );
+      const closePrev =
+        klinePrev.filter((k) => k.date < snapshotDate).slice(-1)[0]?.close ??
+        null;
+      const changeAmount = closePrev ? closeToday - closePrev : null;
+      const changePercent =
+        closePrev && closePrev > 0 ? (changeAmount! / closePrev) * 100 : null;
+
+      // 周变化：取 weekLookback 到 snapshotDate 的 K 线
+      const klineWeek = await fetchKline(
+        indexCode,
+        'daily',
+        weekLookback,
+        snapshotDate,
+        'none',
+        10
+      );
+      const closeWeekBase =
+        klineWeek.filter((k) => k.date < snapshotDate).slice(0, 1)[0]?.close ??
+        null;
+      const weeklyChangePercent =
+        closeWeekBase && closeWeekBase > 0
+          ? ((closeToday - closeWeekBase) / closeWeekBase) * 100
+          : null;
+
+      // 月变化
+      const klineMonth = await fetchKline(
+        indexCode,
+        'daily',
+        monthStart,
+        snapshotDate,
+        'none',
+        5
+      );
+      const closeMonthBase =
+        klineMonth.filter((k) => k.date < snapshotDate)[0]?.close ?? null;
+      const monthlyChangePercent =
+        closeMonthBase && closeMonthBase > 0
+          ? ((closeToday - closeMonthBase) / closeMonthBase) * 100
+          : null;
+
+      // 年变化
+      const klineYear = await fetchKline(
+        indexCode,
+        'daily',
+        yearStart,
+        snapshotDate,
+        'none',
+        5
+      );
+      const closeYearBase =
+        klineYear.filter((k) => k.date < snapshotDate)[0]?.close ?? null;
+      const yearlyChangePercent =
+        closeYearBase && closeYearBase > 0
+          ? ((closeToday - closeYearBase) / closeYearBase) * 100
+          : null;
+
+      await prisma.$executeRawUnsafe(
+        `UPDATE "IndexSnapshot"
+            SET "currentPrice"         = ?,
+                "changeAmount"         = ?,
+                "changePercent"        = ?,
+                "weeklyChangePercent"  = ?,
+                "monthlyChangePercent" = ?,
+                "yearlyChangePercent"  = ?
+          WHERE "date" = ?
+            AND "indexCode" = ?`,
+        closeToday,
+        changeAmount,
+        changePercent,
+        weeklyChangePercent,
+        monthlyChangePercent,
+        yearlyChangePercent,
+        snapshotDate,
+        indexCode
+      );
+    } catch (error) {
+      console.warn(
+        `[SnapshotService] correctIndexSnapshotWithKline failed for ${indexCode} on ${snapshotDate} (non-fatal):`,
+        error
+      );
+    }
+  }
+
+  console.log(
+    `[SnapshotService] ✅ IndexSnapshot corrected with K-line: date=${snapshotDate}`
+  );
+}
+
 async function correctSnapshotWithKline(params: {
   portfolioId: string;
   snapshotDate: string;
@@ -588,9 +789,16 @@ async function correctSnapshotWithKline(params: {
       totalPnl: unknown;
       dailyPnl: unknown;
       leverageUsed: unknown;
+      unrealizedPnl: unknown;
+      netDepositedCash: unknown;
+      dailyPnlPercent: unknown;
+      yearlyReturnValue: unknown;
+      yearlyReturnPercent: unknown;
     }>
   >(
-    `SELECT "cash", "totalMarketValue", "netAssets", "totalPnl", "dailyPnl", "leverageUsed"
+    `SELECT "cash", "totalMarketValue", "netAssets", "totalPnl", "dailyPnl", "leverageUsed",
+            "unrealizedPnl", "netDepositedCash", "dailyPnlPercent",
+            "yearlyReturnValue", "yearlyReturnPercent"
        FROM "PortfolioSnapshot"
       WHERE "portfolioId" = ? AND "date" = ?
       LIMIT 1`,
@@ -615,9 +823,14 @@ async function correctSnapshotWithKline(params: {
       totalPnl: unknown;
       dailyPnl: unknown;
       dailyPct: unknown;
+      costPrice: unknown;
+      floatingPnl: unknown;
+      floatingPnlPercent: unknown;
+      totalPnlPercent: unknown;
     }>
   >(
-    `SELECT "assetCode", "quantity", "currentPrice", "marketValue", "totalPnl", "dailyPnl", "dailyPct"
+    `SELECT "assetCode", "quantity", "currentPrice", "marketValue", "totalPnl", "dailyPnl", "dailyPct",
+            "costPrice", "floatingPnl", "floatingPnlPercent", "totalPnlPercent"
        FROM "PositionSnapshot"
       WHERE "portfolioId" = ? AND "date" = ?`,
     portfolioId,
@@ -687,13 +900,36 @@ async function correctSnapshotWithKline(params: {
         ? (correctedDailyPnl / prevCloseMarketValue) * 100
         : toNullableNumber(row.dailyPct);
 
+    // Phase 2: 修正 floatingPnl, floatingPnlPercent, totalPnlPercent
+    // costBasisCNY = costPrice（本币）× quantity × fxRate，用作百分比分母
+    const costPriceLocal = toNullableNumber(row.costPrice);
+    const costBasisCNY =
+      costPriceLocal !== null && costPriceLocal > 0 && quantity > 0
+        ? costPriceLocal * quantity * fxRate
+        : null;
+
+    const oldFloatingPnl = toNullableNumber(row.floatingPnl);
+    const correctedFloatingPnl =
+      oldFloatingPnl === null ? null : oldFloatingPnl + delta;
+    const correctedFloatingPnlPct =
+      correctedFloatingPnl !== null && costBasisCNY !== null && costBasisCNY > 0
+        ? (correctedFloatingPnl / costBasisCNY) * 100
+        : toNullableNumber(row.floatingPnlPercent);
+    const correctedTotalPnlPct =
+      correctedTotalPnl !== null && costBasisCNY !== null && costBasisCNY > 0
+        ? (correctedTotalPnl / costBasisCNY) * 100
+        : toNullableNumber(row.totalPnlPercent);
+
     await prisma.$executeRawUnsafe(
       `UPDATE "PositionSnapshot"
           SET "currentPrice" = ?,
               "marketValue" = ?,
               "totalPnl" = ?,
               "dailyPnl" = ?,
-              "dailyPct" = ?
+              "dailyPct" = ?,
+              "floatingPnl" = ?,
+              "floatingPnlPercent" = ?,
+              "totalPnlPercent" = ?
         WHERE "portfolioId" = ?
           AND "date" = ?
           AND "assetCode" = ?`,
@@ -702,6 +938,9 @@ async function correctSnapshotWithKline(params: {
       correctedTotalPnl,
       correctedDailyPnl,
       correctedDailyPct,
+      correctedFloatingPnl,
+      correctedFloatingPnlPct,
+      correctedTotalPnlPct,
       portfolioId,
       snapshotDate,
       assetCode
@@ -758,27 +997,78 @@ async function correctSnapshotWithKline(params: {
   const netAssets = totalMarketValue + cash - leverageUsed;
   const totalPnl = toNullableNumber(snapshot.totalPnl);
   const dailyPnl = toNullableNumber(snapshot.dailyPnl);
+  const correctedTotalPnl =
+    totalPnl === null ? null : totalPnl + portfolioPnlDelta;
+  const correctedDailyPnl =
+    dailyPnl === null ? null : dailyPnl + portfolioPnlDelta;
+
+  // Phase 3: 修正 PortfolioSnapshot 衍生字段
+  const oldUnrealizedPnl = toNullableNumber(snapshot.unrealizedPnl);
+  const correctedUnrealizedPnl =
+    oldUnrealizedPnl === null ? null : oldUnrealizedPnl + portfolioPnlDelta;
+
+  const netDepositedCash = toNullableNumber(snapshot.netDepositedCash);
+
+  const correctedTotalPnlPct =
+    correctedTotalPnl !== null &&
+    netDepositedCash !== null &&
+    netDepositedCash > 0
+      ? (correctedTotalPnl / netDepositedCash) * 100
+      : null;
+
+  const prevNetAssets = netAssets - (correctedDailyPnl ?? 0);
+  const correctedDailyPnlPct =
+    correctedDailyPnl !== null && prevNetAssets > 0
+      ? (correctedDailyPnl / prevNetAssets) * 100
+      : null;
+
+  const correctedYearlyReturnValue =
+    netDepositedCash !== null && netDepositedCash > 0
+      ? netAssets - netDepositedCash
+      : null;
+  const correctedYearlyReturnPct =
+    correctedYearlyReturnValue !== null &&
+    netDepositedCash !== null &&
+    netDepositedCash > 0
+      ? (correctedYearlyReturnValue / netDepositedCash) * 100
+      : null;
 
   await prisma.$executeRawUnsafe(
     `UPDATE "PortfolioSnapshot"
-        SET "totalMarketValue" = ?,
-            "netAssets" = ?,
-            "totalPnl" = ?,
-            "dailyPnl" = ?,
-            "createdAt" = CURRENT_TIMESTAMP
+        SET "totalMarketValue"  = ?,
+            "netAssets"         = ?,
+            "totalPnl"          = ?,
+            "dailyPnl"          = ?,
+            "unrealizedPnl"     = ?,
+            "totalPnlPercent"   = ?,
+            "dailyPnlPercent"   = ?,
+            "yearlyReturnValue" = ?,
+            "yearlyReturnPercent" = ?,
+            "correctedAt"       = CURRENT_TIMESTAMP
       WHERE "portfolioId" = ?
         AND "date" = ?`,
     totalMarketValue,
     netAssets,
-    totalPnl === null ? null : totalPnl + portfolioPnlDelta,
-    dailyPnl === null ? null : dailyPnl + portfolioPnlDelta,
+    correctedTotalPnl,
+    correctedDailyPnl,
+    correctedUnrealizedPnl,
+    correctedTotalPnlPct,
+    correctedDailyPnlPct,
+    correctedYearlyReturnValue,
+    correctedYearlyReturnPct,
     portfolioId,
     snapshotDate
   );
 
   console.log(
-    `[SnapshotService] ✅ Snapshot corrected with K-line: portfolio=${portfolioId}, date=${snapshotDate}, correctedPositions=${correctedCount}, totalMarketValue=${totalMarketValue.toFixed(2)}, netAssets=${netAssets.toFixed(2)}`
+    `[SnapshotService] ✅ Snapshot corrected with K-line (Phase 2+3): portfolio=${portfolioId}, date=${snapshotDate}, correctedPositions=${correctedCount}, totalMarketValue=${totalMarketValue.toFixed(2)}, netAssets=${netAssets.toFixed(2)}`
   );
+
+  // Phase 4: 重跑 Modified Dietz 周度/月度（K 线 only，不用实时报价）
+  await correctPeriodStatsWithKline({ portfolioId, snapshotDate });
+
+  // Phase 5: IndexSnapshot K 线修正
+  await correctIndexSnapshotWithKline(snapshotDate);
 }
 
 /**

@@ -124,6 +124,7 @@ model PortfolioSnapshot {
   yearlyReturnPercent   Decimal?
   yearlyReturnValue     Decimal?
   yearlyBaseDate        String?
+  correctedAt           DateTime? // K 线修正完成时间；null 表示未修正
   createdAt             DateTime @default(now())
 
   portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
