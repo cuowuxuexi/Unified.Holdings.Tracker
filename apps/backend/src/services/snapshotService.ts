@@ -9,10 +9,78 @@ import schedule from 'node-schedule';
 import { prisma } from '../lib/prisma';
 import { container } from '../container';
 import { portfolioStatsService } from './portfolioStatsService';
-import { format, startOfWeek, endOfWeek, subWeeks, subDays } from 'date-fns';
-import { Position } from '@uht/domain';
-import { fetchKline } from './tencentApi';
-import { getExchangeRateForAssetToCNY } from './currencyService';
+import {
+  format,
+  startOfWeek,
+  endOfWeek,
+  startOfYear,
+  subWeeks,
+  subDays,
+} from 'date-fns';
+import type { Portfolio, Position } from '../types';
+import { calculateLeverageCostByDay } from './calculation';
+import { fetchKline, fetchQuotes } from './tencentApi';
+import {
+  getExchangeRateForAssetToCNY,
+  getExchangeRateInfo,
+} from './currencyService';
+
+type SnapshotDbClient = {
+  $executeRawUnsafe: (query: string, ...values: unknown[]) => Promise<unknown>;
+  $queryRawUnsafe: <T = unknown>(
+    query: string,
+    ...values: unknown[]
+  ) => Promise<T>;
+};
+
+type ExchangeRateSnapshotInput = {
+  pair: 'USD-CNY' | 'HKD-CNY';
+  rate: number | null;
+  source: string | null;
+};
+
+type QuoteSnapshotCandidate = {
+  assetCode: string;
+  date: string;
+  timestamp: string;
+  currentPrice: number;
+  changePercent: number | null;
+  changeAmount: number | null;
+  prevClosePrice: number | null;
+  weeklyChangePercent: number | null;
+  monthlyChangePercent: number | null;
+  yearlyChangePercent: number | null;
+};
+
+type IndexSnapshotCandidate = {
+  date: string;
+  indexCode: string;
+  name: string;
+  currentPrice: number;
+  changeAmount: number | null;
+  changePercent: number | null;
+  weeklyChangePercent: number | null;
+  monthlyChangePercent: number | null;
+  yearlyChangePercent: number | null;
+};
+
+const INDEX_CODES = [
+  'sh000001',
+  'sz399001',
+  'hkHSI',
+  'usDJI',
+  'usIXIC',
+  'usINX',
+] as const;
+
+const INDEX_NAMES: Record<string, string> = {
+  sh000001: '上证指数',
+  sz399001: '深证成指',
+  hkHSI: '恒生指数',
+  usDJI: '道琼斯',
+  usIXIC: '纳斯达克',
+  usINX: '标普500',
+};
 
 // ==================== Webhook 告警 ====================
 
@@ -49,6 +117,19 @@ function getSnapshotDate(): string {
 function toSafeNumber(value: unknown): number {
   const num = Number(value);
   return Number.isFinite(num) ? num : 0;
+}
+
+function toNullableNumber(value: unknown): number | null {
+  if (value === null || value === undefined) {
+    return null;
+  }
+
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function getSnapshotTimestamp(snapshotDate: string): string {
+  return new Date(`${snapshotDate}T15:00:00+08:00`).toISOString();
 }
 
 function isForeignAssetCode(assetCode: string): boolean {
@@ -100,6 +181,399 @@ async function findDailyClosePrice(
   return closePrice;
 }
 
+function calculateSnapshotLeverageCumulativeCost(
+  portfolio: Portfolio,
+  snapshotDate: string
+): number | null {
+  const transactions = portfolio.transactions ?? [];
+  if (transactions.length === 0) {
+    return 0;
+  }
+
+  const firstTxDate = transactions.reduce((earliest, current) => {
+    const currentTs = new Date(current.date);
+    return currentTs < earliest ? currentTs : earliest;
+  }, new Date(transactions[0].date));
+
+  const endDate = new Date(`${snapshotDate}T23:59:59.999+08:00`);
+  if (Number.isNaN(firstTxDate.getTime()) || Number.isNaN(endDate.getTime())) {
+    console.warn(
+      `[SnapshotService] Invalid leverage cost date range: snapshotDate=${snapshotDate}`
+    );
+    return null;
+  }
+
+  return calculateLeverageCostByDay(portfolio, firstTxDate, endDate);
+}
+
+function buildExchangeRateSnapshotInputs(
+  snapshotDate: string
+): ExchangeRateSnapshotInput[] {
+  return (['USD-CNY', 'HKD-CNY'] as const).map((pair) => {
+    const info = getExchangeRateInfo(pair);
+    if (!info || !Number.isFinite(info.rate) || info.rate <= 0) {
+      console.warn(
+        `[SnapshotService] Exchange rate snapshot unavailable for ${pair}, writing null`
+      );
+      return {
+        pair,
+        rate: null,
+        source: null,
+      };
+    }
+
+    return {
+      pair,
+      rate: info.rate,
+      source: `cache:${info.timestamp ?? getSnapshotTimestamp(snapshotDate)}`,
+    };
+  });
+}
+
+function buildQuoteSnapshotCandidates(
+  positions: Position[],
+  snapshotDate: string
+): QuoteSnapshotCandidate[] {
+  const timestamp = getSnapshotTimestamp(snapshotDate);
+
+  return positions
+    .map((position) => {
+      const currentPrice = toNullableNumber(position.currentPrice);
+      if (currentPrice === null || currentPrice <= 0) {
+        return null;
+      }
+
+      const quantity = Number(position.quantity ?? 0);
+      const dailyChangeLocal = toNullableNumber(position.dailyChangeLocal);
+      const changeAmount =
+        dailyChangeLocal !== null && quantity > 0
+          ? dailyChangeLocal / quantity
+          : null;
+      const prevClosePrice =
+        changeAmount !== null ? currentPrice - changeAmount : null;
+
+      return {
+        assetCode: position.asset.code,
+        date: snapshotDate,
+        timestamp,
+        currentPrice,
+        changePercent: toNullableNumber(position.dailyChangePercent),
+        changeAmount,
+        prevClosePrice,
+        weeklyChangePercent: toNullableNumber(position.weeklyChangePercent),
+        monthlyChangePercent: toNullableNumber(position.monthlyChangePercent),
+        yearlyChangePercent: toNullableNumber(position.yearlyChangePercent),
+      } satisfies QuoteSnapshotCandidate;
+    })
+    .filter(
+      (candidate): candidate is QuoteSnapshotCandidate => candidate !== null
+    );
+}
+
+async function upsertPortfolioSnapshot(
+  db: SnapshotDbClient,
+  params: {
+    portfolioId: string;
+    date: string;
+    totalMarketValue: number;
+    netAssets: number;
+    totalPnl: number;
+    dailyPnl: number;
+    cash: number;
+    leverageUsed: number | null;
+    leverageTotal: number | null;
+    leverageCostRate: number | null;
+    leverageCumulativeCost: number | null;
+    usdCny: number | null;
+    hkdCny: number | null;
+    realizedPnl: number | null;
+    unrealizedPnl: number | null;
+    totalCommission: number | null;
+    netDepositedCash: number | null;
+    totalDividendIncome: number | null;
+    totalPnlPercent: number | null;
+    dailyPnlPercent: number | null;
+    weeklyReturnPercent: number | null;
+    weeklyReturnValue: number | null;
+    weeklyBaseDate: string | null;
+    monthlyReturnPercent: number | null;
+    monthlyReturnValue: number | null;
+    monthlyBaseDate: string | null;
+    yearlyReturnPercent: number | null;
+    yearlyReturnValue: number | null;
+    yearlyBaseDate: string | null;
+  }
+): Promise<void> {
+  await db.$executeRawUnsafe(
+    `INSERT INTO "PortfolioSnapshot"
+       ("portfolioId", "date", "totalMarketValue", "netAssets", "totalPnl", "dailyPnl", "cash",
+        "leverageUsed", "leverageTotal", "leverageCostRate", "leverageCumulativeCost", "usdCny", "hkdCny",
+        "realizedPnl", "unrealizedPnl", "totalCommission", "netDepositedCash", "totalDividendIncome",
+        "totalPnlPercent", "dailyPnlPercent",
+        "weeklyReturnPercent", "weeklyReturnValue", "weeklyBaseDate",
+        "monthlyReturnPercent", "monthlyReturnValue", "monthlyBaseDate",
+        "yearlyReturnPercent", "yearlyReturnValue", "yearlyBaseDate",
+        "createdAt")
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT ("portfolioId", "date") DO UPDATE SET
+       "totalMarketValue"       = excluded."totalMarketValue",
+       "netAssets"              = excluded."netAssets",
+       "totalPnl"               = excluded."totalPnl",
+       "dailyPnl"               = excluded."dailyPnl",
+       "cash"                   = excluded."cash",
+       "leverageUsed"           = excluded."leverageUsed",
+       "leverageTotal"          = excluded."leverageTotal",
+       "leverageCostRate"       = excluded."leverageCostRate",
+       "leverageCumulativeCost" = excluded."leverageCumulativeCost",
+       "usdCny"                 = excluded."usdCny",
+       "hkdCny"                 = excluded."hkdCny",
+       "realizedPnl"            = excluded."realizedPnl",
+       "unrealizedPnl"          = excluded."unrealizedPnl",
+       "totalCommission"        = excluded."totalCommission",
+       "netDepositedCash"       = excluded."netDepositedCash",
+       "totalDividendIncome"    = excluded."totalDividendIncome",
+       "totalPnlPercent"        = excluded."totalPnlPercent",
+       "dailyPnlPercent"        = excluded."dailyPnlPercent",
+       "weeklyReturnPercent"    = excluded."weeklyReturnPercent",
+       "weeklyReturnValue"      = excluded."weeklyReturnValue",
+       "weeklyBaseDate"         = excluded."weeklyBaseDate",
+       "monthlyReturnPercent"   = excluded."monthlyReturnPercent",
+       "monthlyReturnValue"     = excluded."monthlyReturnValue",
+       "monthlyBaseDate"        = excluded."monthlyBaseDate",
+       "yearlyReturnPercent"    = excluded."yearlyReturnPercent",
+       "yearlyReturnValue"      = excluded."yearlyReturnValue",
+       "yearlyBaseDate"         = excluded."yearlyBaseDate",
+       "createdAt"              = CURRENT_TIMESTAMP`,
+    params.portfolioId,
+    params.date,
+    params.totalMarketValue,
+    params.netAssets,
+    params.totalPnl,
+    params.dailyPnl,
+    params.cash,
+    params.leverageUsed,
+    params.leverageTotal,
+    params.leverageCostRate,
+    params.leverageCumulativeCost,
+    params.usdCny,
+    params.hkdCny,
+    params.realizedPnl,
+    params.unrealizedPnl,
+    params.totalCommission,
+    params.netDepositedCash,
+    params.totalDividendIncome,
+    params.totalPnlPercent,
+    params.dailyPnlPercent,
+    params.weeklyReturnPercent,
+    params.weeklyReturnValue,
+    params.weeklyBaseDate,
+    params.monthlyReturnPercent,
+    params.monthlyReturnValue,
+    params.monthlyBaseDate,
+    params.yearlyReturnPercent,
+    params.yearlyReturnValue,
+    params.yearlyBaseDate
+  );
+}
+
+async function upsertPositionSnapshot(
+  db: SnapshotDbClient,
+  portfolioId: string,
+  date: string,
+  pos: Position
+): Promise<void> {
+  const totalCost = toSafeNumber(pos.totalCost);
+  const floatingPnl =
+    toNullableNumber(pos.floatingPnl) ??
+    (totalCost > 0 ? toSafeNumber(pos.marketValue) - totalCost : null);
+  const floatingPnlPercent =
+    toNullableNumber(pos.floatingPnlPercent) ??
+    (floatingPnl !== null && totalCost > 0
+      ? (floatingPnl / totalCost) * 100
+      : null);
+  const totalPnlPercent =
+    toNullableNumber(pos.totalPnlPercent) ??
+    (pos.totalBuyCost && pos.totalBuyCost > 0 && pos.totalPnl != null
+      ? (toSafeNumber(pos.totalPnl) / pos.totalBuyCost) * 100
+      : null);
+
+  await db.$executeRawUnsafe(
+    `INSERT INTO "PositionSnapshot"
+       ("portfolioId", "date", "assetCode", "quantity", "currentPrice", "marketValue",
+        "costPrice", "totalPnl", "dailyPnl", "dailyPct",
+        "totalPnlPercent", "floatingPnl", "floatingPnlPercent")
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT ("portfolioId", "date", "assetCode") DO UPDATE SET
+       "quantity"          = excluded."quantity",
+       "currentPrice"      = excluded."currentPrice",
+       "marketValue"       = excluded."marketValue",
+       "costPrice"         = excluded."costPrice",
+       "totalPnl"          = excluded."totalPnl",
+       "dailyPnl"          = excluded."dailyPnl",
+       "dailyPct"          = excluded."dailyPct",
+       "totalPnlPercent"   = excluded."totalPnlPercent",
+       "floatingPnl"       = excluded."floatingPnl",
+       "floatingPnlPercent" = excluded."floatingPnlPercent"`,
+    portfolioId,
+    date,
+    pos.asset.code,
+    pos.quantity,
+    pos.currentPrice ?? 0,
+    pos.marketValue ?? 0,
+    toNullableNumber(pos.costPrice),
+    toNullableNumber(pos.totalPnl),
+    toNullableNumber(pos.dailyChange),
+    toNullableNumber(pos.dailyChangePercent),
+    totalPnlPercent,
+    floatingPnl,
+    floatingPnlPercent
+  );
+}
+
+async function upsertExchangeRateSnapshot(
+  db: SnapshotDbClient,
+  snapshotDate: string,
+  snapshot: ExchangeRateSnapshotInput
+): Promise<void> {
+  await db.$executeRawUnsafe(
+    `INSERT INTO "ExchangeRateSnapshot"
+       ("date", "pair", "rate", "source", "createdAt")
+     VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+     ON CONFLICT ("date", "pair") DO UPDATE SET
+       "rate"      = excluded."rate",
+       "source"    = excluded."source",
+       "createdAt" = CURRENT_TIMESTAMP`,
+    snapshotDate,
+    snapshot.pair,
+    snapshot.rate,
+    snapshot.source
+  );
+}
+
+async function buildIndexSnapshotCandidates(
+  snapshotDate: string
+): Promise<IndexSnapshotCandidate[]> {
+  const codes = [...INDEX_CODES];
+  try {
+    const quotes = await fetchQuotes(codes);
+    return quotes
+      .map((q) => {
+        const name = INDEX_NAMES[q.code] ?? q.name ?? q.code;
+        const currentPrice = toNullableNumber(q.currentPrice);
+        if (currentPrice === null || currentPrice <= 0) {
+          return null;
+        }
+        return {
+          date: snapshotDate,
+          indexCode: q.code,
+          name,
+          currentPrice,
+          changeAmount: toNullableNumber(q.changeAmount),
+          changePercent: toNullableNumber(q.changePercent),
+          weeklyChangePercent: toNullableNumber(q.weeklyChangePercent),
+          monthlyChangePercent: toNullableNumber(q.monthlyChangePercent),
+          yearlyChangePercent: toNullableNumber(q.yearlyChangePercent),
+        } satisfies IndexSnapshotCandidate;
+      })
+      .filter((c): c is IndexSnapshotCandidate => c !== null);
+  } catch (error) {
+    console.warn(
+      '[SnapshotService] Failed to fetch index quotes for IndexSnapshot:',
+      error
+    );
+    return [];
+  }
+}
+
+async function tryWriteIndexSnapshots(
+  db: SnapshotDbClient,
+  snapshots: IndexSnapshotCandidate[]
+): Promise<void> {
+  if (snapshots.length === 0) {
+    return;
+  }
+  try {
+    for (const s of snapshots) {
+      await db.$executeRawUnsafe(
+        `INSERT INTO "IndexSnapshot"
+           ("date", "indexCode", "name", "currentPrice", "changeAmount", "changePercent",
+            "weeklyChangePercent", "monthlyChangePercent", "yearlyChangePercent", "createdAt")
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT ("date", "indexCode") DO UPDATE SET
+           "name"                = excluded."name",
+           "currentPrice"        = excluded."currentPrice",
+           "changeAmount"        = excluded."changeAmount",
+           "changePercent"       = excluded."changePercent",
+           "weeklyChangePercent" = excluded."weeklyChangePercent",
+           "monthlyChangePercent" = excluded."monthlyChangePercent",
+           "yearlyChangePercent" = excluded."yearlyChangePercent",
+           "createdAt"           = CURRENT_TIMESTAMP`,
+        s.date,
+        s.indexCode,
+        s.name,
+        s.currentPrice,
+        s.changeAmount,
+        s.changePercent,
+        s.weeklyChangePercent,
+        s.monthlyChangePercent,
+        s.yearlyChangePercent
+      );
+    }
+    console.log(
+      `[SnapshotService] ✅ IndexSnapshot written: ${snapshots.map((s) => s.indexCode).join(', ')}`
+    );
+  } catch (error) {
+    console.warn(
+      '[SnapshotService] Optional IndexSnapshot write failed, keep main snapshot committed.',
+      error
+    );
+  }
+}
+
+async function tryWriteOptionalQuoteSnapshots(
+  db: SnapshotDbClient,
+  snapshots: QuoteSnapshotCandidate[]
+): Promise<void> {
+  if (snapshots.length === 0) {
+    return;
+  }
+
+  try {
+    for (const snapshot of snapshots) {
+      await db.$executeRawUnsafe(
+        `INSERT INTO "QuoteSnapshot"
+           ("assetCode", "date", "timestamp", "currentPrice", "changePercent", "changeAmount", "prevClosePrice", "weeklyChangePercent", "monthlyChangePercent", "yearlyChangePercent", "createdAt")
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+         ON CONFLICT ("assetCode", "date") DO UPDATE SET
+           "timestamp"           = excluded."timestamp",
+           "currentPrice"        = excluded."currentPrice",
+           "changePercent"       = excluded."changePercent",
+           "changeAmount"        = excluded."changeAmount",
+           "prevClosePrice"      = excluded."prevClosePrice",
+           "weeklyChangePercent" = excluded."weeklyChangePercent",
+           "monthlyChangePercent" = excluded."monthlyChangePercent",
+           "yearlyChangePercent" = excluded."yearlyChangePercent",
+           "createdAt"           = CURRENT_TIMESTAMP`,
+        snapshot.assetCode,
+        snapshot.date,
+        snapshot.timestamp,
+        snapshot.currentPrice,
+        snapshot.changePercent,
+        snapshot.changeAmount,
+        snapshot.prevClosePrice,
+        snapshot.weeklyChangePercent,
+        snapshot.monthlyChangePercent,
+        snapshot.yearlyChangePercent
+      );
+    }
+  } catch (error) {
+    console.warn(
+      '[SnapshotService] Optional QuoteSnapshot write failed, keep main snapshot committed.',
+      error
+    );
+  }
+}
+
 async function correctSnapshotWithKline(params: {
   portfolioId: string;
   snapshotDate: string;
@@ -111,9 +585,12 @@ async function correctSnapshotWithKline(params: {
       cash: unknown;
       totalMarketValue: unknown;
       netAssets: unknown;
+      totalPnl: unknown;
+      dailyPnl: unknown;
+      leverageUsed: unknown;
     }>
   >(
-    `SELECT "cash", "totalMarketValue", "netAssets"
+    `SELECT "cash", "totalMarketValue", "netAssets", "totalPnl", "dailyPnl", "leverageUsed"
        FROM "PortfolioSnapshot"
       WHERE "portfolioId" = ? AND "date" = ?
       LIMIT 1`,
@@ -133,10 +610,14 @@ async function correctSnapshotWithKline(params: {
     Array<{
       assetCode: string;
       quantity: unknown;
+      currentPrice: unknown;
       marketValue: unknown;
+      totalPnl: unknown;
+      dailyPnl: unknown;
+      dailyPct: unknown;
     }>
   >(
-    `SELECT "assetCode", "quantity", "marketValue"
+    `SELECT "assetCode", "quantity", "currentPrice", "marketValue", "totalPnl", "dailyPnl", "dailyPct"
        FROM "PositionSnapshot"
       WHERE "portfolioId" = ? AND "date" = ?`,
     portfolioId,
@@ -154,6 +635,7 @@ async function correctSnapshotWithKline(params: {
     (sum, row) => sum + toSafeNumber(row.marketValue),
     0
   );
+  let portfolioPnlDelta = 0;
 
   let correctedCount = 0;
 
@@ -189,22 +671,74 @@ async function correctSnapshotWithKline(params: {
     }
 
     const newMarketValue = closePrice * quantity * fxRate;
+    const delta = newMarketValue - oldMarketValue;
+    const nextTotalPnl = toNullableNumber(row.totalPnl);
+    const nextDailyPnl = toNullableNumber(row.dailyPnl);
+    const correctedTotalPnl =
+      nextTotalPnl === null ? null : nextTotalPnl + delta;
+    const correctedDailyPnl =
+      nextDailyPnl === null ? null : nextDailyPnl + delta;
+    const prevCloseMarketValue =
+      correctedDailyPnl === null ? null : newMarketValue - correctedDailyPnl;
+    const correctedDailyPct =
+      correctedDailyPnl !== null &&
+      prevCloseMarketValue !== null &&
+      prevCloseMarketValue > 0
+        ? (correctedDailyPnl / prevCloseMarketValue) * 100
+        : toNullableNumber(row.dailyPct);
 
     await prisma.$executeRawUnsafe(
       `UPDATE "PositionSnapshot"
           SET "currentPrice" = ?,
-              "marketValue" = ?
+              "marketValue" = ?,
+              "totalPnl" = ?,
+              "dailyPnl" = ?,
+              "dailyPct" = ?
         WHERE "portfolioId" = ?
           AND "date" = ?
           AND "assetCode" = ?`,
       closePrice,
       newMarketValue,
+      correctedTotalPnl,
+      correctedDailyPnl,
+      correctedDailyPct,
       portfolioId,
       snapshotDate,
       assetCode
     );
 
+    const changeAmount =
+      quantity > 0 && fxRate > 0 && correctedDailyPnl !== null
+        ? correctedDailyPnl / quantity / fxRate
+        : null;
+    const prevClosePrice =
+      changeAmount !== null ? closePrice - changeAmount : null;
+    const changePercent =
+      changeAmount !== null && prevClosePrice !== null && prevClosePrice > 0
+        ? (changeAmount / prevClosePrice) * 100
+        : null;
+
+    await prisma.$executeRawUnsafe(
+      `UPDATE "QuoteSnapshot"
+          SET "timestamp" = ?,
+              "currentPrice" = ?,
+              "changeAmount" = ?,
+              "changePercent" = ?,
+              "prevClosePrice" = ?,
+              "createdAt" = CURRENT_TIMESTAMP
+        WHERE "assetCode" = ?
+          AND "date" = ?`,
+      getSnapshotTimestamp(snapshotDate),
+      closePrice,
+      changeAmount,
+      changePercent,
+      prevClosePrice,
+      assetCode,
+      snapshotDate
+    );
+
     totalMarketValue = totalMarketValue - oldMarketValue + newMarketValue;
+    portfolioPnlDelta += delta;
     correctedCount += 1;
   }
 
@@ -218,18 +752,26 @@ async function correctSnapshotWithKline(params: {
   const cash = toSafeNumber(snapshot.cash);
   const previousTotalMarketValue = toSafeNumber(snapshot.totalMarketValue);
   const previousNetAssets = toSafeNumber(snapshot.netAssets);
-  const leverageUsed = previousTotalMarketValue + cash - previousNetAssets;
+  const leverageUsed =
+    toNullableNumber(snapshot.leverageUsed) ??
+    previousTotalMarketValue + cash - previousNetAssets;
   const netAssets = totalMarketValue + cash - leverageUsed;
+  const totalPnl = toNullableNumber(snapshot.totalPnl);
+  const dailyPnl = toNullableNumber(snapshot.dailyPnl);
 
   await prisma.$executeRawUnsafe(
     `UPDATE "PortfolioSnapshot"
         SET "totalMarketValue" = ?,
             "netAssets" = ?,
+            "totalPnl" = ?,
+            "dailyPnl" = ?,
             "createdAt" = CURRENT_TIMESTAMP
       WHERE "portfolioId" = ?
         AND "date" = ?`,
     totalMarketValue,
     netAssets,
+    totalPnl === null ? null : totalPnl + portfolioPnlDelta,
+    dailyPnl === null ? null : dailyPnl + portfolioPnlDelta,
     portfolioId,
     snapshotDate
   );
@@ -264,33 +806,107 @@ async function takeSnapshotForPortfolio(
     });
 
     const snapshotDate = dateOverride || getSnapshotDate();
-
-    // 1. 写入组合级快照
-    await prisma.$executeRawUnsafe(
-      `INSERT INTO "PortfolioSnapshot" ("portfolioId", "date", "totalMarketValue", "netAssets", "totalPnl", "dailyPnl", "cash", "createdAt")
-       VALUES (?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-       ON CONFLICT ("portfolioId", "date") DO UPDATE SET
-         "totalMarketValue" = excluded."totalMarketValue",
-         "netAssets"        = excluded."netAssets",
-         "totalPnl"         = excluded."totalPnl",
-         "dailyPnl"         = excluded."dailyPnl",
-         "cash"             = excluded."cash",
-         "createdAt"        = CURRENT_TIMESTAMP`,
-      portfolioId,
-      snapshotDate,
-      stats.totalMarketValue,
-      stats.netAssets,
-      stats.totalPnl,
-      stats.dailyPnl,
-      stats.cash
+    const exchangeRateSnapshots = buildExchangeRateSnapshotInputs(snapshotDate);
+    const leverageCumulativeCost = calculateSnapshotLeverageCumulativeCost(
+      portfolio,
+      snapshotDate
+    );
+    const usdCny =
+      exchangeRateSnapshots.find((item) => item.pair === 'USD-CNY')?.rate ??
+      null;
+    const hkdCny =
+      exchangeRateSnapshots.find((item) => item.pair === 'HKD-CNY')?.rate ??
+      null;
+    const optionalQuoteSnapshots = buildQuoteSnapshotCandidates(
+      stats.positions,
+      snapshotDate
     );
 
-    // 2. 写入个股快照
-    for (const pos of stats.positions) {
-      await upsertPositionSnapshot(portfolioId, snapshotDate, pos);
-    }
+    // 计算补充字段
+    const netDepositedCash = stats.netDepositedCash;
+    const totalPnlPercent =
+      netDepositedCash > 0 ? (stats.totalPnl / netDepositedCash) * 100 : null;
+    const prevNetAssets = stats.netAssets - stats.dailyPnl;
+    const dailyPnlPercent =
+      prevNetAssets > 0 ? (stats.dailyPnl / prevNetAssets) * 100 : null;
 
-    await correctSnapshotWithKline({ portfolioId, snapshotDate });
+    const weeklyStats = stats.weeklyStats;
+    const monthlyStats = stats.monthlyStats;
+
+    // 年度收益：以净入金为基准（包含所有盈亏、融资成本、履约等所有市値变化）
+    const yearlyReturnValue =
+      netDepositedCash > 0 ? stats.netAssets - netDepositedCash : null;
+    const yearlyReturnPercent =
+      netDepositedCash > 0 && yearlyReturnValue !== null
+        ? (yearlyReturnValue / netDepositedCash) * 100
+        : null;
+    const yearlyBaseDate = format(startOfYear(new Date()), 'yyyy-MM-dd');
+
+    await prisma.$transaction(async (tx) => {
+      await upsertPortfolioSnapshot(tx, {
+        portfolioId,
+        date: snapshotDate,
+        totalMarketValue: stats.totalMarketValue,
+        netAssets: stats.netAssets,
+        totalPnl: stats.totalPnl,
+        dailyPnl: stats.dailyPnl,
+        cash: stats.cash,
+        leverageUsed: toNullableNumber(portfolio.leverage?.usedAmount),
+        leverageTotal: toNullableNumber(portfolio.leverage?.totalAmount),
+        leverageCostRate: toNullableNumber(portfolio.leverage?.costRate),
+        leverageCumulativeCost,
+        usdCny,
+        hkdCny,
+        realizedPnl: toNullableNumber(stats.realizedPnl),
+        unrealizedPnl: toNullableNumber(stats.unrealizedPnl),
+        totalCommission: toNullableNumber(stats.totalCommission),
+        netDepositedCash: toNullableNumber(netDepositedCash),
+        totalDividendIncome: toNullableNumber(stats.totalDividendIncome),
+        totalPnlPercent,
+        dailyPnlPercent,
+        weeklyReturnPercent: toNullableNumber(weeklyStats?.periodReturnPercent),
+        weeklyReturnValue: toNullableNumber(
+          weeklyStats?.totalValueChange ?? weeklyStats?.periodPnl
+        ),
+        weeklyBaseDate: weeklyStats?.baseDate ?? null,
+        monthlyReturnPercent: toNullableNumber(
+          monthlyStats?.periodReturnPercent
+        ),
+        monthlyReturnValue: toNullableNumber(
+          monthlyStats?.totalValueChange ?? monthlyStats?.periodPnl
+        ),
+        monthlyBaseDate: monthlyStats?.baseDate ?? null,
+        yearlyReturnPercent,
+        yearlyReturnValue,
+        yearlyBaseDate,
+      });
+
+      for (const pos of stats.positions) {
+        await upsertPositionSnapshot(tx, portfolioId, snapshotDate, pos);
+      }
+
+      for (const exchangeRateSnapshot of exchangeRateSnapshots) {
+        await upsertExchangeRateSnapshot(
+          tx,
+          snapshotDate,
+          exchangeRateSnapshot
+        );
+      }
+    });
+
+    await tryWriteOptionalQuoteSnapshots(prisma, optionalQuoteSnapshots);
+
+    const indexSnapshots = await buildIndexSnapshotCandidates(snapshotDate);
+    await tryWriteIndexSnapshots(prisma, indexSnapshots);
+
+    try {
+      await correctSnapshotWithKline({ portfolioId, snapshotDate });
+    } catch (error) {
+      console.warn(
+        `[SnapshotService] K-line correction failed after main snapshot commit: portfolio=${portfolioId}, date=${snapshotDate}`,
+        error
+      );
+    }
 
     console.log(
       `[SnapshotService] ✅ Snapshot saved: portfolio=${portfolioId}, date=${snapshotDate}, netAssets=${stats.netAssets.toFixed(2)}`
@@ -302,28 +918,6 @@ async function takeSnapshotForPortfolio(
     );
     throw error;
   }
-}
-
-async function upsertPositionSnapshot(
-  portfolioId: string,
-  date: string,
-  pos: Position
-): Promise<void> {
-  await prisma.$executeRawUnsafe(
-    `INSERT INTO "PositionSnapshot"
-       ("portfolioId", "date", "assetCode", "quantity", "currentPrice", "marketValue")
-     VALUES (?, ?, ?, ?, ?, ?)
-     ON CONFLICT ("portfolioId", "date", "assetCode") DO UPDATE SET
-       "quantity"     = excluded."quantity",
-       "currentPrice" = excluded."currentPrice",
-       "marketValue"  = excluded."marketValue"`,
-    portfolioId,
-    date,
-    pos.asset.code,
-    pos.quantity,
-    pos.currentPrice ?? 0,
-    pos.marketValue ?? 0
-  );
 }
 
 /**
@@ -340,7 +934,9 @@ async function takeSnapshotForAll(dateOverride?: string): Promise<void> {
       select: { id: true, snapshotEnabled: true },
     });
     const enabledSet = new Set(
-      dbPortfolios.filter((p: any) => p.snapshotEnabled).map((p: any) => p.id)
+      dbPortfolios
+        .filter((portfolio) => portfolio.snapshotEnabled)
+        .map((portfolio) => portfolio.id)
     );
 
     let count = 0;

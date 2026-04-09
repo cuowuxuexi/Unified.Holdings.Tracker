@@ -149,6 +149,21 @@ function normalizePeriodReportQuery(
   };
 }
 
+function isValidDateOnly(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    return false;
+  }
+
+  const [year, month, day] = value.split('-').map(Number);
+  const parsed = new Date(Date.UTC(year, month - 1, day));
+  return (
+    !Number.isNaN(parsed.getTime()) &&
+    parsed.getUTCFullYear() === year &&
+    parsed.getUTCMonth() === month - 1 &&
+    parsed.getUTCDate() === day
+  );
+}
+
 async function resolveLegacyPeriodReportPortfolioId(
   query: Request['query'],
   from: string,
@@ -773,6 +788,48 @@ router.patch(
 
 // ========== 复杂业务逻辑路由（暂时保持现有实现）==========
 
+// GET /api/portfolio/:id/stats/historical - 获取指定日期的历史统计快照
+router.get(
+  '/:id/stats/historical',
+  asyncHandler(async (req: Request, res: Response) => {
+    const portfolioId = req.params.id;
+    const date =
+      typeof req.query.date === 'string' ? req.query.date.trim() : '';
+
+    if (!date) {
+      return res.status(400).json({
+        message: 'Query parameter date is required in YYYY-MM-DD format.',
+      });
+    }
+
+    if (!isValidDateOnly(date)) {
+      return res.status(400).json({
+        message: 'Query parameter date must be a valid YYYY-MM-DD date.',
+      });
+    }
+
+    try {
+      const { getHistoricalStats } = await import(
+        '../services/historicalStatsService'
+      );
+      const stats = await getHistoricalStats(portfolioId, date);
+      res.json(stats);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.name === 'HistoricalStatsNotFoundError'
+      ) {
+        return res.status(404).json({
+          message: error.message,
+          portfolioId,
+          date,
+        });
+      }
+      throw error;
+    }
+  })
+);
+
 // GET /api/portfolio/:id/stats - 获取投资组合统计信息
 router.get(
   '/:id/stats',
@@ -1054,6 +1111,76 @@ router.post(
     );
     await takeSnapshotForPortfolio(portfolioId);
     res.json({ message: 'Snapshot triggered successfully.' });
+  })
+);
+
+// GET /api/portfolio/:id/snapshot-data?date=YYYY-MM-DD
+// 纯读库，返回指定日期的完整快照数据（不依赖实时 API）
+router.get(
+  '/:id/snapshot-data',
+  asyncHandler(async (req: Request, res: Response) => {
+    const portfolioId = req.params.id;
+    const date = req.query.date as string | undefined;
+
+    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({
+        error: 'Missing or invalid date parameter (format: YYYY-MM-DD)',
+      });
+    }
+
+    const [
+      portfolioSnap,
+      positionSnaps,
+      quoteSnaps,
+      indexSnaps,
+      exchangeRates,
+    ] = await Promise.all([
+      prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+        `SELECT * FROM "PortfolioSnapshot" WHERE "portfolioId" = ? AND "date" = ? LIMIT 1`,
+        portfolioId,
+        date
+      ),
+      prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+        `SELECT ps.*, a.name as assetName, a.market
+           FROM "PositionSnapshot" ps
+           LEFT JOIN "Asset" a ON a.code = ps.assetCode
+           WHERE ps."portfolioId" = ? AND ps."date" = ?
+           ORDER BY ps.marketValue DESC`,
+        portfolioId,
+        date
+      ),
+      prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+        `SELECT qs.* FROM "QuoteSnapshot" qs
+           INNER JOIN "PositionSnapshot" ps ON ps.assetCode = qs.assetCode
+           WHERE ps."portfolioId" = ? AND qs."date" = ?`,
+        portfolioId,
+        date
+      ),
+      prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+        `SELECT * FROM "IndexSnapshot" WHERE "date" = ? ORDER BY "indexCode"`,
+        date
+      ),
+      prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+        `SELECT * FROM "ExchangeRateSnapshot" WHERE "date" = ?`,
+        date
+      ),
+    ]);
+
+    if (portfolioSnap.length === 0) {
+      return res.status(404).json({
+        error: `No snapshot found for portfolio ${portfolioId} on ${date}`,
+      });
+    }
+
+    res.json({
+      date,
+      portfolioId,
+      portfolio: portfolioSnap[0],
+      positions: positionSnaps,
+      quotes: quoteSnaps,
+      indices: indexSnaps,
+      exchangeRates,
+    });
   })
 );
 

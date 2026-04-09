@@ -4,9 +4,9 @@ generator client {
 }
 
 // 数据库配置
-// DATABASE_URL 应设置为：file:./prisma/data/portfolio.db
-// 路径相对于 apps/backend/ 目录（不是项目根目录）
-// 确保 apps/backend/prisma/data/ 目录存在
+// DATABASE_URL 应设置为：file:./data/portfolio.db
+// Prisma CLI 会按 schema.prisma 所在目录解析相对路径
+// 因此这里实际落到 apps/backend/prisma/data/portfolio.db
 datasource db {
   provider = "sqlite"
   url      = env("DATABASE_URL")
@@ -69,6 +69,7 @@ model Transaction {
 model QuoteSnapshot {
   id                 Int      @id @default(autoincrement())
   assetCode          String
+  date               String?
   timestamp          DateTime
   currentPrice       Decimal
   changePercent      Decimal?
@@ -81,23 +82,49 @@ model QuoteSnapshot {
   prevClosePrice     Decimal?
   marketCap          Decimal?
   peRatio            Decimal?
-  weekChangePercent  Decimal?
-  monthChangePercent Decimal?
-  yearChangePercent  Decimal?
+  weeklyChangePercent  Decimal?
+  monthlyChangePercent Decimal?
+  yearlyChangePercent  Decimal?
   createdAt          DateTime @default(now())
   asset              Asset    @relation(fields: [assetCode], references: [code], onDelete: Cascade)
+
+  @@unique([assetCode, date])
 }
 
 model PortfolioSnapshot {
-  id               Int      @id @default(autoincrement())
-  portfolioId      String
-  date             String   // 格式 YYYY-MM-DD，每个组合每天只存一条
-  totalMarketValue Decimal  // 总市值（CNY）
-  netAssets        Decimal  // 净资产（CNY）
-  totalPnl         Decimal  // 累计盈亏
-  dailyPnl         Decimal  // 当日盈亏
-  cash             Decimal  // 现金
-  createdAt        DateTime @default(now())
+  id                    Int      @id @default(autoincrement())
+  portfolioId           String
+  date                  String   // 格式 YYYY-MM-DD，每个组合每天只存一条
+  totalMarketValue      Decimal  // 总市值（CNY）
+  netAssets             Decimal  // 净资产（CNY）
+  totalPnl              Decimal  // 累计盈亏
+  dailyPnl              Decimal  // 当日盈亏
+  cash                  Decimal  // 现金
+  leverageUsed          Decimal?
+  leverageTotal         Decimal?
+  leverageCostRate      Decimal?
+  leverageCumulativeCost Decimal?
+  usdCny                Decimal?
+  hkdCny                Decimal?
+  // 财务指标（快照时计算并存储，避免管线实时重算）
+  realizedPnl           Decimal?
+  unrealizedPnl         Decimal?
+  totalCommission       Decimal?
+  netDepositedCash      Decimal?
+  totalDividendIncome   Decimal?
+  totalPnlPercent       Decimal?
+  dailyPnlPercent       Decimal?
+  // 周期收益（快照时写入，避免历史序列缺口导致计算不稳定）
+  weeklyReturnPercent   Decimal?
+  weeklyReturnValue     Decimal?
+  weeklyBaseDate        String?
+  monthlyReturnPercent  Decimal?
+  monthlyReturnValue    Decimal?
+  monthlyBaseDate       String?
+  yearlyReturnPercent   Decimal?
+  yearlyReturnValue     Decimal?
+  yearlyBaseDate        String?
+  createdAt             DateTime @default(now())
 
   portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
 
@@ -105,20 +132,54 @@ model PortfolioSnapshot {
 }
 
 model PositionSnapshot {
-  id           Int      @id @default(autoincrement())
-  portfolioId  String
-  date         String   // 格式 YYYY-MM-DD
-  assetCode    String   // 股票代码 (如 sh600519)
-  quantity     Decimal  // 持仓数量
-  currentPrice Decimal  // 收盘价（原币种）
-  marketValue  Decimal  // 市值（CNY，含汇率）
-  createdAt    DateTime @default(now())
+  id               Int      @id @default(autoincrement())
+  portfolioId      String
+  date             String   // 格式 YYYY-MM-DD
+  assetCode        String   // 股票代码 (如 sh600519)
+  quantity         Decimal  // 持仓数量
+  currentPrice     Decimal  // 收盘价（原币种）
+  marketValue      Decimal  // 市值（CNY，含汇率）
+  costPrice        Decimal?
+  totalPnl         Decimal?
+  dailyPnl         Decimal?
+  dailyPct         Decimal?
+  totalPnlPercent  Decimal? // 总盈亏率（%）
+  floatingPnl      Decimal? // 浮动盈亏（CNY）
+  floatingPnlPercent Decimal? // 浮动盈亏率（%）
+  createdAt        DateTime @default(now())
 
   portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
   asset     Asset     @relation(fields: [assetCode], references: [code])
 
   @@unique([portfolioId, date, assetCode])
   @@index([portfolioId, date])
+}
+
+model IndexSnapshot {
+  id                   Int      @id @default(autoincrement())
+  date                 String
+  indexCode            String   // sh000001, sz399001, hkHSI, usDJI, usIXIC, usINX
+  name                 String   // 上证指数, 深证成指, ...
+  currentPrice         Decimal
+  changeAmount         Decimal?
+  changePercent        Decimal?
+  weeklyChangePercent  Decimal?
+  monthlyChangePercent Decimal?
+  yearlyChangePercent  Decimal?
+  createdAt            DateTime @default(now())
+
+  @@unique([date, indexCode])
+}
+
+model ExchangeRateSnapshot {
+  id        Int      @id @default(autoincrement())
+  date      String
+  pair      String
+  rate      Decimal?
+  source    String?
+  createdAt DateTime @default(now())
+
+  @@unique([date, pair])
 }
 
 model AttentionItem {
