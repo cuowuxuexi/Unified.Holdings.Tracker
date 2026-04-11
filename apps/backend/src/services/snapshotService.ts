@@ -585,7 +585,9 @@ async function correctPeriodStatsWithKline(params: {
 }): Promise<void> {
   const { portfolioId, snapshotDate } = params;
   try {
-    const portfolio = await container.getPortfolioUseCase.execute({ portfolioId });
+    const portfolio = await container.getPortfolioUseCase.execute({
+      portfolioId,
+    });
     if (!portfolio) {
       console.warn(
         `[SnapshotService] correctPeriodStatsWithKline: portfolio not found ${portfolioId}`
@@ -640,17 +642,35 @@ async function correctPeriodStatsWithKline(params: {
  * Phase 5: IndexSnapshot K 线修正
  * 用 K 线收盘价替换 IndexSnapshot 中的实时报价字段。
  */
-async function correctIndexSnapshotWithKline(snapshotDate: string): Promise<void> {
-  const prevDate = format(subDays(new Date(`${snapshotDate}T12:00:00+08:00`), 1), 'yyyy-MM-dd');
-  const yearStart = format(new Date(`${snapshotDate.slice(0, 4)}-01-01`), 'yyyy-MM-dd');
+async function correctIndexSnapshotWithKline(
+  snapshotDate: string
+): Promise<void> {
+  const prevDate = format(
+    subDays(new Date(`${snapshotDate}T12:00:00+08:00`), 1),
+    'yyyy-MM-dd'
+  );
+  const yearStart = format(
+    new Date(`${snapshotDate.slice(0, 4)}-01-01`),
+    'yyyy-MM-dd'
+  );
   // 月初：当月1日
   const monthStart = `${snapshotDate.slice(0, 8)}01`;
   // 上周收盘日（周五）：最简单的近似是取 snapshotDate 前7天内的最近 K 线
-  const weekLookback = format(subDays(new Date(`${snapshotDate}T12:00:00+08:00`), 7), 'yyyy-MM-dd');
+  const weekLookback = format(
+    subDays(new Date(`${snapshotDate}T12:00:00+08:00`), 7),
+    'yyyy-MM-dd'
+  );
 
   for (const indexCode of INDEX_CODES) {
     try {
-      const klineToday = await fetchKline(indexCode, 'daily', snapshotDate, snapshotDate, 'none', 5);
+      const klineToday = await fetchKline(
+        indexCode,
+        'daily',
+        snapshotDate,
+        snapshotDate,
+        'none',
+        5
+      );
       const closeToday = klineToday.find((k) => k.date === snapshotDate)?.close;
       if (!closeToday || closeToday <= 0) {
         console.warn(
@@ -659,28 +679,65 @@ async function correctIndexSnapshotWithKline(snapshotDate: string): Promise<void
         continue;
       }
 
-      const klinePrev = await fetchKline(indexCode, 'daily', prevDate, snapshotDate, 'none', 5);
-      const closePrev = klinePrev.filter((k) => k.date < snapshotDate).slice(-1)[0]?.close ?? null;
+      const klinePrev = await fetchKline(
+        indexCode,
+        'daily',
+        prevDate,
+        snapshotDate,
+        'none',
+        5
+      );
+      const closePrev =
+        klinePrev.filter((k) => k.date < snapshotDate).slice(-1)[0]?.close ??
+        null;
       const changeAmount = closePrev ? closeToday - closePrev : null;
-      const changePercent = closePrev && closePrev > 0 ? (changeAmount! / closePrev) * 100 : null;
+      const changePercent =
+        closePrev && closePrev > 0 ? (changeAmount! / closePrev) * 100 : null;
 
       // 周变化：取 weekLookback 到 snapshotDate 的 K 线
-      const klineWeek = await fetchKline(indexCode, 'daily', weekLookback, snapshotDate, 'none', 10);
-      const closeWeekBase = klineWeek.filter((k) => k.date < snapshotDate).slice(0, 1)[0]?.close ?? null;
+      const klineWeek = await fetchKline(
+        indexCode,
+        'daily',
+        weekLookback,
+        snapshotDate,
+        'none',
+        10
+      );
+      const closeWeekBase =
+        klineWeek.filter((k) => k.date < snapshotDate).slice(0, 1)[0]?.close ??
+        null;
       const weeklyChangePercent =
-        closeWeekBase && closeWeekBase > 0 ? ((closeToday - closeWeekBase) / closeWeekBase) * 100 : null;
+        closeWeekBase && closeWeekBase > 0
+          ? ((closeToday - closeWeekBase) / closeWeekBase) * 100
+          : null;
 
       // 月变化
-      const klineMonth = await fetchKline(indexCode, 'daily', monthStart, snapshotDate, 'none', 30);
-      const closeMonthBase = klineMonth.filter((k) => k.date < snapshotDate)[0]?.close ?? null;
+      const klineMonth = await fetchKline(
+        indexCode,
+        'daily',
+        monthStart,
+        snapshotDate,
+        'none',
+        30
+      );
+      const closeMonthBase =
+        klineMonth.filter((k) => k.date < snapshotDate)[0]?.close ?? null;
       const monthlyChangePercent =
         closeMonthBase && closeMonthBase > 0
           ? ((closeToday - closeMonthBase) / closeMonthBase) * 100
           : null;
 
       // 年变化
-      const klineYear = await fetchKline(indexCode, 'daily', yearStart, snapshotDate, 'none', 260);
-      const closeYearBase = klineYear.filter((k) => k.date < snapshotDate)[0]?.close ?? null;
+      const klineYear = await fetchKline(
+        indexCode,
+        'daily',
+        yearStart,
+        snapshotDate,
+        'none',
+        260
+      );
+      const closeYearBase =
+        klineYear.filter((k) => k.date < snapshotDate)[0]?.close ?? null;
       const yearlyChangePercent =
         closeYearBase && closeYearBase > 0
           ? ((closeToday - closeYearBase) / closeYearBase) * 100
@@ -940,8 +997,10 @@ async function correctSnapshotWithKline(params: {
   const netAssets = totalMarketValue + cash - leverageUsed;
   const totalPnl = toNullableNumber(snapshot.totalPnl);
   const dailyPnl = toNullableNumber(snapshot.dailyPnl);
-  const correctedTotalPnl = totalPnl === null ? null : totalPnl + portfolioPnlDelta;
-  const correctedDailyPnl = dailyPnl === null ? null : dailyPnl + portfolioPnlDelta;
+  const correctedTotalPnl =
+    totalPnl === null ? null : totalPnl + portfolioPnlDelta;
+  const correctedDailyPnl =
+    dailyPnl === null ? null : dailyPnl + portfolioPnlDelta;
 
   // Phase 3: 修正 PortfolioSnapshot 衍生字段
   const oldUnrealizedPnl = toNullableNumber(snapshot.unrealizedPnl);
@@ -951,7 +1010,9 @@ async function correctSnapshotWithKline(params: {
   const netDepositedCash = toNullableNumber(snapshot.netDepositedCash);
 
   const correctedTotalPnlPct =
-    correctedTotalPnl !== null && netDepositedCash !== null && netDepositedCash > 0
+    correctedTotalPnl !== null &&
+    netDepositedCash !== null &&
+    netDepositedCash > 0
       ? (correctedTotalPnl / netDepositedCash) * 100
       : null;
 
@@ -966,7 +1027,9 @@ async function correctSnapshotWithKline(params: {
       ? netAssets - netDepositedCash
       : null;
   const correctedYearlyReturnPct =
-    correctedYearlyReturnValue !== null && netDepositedCash !== null && netDepositedCash > 0
+    correctedYearlyReturnValue !== null &&
+    netDepositedCash !== null &&
+    netDepositedCash > 0
       ? (correctedYearlyReturnValue / netDepositedCash) * 100
       : null;
 

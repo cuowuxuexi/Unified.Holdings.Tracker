@@ -1101,16 +1101,47 @@ router.get(
 );
 
 // POST /api/portfolio/:id/snapshots/trigger - 手动触发组合快照
+// ?force=true 跳过 correctedAt 保护，强制覆盖已修正的快照
 router.post(
   '/:id/snapshots/trigger',
   asyncHandler(async (req: Request, res: Response) => {
     const portfolioId = req.params.id;
+    const force = req.query.force === 'true';
+
+    const { prisma } = await import('../lib/prisma');
+    const { format, subDays } = await import('date-fns');
+    const snapshotDate = format(subDays(new Date(), 1), 'yyyy-MM-dd');
+
+    if (!force) {
+      const existing = await prisma.$queryRawUnsafe<
+        Array<{ correctedAt: string | null }>
+      >(
+        `SELECT "correctedAt" FROM "PortfolioSnapshot"
+          WHERE "portfolioId" = ? AND "date" = ?
+          LIMIT 1`,
+        portfolioId,
+        snapshotDate
+      );
+      const correctedAt = existing[0]?.correctedAt ?? null;
+      if (correctedAt) {
+        res.status(409).json({
+          message: `快照已于 ${correctedAt} 完成 K 线修正，如需覆盖请传 ?force=true`,
+          correctedAt,
+          snapshotDate,
+        });
+        return;
+      }
+    }
 
     const { takeSnapshotForPortfolio } = await import(
       '../services/snapshotService'
     );
     await takeSnapshotForPortfolio(portfolioId);
-    res.json({ message: 'Snapshot triggered successfully.' });
+    res.json({
+      message: 'Snapshot triggered successfully.',
+      snapshotDate,
+      force,
+    });
   })
 );
 
