@@ -13,7 +13,13 @@ services:
     volumes:
       - tracker-data:/app/prisma/data
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:3001/api/health').then(r=>{if(!r.ok)throw 1})"]
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://localhost:3001/api/health').then(r=>{if(!r.ok)throw 1})",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -26,7 +32,7 @@ services:
     container_name: tracker-nginx
     restart: unless-stopped
     ports:
-      - "80:80"
+      - '8080:80'
     depends_on:
       backend:
         condition: service_healthy
