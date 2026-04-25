@@ -28,6 +28,7 @@ export const openApiDocument: UhtOpenApiDocument = {
     { name: 'Currency', description: '汇率服务' },
     { name: 'Freshness', description: '数据新鲜度契约（预留）' },
     { name: 'Source', description: '数据源健康与中台事实查询' },
+    { name: 'AgentTools', description: '只读 Agent 工具门面' },
   ],
   'x-uht-planned-readonly-contracts': {
     '/portfolio/{id}/data-freshness': {
@@ -889,6 +890,205 @@ export const openApiDocument: UhtOpenApiDocument = {
         },
       },
     },
+    '/agent-tools': {
+      get: {
+        tags: ['AgentTools'],
+        summary: '列出只读 Agent 工具',
+        description:
+          '返回 UHT 暴露给 AI/其他项目的只读工具目录。该目录只描述读取入口，不包含写操作。',
+        responses: {
+          '200': {
+            description: '成功返回工具目录',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentToolEnvelope' },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/agent-tools/latest-data-date': {
+      get: {
+        tags: ['AgentTools'],
+        summary: '工具：get_latest_data_date',
+        parameters: [
+          { name: 'portfolioId', in: 'query', schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: '成功返回最新可用日期',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentToolEnvelope' },
+              },
+            },
+          },
+          '404': { description: '没有可用组合快照' },
+        },
+      },
+    },
+    '/agent-tools/portfolio-overview-context': {
+      get: {
+        tags: ['AgentTools'],
+        summary: '工具：get_portfolio_overview_context',
+        description: '薄封装 M5 overview-context，不复制聚合逻辑。',
+        parameters: [
+          {
+            name: 'portfolioId',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+          },
+          { name: 'date', in: 'query', schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: '成功返回 overview-context',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentToolEnvelope' },
+              },
+            },
+          },
+          '400': { description: '参数错误' },
+          '404': { description: '没有可用组合快照' },
+        },
+      },
+    },
+    '/agent-tools/fx-context': {
+      get: {
+        tags: ['AgentTools'],
+        summary: '工具：get_fx_context',
+        parameters: [
+          {
+            name: 'portfolioId',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+          },
+          { name: 'date', in: 'query', schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: '成功返回 FX 上下文',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentToolEnvelope' },
+              },
+            },
+          },
+          '400': { description: '参数错误' },
+        },
+      },
+    },
+    '/agent-tools/yield-context': {
+      get: {
+        tags: ['AgentTools'],
+        summary: '工具：get_yield_context',
+        parameters: [
+          {
+            name: 'portfolioId',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+          },
+          { name: 'date', in: 'query', schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: '成功返回利率上下文',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentToolEnvelope' },
+              },
+            },
+          },
+          '400': { description: '参数错误' },
+        },
+      },
+    },
+    '/agent-tools/quote-diagnostics': {
+      get: {
+        tags: ['AgentTools'],
+        summary: '工具：get_quote_diagnostics',
+        parameters: [
+          {
+            name: 'portfolioId',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+          },
+          { name: 'date', in: 'query', schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: '成功返回行情诊断',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentToolEnvelope' },
+              },
+            },
+          },
+          '400': { description: '参数错误' },
+        },
+      },
+    },
+    '/agent-tools/macro-context': {
+      get: {
+        tags: ['AgentTools'],
+        summary: '工具：get_macro_context',
+        parameters: [
+          {
+            name: 'portfolioId',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+          },
+          { name: 'date', in: 'query', schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: '成功返回宏观上下文',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentToolEnvelope' },
+              },
+            },
+          },
+          '400': { description: '参数错误' },
+        },
+      },
+    },
+    '/agent-tools/source-health': {
+      get: {
+        tags: ['AgentTools'],
+        summary: '工具：get_source_health',
+        parameters: [
+          { name: 'domain', in: 'query', schema: { type: 'string' } },
+          { name: 'sourceId', in: 'query', schema: { type: 'string' } },
+          {
+            name: 'status',
+            in: 'query',
+            schema: {
+              type: 'string',
+              enum: ['HEALTHY', 'DEGRADED', 'DOWN', 'UNKNOWN'],
+            },
+          },
+        ],
+        responses: {
+          '200': {
+            description: '成功返回 source health',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/AgentToolEnvelope' },
+              },
+            },
+          },
+          '400': { description: '参数错误' },
+        },
+      },
+    },
   },
   components: {
     schemas: {
@@ -1469,6 +1669,34 @@ export const openApiDocument: UhtOpenApiDocument = {
             },
           },
           meta: { $ref: '#/components/schemas/ResponseMeta' },
+          warnings: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiWarning' },
+          },
+          errors: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiError' },
+          },
+        },
+      },
+      AgentToolEnvelope: {
+        type: 'object',
+        required: ['data', 'meta', 'warnings', 'errors'],
+        properties: {
+          data: {
+            nullable: true,
+            oneOf: [
+              { type: 'object', additionalProperties: true },
+              { $ref: '#/components/schemas/PortfolioOverviewContext' },
+            ],
+          },
+          meta: {
+            allOf: [{ $ref: '#/components/schemas/ResponseMeta' }],
+            properties: {
+              tool: { type: 'string' },
+              upstream_source: { type: 'string', nullable: true },
+            },
+          },
           warnings: {
             type: 'array',
             items: { $ref: '#/components/schemas/ApiWarning' },

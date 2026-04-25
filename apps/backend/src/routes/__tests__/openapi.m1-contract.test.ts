@@ -14,6 +14,20 @@ describe('OpenAPI M1 readonly contract', () => {
     expect(openApiDocument.paths['/source-health']).toBeDefined();
     expect(openApiDocument.paths['/data/yield-curve']).toBeDefined();
     expect(openApiDocument.paths['/data/macro-indicators']).toBeDefined();
+    expect(openApiDocument.paths['/agent-tools']).toBeDefined();
+    expect(
+      openApiDocument.paths['/agent-tools/latest-data-date']
+    ).toBeDefined();
+    expect(
+      openApiDocument.paths['/agent-tools/portfolio-overview-context']
+    ).toBeDefined();
+    expect(openApiDocument.paths['/agent-tools/fx-context']).toBeDefined();
+    expect(openApiDocument.paths['/agent-tools/yield-context']).toBeDefined();
+    expect(
+      openApiDocument.paths['/agent-tools/quote-diagnostics']
+    ).toBeDefined();
+    expect(openApiDocument.paths['/agent-tools/macro-context']).toBeDefined();
+    expect(openApiDocument.paths['/agent-tools/source-health']).toBeDefined();
     expect(
       openApiDocument.paths['/portfolio/{id}/period-report']
     ).toBeDefined();
@@ -28,6 +42,7 @@ describe('OpenAPI M1 readonly contract', () => {
     expect(schemas.YieldCurveEnvelope).toBeDefined();
     expect(schemas.MacroIndicatorEnvelope).toBeDefined();
     expect(schemas.PortfolioOverviewContextEnvelope).toBeDefined();
+    expect(schemas.AgentToolEnvelope).toBeDefined();
 
     const planned = (openApiDocument as any)[
       'x-uht-planned-readonly-contracts'
