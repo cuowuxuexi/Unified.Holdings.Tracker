@@ -59,6 +59,7 @@ docs/legacy-backend/
 .backups/
 *.backup
 *.bak
+*.bak-*
 
 # 临时调试脚本
 test-*.js
@@ -97,6 +98,8 @@ packages/**/src/**/*.d.ts.map
 *.db
 *.db-*
 *.db.backup*
+*.sqlite
+*.sqlite-*
 apps/backend/prisma/dev.db
 apps/backend/prisma/data/*.db*
 
