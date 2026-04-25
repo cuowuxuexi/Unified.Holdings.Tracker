@@ -28,6 +28,7 @@ Thumbs.db
 .cursor/
 .repomix/
 .specstory/
+.omx/
 
 # Others
 .env
