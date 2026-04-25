@@ -1,5 +1,5 @@
 generator client {
-  provider = "prisma-client-js"
+  provider      = "prisma-client-js"
   binaryTargets = ["native", "windows", "debian-openssl-3.0.x"]
 }
 
@@ -13,7 +13,7 @@ datasource db {
 }
 
 model Portfolio {
-  id                      String               @id @default(uuid())
+  id                      String              @id @default(uuid())
   name                    String
   initialCash             Decimal
   cash                    Decimal
@@ -21,10 +21,10 @@ model Portfolio {
   leverageUsedAmount      Decimal
   leverageAvailableAmount Decimal
   leverageCostRate        Decimal
-  createdAt               DateTime             @default(now())
-  updatedAt               DateTime             @updatedAt
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
   attentionInfo           String?
-  snapshotEnabled         Boolean              @default(true)
+  snapshotEnabled         Boolean             @default(true)
   AttentionItem           AttentionItem[]
   transactions            Transaction[]
   snapshots               PortfolioSnapshot[]
@@ -32,9 +32,9 @@ model Portfolio {
 }
 
 model Asset {
-  code         String          @id
-  name         String
-  market       Market
+  code              String             @id
+  name              String
+  market            Market
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   quotes            QuoteSnapshot[]
@@ -67,65 +67,65 @@ model Transaction {
 }
 
 model QuoteSnapshot {
-  id                 Int      @id @default(autoincrement())
-  assetCode          String
-  date               String?
-  timestamp          DateTime
-  currentPrice       Decimal
-  changePercent      Decimal?
-  changeAmount       Decimal?
-  volume             Decimal?
-  turnover           Decimal?
-  openPrice          Decimal?
-  highPrice          Decimal?
-  lowPrice           Decimal?
-  prevClosePrice     Decimal?
-  marketCap          Decimal?
-  peRatio            Decimal?
+  id                   Int      @id @default(autoincrement())
+  assetCode            String
+  date                 String?
+  timestamp            DateTime
+  currentPrice         Decimal
+  changePercent        Decimal?
+  changeAmount         Decimal?
+  volume               Decimal?
+  turnover             Decimal?
+  openPrice            Decimal?
+  highPrice            Decimal?
+  lowPrice             Decimal?
+  prevClosePrice       Decimal?
+  marketCap            Decimal?
+  peRatio              Decimal?
   weeklyChangePercent  Decimal?
   monthlyChangePercent Decimal?
   yearlyChangePercent  Decimal?
-  createdAt          DateTime @default(now())
-  asset              Asset    @relation(fields: [assetCode], references: [code], onDelete: Cascade)
+  createdAt            DateTime @default(now())
+  asset                Asset    @relation(fields: [assetCode], references: [code], onDelete: Cascade)
 
   @@unique([assetCode, date])
 }
 
 model PortfolioSnapshot {
-  id                    Int      @id @default(autoincrement())
-  portfolioId           String
-  date                  String   // 格式 YYYY-MM-DD，每个组合每天只存一条
-  totalMarketValue      Decimal  // 总市值（CNY）
-  netAssets             Decimal  // 净资产（CNY）
-  totalPnl              Decimal  // 累计盈亏
-  dailyPnl              Decimal  // 当日盈亏
-  cash                  Decimal  // 现金
-  leverageUsed          Decimal?
-  leverageTotal         Decimal?
-  leverageCostRate      Decimal?
+  id                     Int       @id @default(autoincrement())
+  portfolioId            String
+  date                   String // 格式 YYYY-MM-DD，每个组合每天只存一条
+  totalMarketValue       Decimal // 总市值（CNY）
+  netAssets              Decimal // 净资产（CNY）
+  totalPnl               Decimal // 累计盈亏
+  dailyPnl               Decimal // 当日盈亏
+  cash                   Decimal // 现金
+  leverageUsed           Decimal?
+  leverageTotal          Decimal?
+  leverageCostRate       Decimal?
   leverageCumulativeCost Decimal?
-  usdCny                Decimal?
-  hkdCny                Decimal?
+  usdCny                 Decimal?
+  hkdCny                 Decimal?
   // 财务指标（快照时计算并存储，避免管线实时重算）
-  realizedPnl           Decimal?
-  unrealizedPnl         Decimal?
-  totalCommission       Decimal?
-  netDepositedCash      Decimal?
-  totalDividendIncome   Decimal?
-  totalPnlPercent       Decimal?
-  dailyPnlPercent       Decimal?
+  realizedPnl            Decimal?
+  unrealizedPnl          Decimal?
+  totalCommission        Decimal?
+  netDepositedCash       Decimal?
+  totalDividendIncome    Decimal?
+  totalPnlPercent        Decimal?
+  dailyPnlPercent        Decimal?
   // 周期收益（快照时写入，避免历史序列缺口导致计算不稳定）
-  weeklyReturnPercent   Decimal?
-  weeklyReturnValue     Decimal?
-  weeklyBaseDate        String?
-  monthlyReturnPercent  Decimal?
-  monthlyReturnValue    Decimal?
-  monthlyBaseDate       String?
-  yearlyReturnPercent   Decimal?
-  yearlyReturnValue     Decimal?
-  yearlyBaseDate        String?
-  correctedAt           DateTime? // K 线修正完成时间；null 表示未修正
-  createdAt             DateTime @default(now())
+  weeklyReturnPercent    Decimal?
+  weeklyReturnValue      Decimal?
+  weeklyBaseDate         String?
+  monthlyReturnPercent   Decimal?
+  monthlyReturnValue     Decimal?
+  monthlyBaseDate        String?
+  yearlyReturnPercent    Decimal?
+  yearlyReturnValue      Decimal?
+  yearlyBaseDate         String?
+  correctedAt            DateTime? // K 线修正完成时间；null 表示未修正
+  createdAt              DateTime  @default(now())
 
   portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
 
@@ -133,21 +133,21 @@ model PortfolioSnapshot {
 }
 
 model PositionSnapshot {
-  id               Int      @id @default(autoincrement())
-  portfolioId      String
-  date             String   // 格式 YYYY-MM-DD
-  assetCode        String   // 股票代码 (如 sh600519)
-  quantity         Decimal  // 持仓数量
-  currentPrice     Decimal  // 收盘价（原币种）
-  marketValue      Decimal  // 市值（CNY，含汇率）
-  costPrice        Decimal?
-  totalPnl         Decimal?
-  dailyPnl         Decimal?
-  dailyPct         Decimal?
-  totalPnlPercent  Decimal? // 总盈亏率（%）
-  floatingPnl      Decimal? // 浮动盈亏（CNY）
+  id                 Int      @id @default(autoincrement())
+  portfolioId        String
+  date               String // 格式 YYYY-MM-DD
+  assetCode          String // 股票代码 (如 sh600519)
+  quantity           Decimal // 持仓数量
+  currentPrice       Decimal // 收盘价（原币种）
+  marketValue        Decimal // 市值（CNY，含汇率）
+  costPrice          Decimal?
+  totalPnl           Decimal?
+  dailyPnl           Decimal?
+  dailyPct           Decimal?
+  totalPnlPercent    Decimal? // 总盈亏率（%）
+  floatingPnl        Decimal? // 浮动盈亏（CNY）
   floatingPnlPercent Decimal? // 浮动盈亏率（%）
-  createdAt        DateTime @default(now())
+  createdAt          DateTime @default(now())
 
   portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
   asset     Asset     @relation(fields: [assetCode], references: [code])
@@ -159,8 +159,8 @@ model PositionSnapshot {
 model IndexSnapshot {
   id                   Int      @id @default(autoincrement())
   date                 String
-  indexCode            String   // sh000001, sz399001, hkHSI, usDJI, usIXIC, usINX
-  name                 String   // 上证指数, 深证成指, ...
+  indexCode            String // sh000001, sz399001, hkHSI, usDJI, usIXIC, usINX
+  name                 String // 上证指数, 深证成指, ...
   currentPrice         Decimal
   changeAmount         Decimal?
   changePercent        Decimal?
@@ -181,6 +181,89 @@ model ExchangeRateSnapshot {
   createdAt DateTime @default(now())
 
   @@unique([date, pair])
+}
+
+model SourceRun {
+  id           String          @id @default(uuid())
+  runKey       String          @unique
+  sourceId     String
+  domain       String
+  job          String?
+  targetDate   String?
+  startedAt    DateTime
+  finishedAt   DateTime?
+  status       SourceRunStatus
+  rowsWritten  Int             @default(0)
+  errorCode    String?
+  errorMessage String?
+  payloadHash  String?
+  createdAt    DateTime        @default(now())
+  updatedAt    DateTime        @updatedAt
+
+  @@index([sourceId, startedAt])
+  @@index([domain, targetDate])
+  @@index([status, startedAt])
+}
+
+model SourceHealth {
+  id                  Int                @id @default(autoincrement())
+  sourceId            String
+  domain              String
+  status              SourceHealthStatus
+  checkedAt           DateTime
+  lastSuccessAt       DateTime?
+  lastFailureAt       DateTime?
+  consecutiveFailures Int                @default(0)
+  latencyMs           Int?
+  errorCode           String?
+  errorMessage        String?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  @@unique([sourceId, domain])
+  @@index([domain, status])
+  @@index([checkedAt])
+}
+
+model YieldCurveSnapshot {
+  id           Int              @id @default(autoincrement())
+  date         String
+  country      String
+  tenor        String
+  yieldPercent Decimal?
+  sourceId     String
+  sourceTime   DateTime?
+  status       M2SnapshotStatus
+  errorSummary String?
+  payloadHash  String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@unique([date, country, tenor, sourceId])
+  @@index([date, country])
+  @@index([country, tenor, date])
+  @@index([sourceId, date])
+  @@index([status, date])
+}
+
+model MacroIndicatorSnapshot {
+  id           Int              @id @default(autoincrement())
+  date         String
+  indicatorId  String
+  value        Decimal?
+  unit         String?
+  sourceId     String
+  sourceTime   DateTime?
+  status       M2SnapshotStatus
+  errorSummary String?
+  payloadHash  String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  @@unique([date, indicatorId, sourceId])
+  @@index([indicatorId, date])
+  @@index([sourceId, date])
+  @@index([status, date])
 }
 
 model AttentionItem {
@@ -209,4 +292,24 @@ enum TransactionType {
   LEVERAGE_REMOVE
   LEVERAGE_COST
   DIVIDEND
+}
+
+enum SourceRunStatus {
+  SUCCESS
+  PARTIAL
+  FAILED
+}
+
+enum SourceHealthStatus {
+  HEALTHY
+  DEGRADED
+  DOWN
+  UNKNOWN
+}
+
+enum M2SnapshotStatus {
+  SUCCESS
+  MISSING
+  STALE
+  SOURCE_FAILED
 }
