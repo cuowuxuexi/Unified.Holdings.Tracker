@@ -85,6 +85,37 @@ describe('PrismaM2DataRepository', () => {
     expect(health.consecutiveFailures).toBe(2);
   });
 
+  it('lists source health by domain and status', async () => {
+    const checkedAt = new Date('2026-04-25T01:02:00.000Z');
+
+    await repository.upsertSourceHealth({
+      sourceId: 'akshare-yield-curve',
+      domain: 'yield_curve',
+      status: 'HEALTHY',
+      checkedAt,
+    });
+    await repository.upsertSourceHealth({
+      sourceId: 'fred-macro',
+      domain: 'macro',
+      status: 'DOWN',
+      checkedAt,
+      lastFailureAt: checkedAt,
+      consecutiveFailures: 1,
+    });
+
+    const yieldHealth = await repository.listSourceHealth({
+      domain: 'yield_curve',
+      status: 'HEALTHY',
+    });
+
+    expect(yieldHealth).toHaveLength(1);
+    expect(yieldHealth[0]).toMatchObject({
+      sourceId: 'akshare-yield-curve',
+      domain: 'yield_curve',
+      status: 'HEALTHY',
+    });
+  });
+
   it('stores missing yield curve points and supports date/source window queries', async () => {
     await repository.upsertYieldCurveSnapshot({
       date: '2026-04-24',

@@ -57,6 +57,12 @@ export interface SourceHealthRecord {
   updatedAt: Date;
 }
 
+export interface SourceHealthQuery {
+  domain?: string;
+  sourceId?: string;
+  status?: SourceHealthStatus;
+}
+
 export interface UpsertSourceHealthInput {
   sourceId: string;
   domain: string;
@@ -146,6 +152,7 @@ export interface M2DataRepository {
   upsertSourceHealth(
     input: UpsertSourceHealthInput
   ): Promise<SourceHealthRecord>;
+  listSourceHealth(query?: SourceHealthQuery): Promise<SourceHealthRecord[]>;
   upsertYieldCurveSnapshot(
     input: UpsertYieldCurveSnapshotInput
   ): Promise<YieldCurveSnapshotRecord>;

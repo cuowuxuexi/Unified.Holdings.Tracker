@@ -1,4 +1,5 @@
-import { SourceAdapter, SourceResult, toSourceError } from '../..';
+import { toSourceError } from '../../errors';
+import { SourceAdapter, SourceResult } from '../../types';
 import { normalizeFxRates } from './normalizer';
 import { FX_PAIRS, FxFetcher, FxRateRecord, FxRateRequest } from './types';
 

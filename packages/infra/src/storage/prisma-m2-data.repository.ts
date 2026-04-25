@@ -4,6 +4,7 @@ import type {
   M2DataRepository,
   MacroIndicatorSnapshotQuery,
   MacroIndicatorSnapshotRecord,
+  SourceHealthQuery,
   SourceHealthRecord,
   SourceRunRecord,
   UpsertMacroIndicatorSnapshotInput,
@@ -88,6 +89,21 @@ export class PrismaM2DataRepository implements M2DataRepository {
     });
 
     return mapSourceHealth(record);
+  }
+
+  async listSourceHealth(
+    query: SourceHealthQuery = {}
+  ): Promise<SourceHealthRecord[]> {
+    const records = await this.prisma.sourceHealth.findMany({
+      where: {
+        domain: query.domain,
+        sourceId: query.sourceId,
+        status: query.status,
+      },
+      orderBy: [{ domain: 'asc' }, { sourceId: 'asc' }],
+    });
+
+    return records.map(mapSourceHealth);
   }
 
   async upsertYieldCurveSnapshot(

@@ -11,6 +11,7 @@ import marketDataRouter from './routes/marketData';
 import portfolioRouter from './routes/portfolio';
 import batchRouter from './routes/batch';
 import archiveRouter from './routes/archive';
+import sourceDataRouter from './routes/sourceData';
 import { dataService } from './services/dataService';
 import { initExchangeRates } from './services/currencyService';
 import {
@@ -147,6 +148,7 @@ export const createApp = (): Express => {
 
   app.use(`${apiBasePath}/market`, marketDataRouter);
   app.use(`${apiBasePath}/portfolio`, portfolioRouter);
+  app.use(`${apiBasePath}`, sourceDataRouter);
   app.use(`${apiBasePath}/batch`, batchRouter);
   app.use(`${apiBasePath}`, archiveRouter);
 

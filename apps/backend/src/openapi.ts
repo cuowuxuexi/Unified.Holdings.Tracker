@@ -27,18 +27,13 @@ export const openApiDocument: UhtOpenApiDocument = {
     { name: 'Market', description: '市场数据' },
     { name: 'Currency', description: '汇率服务' },
     { name: 'Freshness', description: '数据新鲜度契约（预留）' },
-    { name: 'Source', description: '数据源健康契约（预留）' },
+    { name: 'Source', description: '数据源健康与中台事实查询' },
   ],
   'x-uht-planned-readonly-contracts': {
     '/portfolio/{id}/data-freshness': {
       status: 'reserved',
       envelope: '#/components/schemas/DataFreshnessEnvelope',
       note: 'Reserved for M2/M3-backed freshness implementation; not a production route in M1.',
-    },
-    '/source-health': {
-      status: 'reserved',
-      envelope: '#/components/schemas/SourceHealthEnvelope',
-      note: 'Reserved for Source Gateway health implementation; not a production route in M1.',
     },
   },
   paths: {
@@ -737,6 +732,111 @@ export const openApiDocument: UhtOpenApiDocument = {
         },
       },
     },
+    '/source-health': {
+      get: {
+        tags: ['Source'],
+        summary: '查询数据源健康状态',
+        description: '返回 Source Gateway 写入的 source health 快照。',
+        parameters: [
+          {
+            name: 'domain',
+            in: 'query',
+            schema: { type: 'string' },
+          },
+          {
+            name: 'sourceId',
+            in: 'query',
+            schema: { type: 'string' },
+          },
+          {
+            name: 'status',
+            in: 'query',
+            schema: {
+              type: 'string',
+              enum: ['HEALTHY', 'DEGRADED', 'DOWN', 'UNKNOWN'],
+            },
+          },
+        ],
+        responses: {
+          '200': {
+            description: '成功返回 source health',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/SourceHealthEnvelope' },
+              },
+            },
+          },
+          '400': { description: '查询参数错误' },
+        },
+      },
+    },
+    '/data/yield-curve': {
+      get: {
+        tags: ['Source'],
+        summary: '查询国债曲线标准事实',
+        description: '读取 M2 YieldCurveSnapshot 标准表。',
+        parameters: [
+          { name: 'date', in: 'query', schema: { type: 'string' } },
+          { name: 'dateFrom', in: 'query', schema: { type: 'string' } },
+          { name: 'dateTo', in: 'query', schema: { type: 'string' } },
+          { name: 'country', in: 'query', schema: { type: 'string' } },
+          { name: 'tenors', in: 'query', schema: { type: 'string' } },
+          { name: 'sourceId', in: 'query', schema: { type: 'string' } },
+          {
+            name: 'status',
+            in: 'query',
+            schema: {
+              type: 'string',
+              enum: ['SUCCESS', 'MISSING', 'STALE', 'SOURCE_FAILED'],
+            },
+          },
+        ],
+        responses: {
+          '200': {
+            description: '成功返回国债曲线事实',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/YieldCurveEnvelope' },
+              },
+            },
+          },
+          '400': { description: '查询参数错误' },
+        },
+      },
+    },
+    '/data/macro-indicators': {
+      get: {
+        tags: ['Source'],
+        summary: '查询宏观指标标准事实',
+        description: '读取 M2 MacroIndicatorSnapshot 标准表。',
+        parameters: [
+          { name: 'date', in: 'query', schema: { type: 'string' } },
+          { name: 'dateFrom', in: 'query', schema: { type: 'string' } },
+          { name: 'dateTo', in: 'query', schema: { type: 'string' } },
+          { name: 'indicatorIds', in: 'query', schema: { type: 'string' } },
+          { name: 'sourceId', in: 'query', schema: { type: 'string' } },
+          {
+            name: 'status',
+            in: 'query',
+            schema: {
+              type: 'string',
+              enum: ['SUCCESS', 'MISSING', 'STALE', 'SOURCE_FAILED'],
+            },
+          },
+        ],
+        responses: {
+          '200': {
+            description: '成功返回宏观指标事实',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/MacroIndicatorEnvelope' },
+              },
+            },
+          },
+          '400': { description: '查询参数错误' },
+        },
+      },
+    },
   },
   components: {
     schemas: {
@@ -1149,15 +1249,124 @@ export const openApiDocument: UhtOpenApiDocument = {
       },
       SourceHealthEnvelope: {
         type: 'object',
-        description:
-          'Reserved contract for future Source Gateway health endpoint; not implemented as a production route in M1.',
+        description: 'Source Gateway health readonly response.',
         properties: {
           data: {
             type: 'object',
             properties: {
               sources: {
                 type: 'array',
-                items: { type: 'object', additionalProperties: true },
+                items: { $ref: '#/components/schemas/SourceHealthRecord' },
+              },
+            },
+          },
+          meta: { $ref: '#/components/schemas/ResponseMeta' },
+          warnings: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiWarning' },
+          },
+          errors: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiError' },
+          },
+        },
+      },
+      SourceHealthRecord: {
+        type: 'object',
+        properties: {
+          sourceId: { type: 'string' },
+          domain: { type: 'string' },
+          status: {
+            type: 'string',
+            enum: ['HEALTHY', 'DEGRADED', 'DOWN', 'UNKNOWN'],
+          },
+          checkedAt: { type: 'string', format: 'date-time' },
+          lastSuccessAt: {
+            type: 'string',
+            format: 'date-time',
+            nullable: true,
+          },
+          lastFailureAt: {
+            type: 'string',
+            format: 'date-time',
+            nullable: true,
+          },
+          consecutiveFailures: { type: 'integer' },
+          latencyMs: { type: 'integer', nullable: true },
+          errorCode: { type: 'string', nullable: true },
+          errorMessage: { type: 'string', nullable: true },
+        },
+      },
+      YieldCurveSnapshotRecord: {
+        type: 'object',
+        properties: {
+          date: { type: 'string', format: 'date' },
+          country: { type: 'string' },
+          tenor: { type: 'string' },
+          yieldPercent: { type: 'number', nullable: true },
+          sourceId: { type: 'string' },
+          sourceTime: { type: 'string', format: 'date-time', nullable: true },
+          status: {
+            type: 'string',
+            enum: ['SUCCESS', 'MISSING', 'STALE', 'SOURCE_FAILED'],
+          },
+          errorSummary: { type: 'string', nullable: true },
+        },
+      },
+      YieldCurveEnvelope: {
+        type: 'object',
+        required: ['data', 'meta', 'warnings', 'errors'],
+        properties: {
+          data: {
+            type: 'object',
+            properties: {
+              records: {
+                type: 'array',
+                items: {
+                  $ref: '#/components/schemas/YieldCurveSnapshotRecord',
+                },
+              },
+            },
+          },
+          meta: { $ref: '#/components/schemas/ResponseMeta' },
+          warnings: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiWarning' },
+          },
+          errors: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiError' },
+          },
+        },
+      },
+      MacroIndicatorSnapshotRecord: {
+        type: 'object',
+        properties: {
+          date: { type: 'string', format: 'date' },
+          indicatorId: { type: 'string' },
+          value: { type: 'number', nullable: true },
+          unit: { type: 'string', nullable: true },
+          sourceId: { type: 'string' },
+          sourceTime: { type: 'string', format: 'date-time', nullable: true },
+          status: {
+            type: 'string',
+            enum: ['SUCCESS', 'MISSING', 'STALE', 'SOURCE_FAILED'],
+          },
+          errorSummary: { type: 'string', nullable: true },
+        },
+      },
+      MacroIndicatorEnvelope: {
+        type: 'object',
+        required: ['data', 'meta', 'warnings', 'errors'],
+        properties: {
+          data: {
+            type: 'object',
+            properties: {
+              records: {
+                type: 'array',
+                items: {
+                  $ref: '#/components/schemas/MacroIndicatorSnapshotRecord',
+                },
               },
             },
           },

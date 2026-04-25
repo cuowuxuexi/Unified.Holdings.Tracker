@@ -1,4 +1,5 @@
-import { SourceAdapter, SourceResult, toSourceError } from '../..';
+import { toSourceError } from '../../errors';
+import { SourceAdapter, SourceResult } from '../../types';
 import {
   normalizeYieldCurveResponse,
   normalizeYieldCurveSourceFailure,
