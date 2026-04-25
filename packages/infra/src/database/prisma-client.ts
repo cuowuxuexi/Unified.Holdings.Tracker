@@ -14,7 +14,7 @@ export type PrismaClientInstance = PrismaClient;
 
 function resolveDatabaseUrl(rawUrl: string | undefined): string {
   const SQLITE_PREFIX = 'file:';
-  const repoRoot = path.resolve(__dirname, '../../../..');
+  const repoRoot = findRepoRoot() ?? path.resolve(__dirname, '../../../..');
   const fallbackRelativePath = path.join(
     'apps',
     'backend',
@@ -33,7 +33,35 @@ function resolveDatabaseUrl(rawUrl: string | undefined): string {
   return resolvedUrl;
 }
 
-function extractPath(rawUrl: string | undefined, prefix: string): string | null {
+function findRepoRoot(): string | null {
+  const starts = [process.cwd(), __dirname];
+
+  for (const start of starts) {
+    let current = path.resolve(start);
+
+    while (true) {
+      if (
+        fs.existsSync(path.join(current, 'package.json')) &&
+        fs.existsSync(
+          path.join(current, 'apps', 'backend', 'prisma', 'schema.prisma')
+        )
+      ) {
+        return current;
+      }
+
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+  }
+
+  return null;
+}
+
+function extractPath(
+  rawUrl: string | undefined,
+  prefix: string
+): string | null {
   if (!rawUrl || rawUrl.trim() === '') return null;
   if (rawUrl.startsWith(prefix)) {
     const stripped = rawUrl.slice(prefix.length).trim();
