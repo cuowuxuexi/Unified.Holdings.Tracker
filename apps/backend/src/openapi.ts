@@ -615,6 +615,58 @@ export const openApiDocument: UhtOpenApiDocument = {
         },
       },
     },
+    '/portfolio/{id}/overview-context': {
+      get: {
+        tags: ['Portfolio'],
+        summary: '读取组合轻量上下文',
+        description:
+          '面向 AI 与消费端的只读聚合端点。按请求日期解析到最新可用快照，缺少可选事实时通过 warnings 降级。',
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'date',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', format: 'date' },
+            description:
+              '真实日历日期，格式 YYYY-MM-DD；缺省时使用该组合最新快照。',
+          },
+        ],
+        responses: {
+          '200': {
+            description: '成功返回轻量上下文',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/PortfolioOverviewContextEnvelope',
+                },
+              },
+            },
+          },
+          '400': {
+            description: '日期不是实际日历日期',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorEnvelope' },
+              },
+            },
+          },
+          '404': {
+            description: '无法解析到任何组合快照',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorEnvelope' },
+              },
+            },
+          },
+        },
+      },
+    },
     '/market/quote': {
       get: {
         tags: ['Market'],
@@ -1081,6 +1133,52 @@ export const openApiDocument: UhtOpenApiDocument = {
         required: ['data', 'meta', 'warnings', 'errors'],
         properties: {
           data: { $ref: '#/components/schemas/SnapshotData' },
+          meta: { $ref: '#/components/schemas/ResponseMeta' },
+          warnings: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiWarning' },
+          },
+          errors: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiError' },
+          },
+        },
+      },
+      PortfolioOverviewContext: {
+        type: 'object',
+        required: [
+          'portfolio',
+          'fx',
+          'yield',
+          'market',
+          'macro',
+          'source_health',
+        ],
+        properties: {
+          portfolio: { type: 'object', additionalProperties: true },
+          fx: { type: 'object', additionalProperties: true },
+          yield: {
+            type: 'object',
+            nullable: true,
+            additionalProperties: true,
+          },
+          market: { type: 'object', additionalProperties: true },
+          macro: {
+            type: 'object',
+            nullable: true,
+            additionalProperties: true,
+          },
+          source_health: { type: 'object', additionalProperties: true },
+        },
+      },
+      PortfolioOverviewContextEnvelope: {
+        type: 'object',
+        required: ['data', 'meta', 'warnings', 'errors'],
+        properties: {
+          data: {
+            nullable: true,
+            allOf: [{ $ref: '#/components/schemas/PortfolioOverviewContext' }],
+          },
           meta: { $ref: '#/components/schemas/ResponseMeta' },
           warnings: {
             type: 'array',

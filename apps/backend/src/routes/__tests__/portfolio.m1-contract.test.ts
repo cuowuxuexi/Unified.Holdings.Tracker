@@ -7,6 +7,7 @@ import {
   getExchangeRate,
   getExchangeRateInfo,
 } from '../../services/currencyService';
+import { getPortfolioOverviewContext } from '../../services/overviewContextService';
 
 jest.mock('../../container', () => ({
   container: {
@@ -48,6 +49,10 @@ jest.mock('../../services/portfolioStatsService', () => ({
 
 jest.mock('../../services/tencentApi', () => ({
   fetchQuotes: jest.fn(),
+}));
+
+jest.mock('../../services/overviewContextService', () => ({
+  getPortfolioOverviewContext: jest.fn(),
 }));
 
 function createTestApp() {
@@ -160,5 +165,68 @@ describe('portfolio M1 contract', () => {
       updatedAt: '2026-04-24T00:00:00.000Z',
     });
     expect(response.body.meta.source).toBe('uht.exchange-rates');
+  });
+
+  it('validates overview-context date as a real calendar date', async () => {
+    const response = await request(createTestApp()).get(
+      '/api/portfolio/p1/overview-context?date=2026-99-99'
+    );
+
+    expect(response.status).toBe(400);
+    expect(response.body.errors[0].code).toBe('invalid_date');
+    expect(getPortfolioOverviewContext).not.toHaveBeenCalled();
+  });
+
+  it('returns overview-context standard envelope', async () => {
+    (getPortfolioOverviewContext as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      body: {
+        data: {
+          portfolio: { portfolioId: 'p1', net_assets: 100 },
+          fx: { pairs: [] },
+          yield: null,
+          market: { requested: [], found: [], missing: [] },
+          macro: null,
+          source_health: { sources: [] },
+        },
+        meta: {
+          portfolioId: 'p1',
+          requested_date: '2026-04-25',
+          resolved_date: '2026-04-24',
+          latest_available_date: '2026-04-24',
+          source: 'uht.overview-context',
+          generated_at: '2026-04-25T10:00:00.000Z',
+        },
+        warnings: [
+          {
+            code: 'date_resolved_to_latest_available',
+            message: 'resolved',
+          },
+        ],
+        errors: [],
+      },
+    });
+
+    const response = await request(createTestApp()).get(
+      '/api/portfolio/p1/overview-context?date=2026-04-25'
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.portfolio.net_assets).toBe(100);
+    expect(response.body.meta).toEqual(
+      expect.objectContaining({
+        requested_date: '2026-04-25',
+        resolved_date: '2026-04-24',
+        latest_available_date: '2026-04-24',
+        source: 'uht.overview-context',
+      })
+    );
+    expect(response.body.warnings[0].code).toBe(
+      'date_resolved_to_latest_available'
+    );
+    expect(getPortfolioOverviewContext).toHaveBeenCalledWith({
+      portfolioId: 'p1',
+      requestedDate: '2026-04-25',
+    });
   });
 });

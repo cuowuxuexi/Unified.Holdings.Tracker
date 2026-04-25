@@ -16,6 +16,7 @@ import { portfolioStatsService } from '../services/portfolioStatsService';
 import { PeriodCacheBucket } from '@uht/infra/cache/period-cache-service';
 import { periodReportService } from '../services/periodReportService';
 import { fetchQuotes } from '../services/tencentApi';
+import { getPortfolioOverviewContext } from '../services/overviewContextService';
 
 const router = Router();
 
@@ -1389,6 +1390,42 @@ router.post(
 
 // GET /api/portfolio/:id/snapshot-data?date=YYYY-MM-DD
 // 纯读库，返回指定日期的完整快照数据（不依赖实时 API）
+router.get(
+  '/:id/overview-context',
+  asyncHandler(async (req: Request, res: Response) => {
+    const portfolioId = req.params.id;
+    const date = queryString(req.query.date);
+
+    if (date && !isValidDateOnly(date)) {
+      return sendContractError(
+        res,
+        400,
+        true,
+        'Invalid date parameter (format: YYYY-MM-DD)',
+        [
+          {
+            code: 'invalid_date',
+            message:
+              'Query parameter date must be a real calendar date in YYYY-MM-DD format.',
+            details: { date },
+          },
+        ],
+        {
+          portfolioId,
+          requested_date: date,
+          source: 'uht.overview-context',
+        }
+      );
+    }
+
+    const result = await getPortfolioOverviewContext({
+      portfolioId,
+      requestedDate: date,
+    });
+    res.status(result.statusCode).json(result.body);
+  })
+);
+
 router.get(
   '/:id/snapshot-data',
   asyncHandler(async (req: Request, res: Response) => {

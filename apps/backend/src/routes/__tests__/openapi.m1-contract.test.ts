@@ -5,6 +5,9 @@ describe('OpenAPI M1 readonly contract', () => {
     expect(
       openApiDocument.paths['/portfolio/{id}/snapshot-data']
     ).toBeDefined();
+    expect(
+      openApiDocument.paths['/portfolio/{id}/overview-context']
+    ).toBeDefined();
     expect(openApiDocument.paths['/portfolio/exchange-rates']).toBeDefined();
     expect(openApiDocument.paths['/market/quote']).toBeDefined();
     expect(openApiDocument.paths['/market/kline']).toBeDefined();
@@ -24,6 +27,7 @@ describe('OpenAPI M1 readonly contract', () => {
     expect(schemas.SourceHealthEnvelope).toBeDefined();
     expect(schemas.YieldCurveEnvelope).toBeDefined();
     expect(schemas.MacroIndicatorEnvelope).toBeDefined();
+    expect(schemas.PortfolioOverviewContextEnvelope).toBeDefined();
 
     const planned = (openApiDocument as any)[
       'x-uht-planned-readonly-contracts'
