@@ -83,6 +83,9 @@ const INDEX_NAMES: Record<string, string> = {
   usINX: '标普500',
 };
 
+const SNAPSHOT_TIME_ZONE = 'Asia/Shanghai';
+const DAY_MS = 24 * 60 * 60 * 1000;
+
 // ==================== Webhook 告警 ====================
 
 async function sendSnapshotAlert(message: string): Promise<void> {
@@ -107,12 +110,51 @@ async function sendSnapshotAlert(message: string): Promise<void> {
 
 // ==================== 快照存储 ====================
 
+function getDatePartsInTimeZone(
+  date: Date,
+  timeZone: string
+): { year: number; month: number; day: number } {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+
+  const getPart = (type: string): number => {
+    const value = parts.find((part) => part.type === type)?.value;
+    if (!value) {
+      throw new Error(`Failed to read ${type} from ${timeZone} date`);
+    }
+    return Number(value);
+  };
+
+  return {
+    year: getPart('year'),
+    month: getPart('month'),
+    day: getPart('day'),
+  };
+}
+
+function formatUtcDate(date: Date): string {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 /**
- * 快照日期 = 前一个日历日（即前一交易日）
- * 因为快照在早晨 06:30 执行，记录的是昨天的收盘数据
+ * 快照日期 = 北京日历日的前一天。
+ * 容器可能运行在 UTC，不能直接用系统本地日期减一天。
  */
+export function getSnapshotDateForNow(now: Date = new Date()): string {
+  const { year, month, day } = getDatePartsInTimeZone(now, SNAPSHOT_TIME_ZONE);
+  const beijingCalendarDayUtc = Date.UTC(year, month - 1, day);
+  return formatUtcDate(new Date(beijingCalendarDayUtc - DAY_MS));
+}
+
 function getSnapshotDate(): string {
-  return format(subDays(new Date(), 1), 'yyyy-MM-dd');
+  return getSnapshotDateForNow();
 }
 
 function toSafeNumber(value: unknown): number {

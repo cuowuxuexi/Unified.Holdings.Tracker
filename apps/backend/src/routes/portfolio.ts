@@ -1109,8 +1109,10 @@ router.post(
     const force = req.query.force === 'true';
 
     const { prisma } = await import('../lib/prisma');
-    const { format, subDays } = await import('date-fns');
-    const snapshotDate = format(subDays(new Date(), 1), 'yyyy-MM-dd');
+    const { getSnapshotDateForNow } = await import(
+      '../services/snapshotService'
+    );
+    const snapshotDate = getSnapshotDateForNow();
 
     if (!force) {
       const existing = await prisma.$queryRawUnsafe<

@@ -9,7 +9,9 @@ FROM node:22-slim AS builder
 WORKDIR /app
 
 # Install build essentials for native modules
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN sed -i 's#http://deb.debian.org/debian-security#http://mirrors.ustc.edu.cn/debian-security#g' /etc/apt/sources.list.d/debian.sources \
+    && sed -i 's#http://deb.debian.org/debian#http://mirrors.ustc.edu.cn/debian#g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
     openssl \
     && rm -rf /var/lib/apt/lists/*
 
@@ -45,7 +47,9 @@ FROM node:22-slim AS backend
 
 WORKDIR /app
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+RUN sed -i 's#http://deb.debian.org/debian-security#http://mirrors.ustc.edu.cn/debian-security#g' /etc/apt/sources.list.d/debian.sources \
+    && sed -i 's#http://deb.debian.org/debian#http://mirrors.ustc.edu.cn/debian#g' /etc/apt/sources.list.d/debian.sources \
+    && apt-get update && apt-get install -y --no-install-recommends \
     openssl \
     && rm -rf /var/lib/apt/lists/*
 

@@ -1,18 +1,25 @@
 import { prisma } from '../../lib/prisma';
 import { container } from '../../container';
 import { portfolioStatsService } from '../portfolioStatsService';
-import { takeSnapshotForPortfolio } from '../snapshotService';
+import {
+  getSnapshotDateForNow,
+  takeSnapshotForPortfolio,
+} from '../snapshotService';
 import { fetchKline } from '../tencentApi';
 
-jest.mock('../../lib/prisma', () => ({
-  prisma: {
+jest.mock('../../lib/prisma', () => {
+  const prisma: any = {
     $executeRawUnsafe: jest.fn(),
     $queryRawUnsafe: jest.fn(),
     portfolio: {
       findMany: jest.fn(),
     },
-  },
-}));
+  };
+  prisma.$transaction = jest.fn(async (callback: (tx: any) => unknown) =>
+    callback(prisma)
+  );
+  return { prisma };
+});
 
 jest.mock('../../container', () => ({
   container: {
@@ -33,11 +40,25 @@ jest.mock('../portfolioStatsService', () => ({
 
 jest.mock('../tencentApi', () => ({
   fetchKline: jest.fn(),
+  fetchQuotes: jest.fn(async () => []),
 }));
 
 jest.mock('../currencyService', () => ({
   getExchangeRateForAssetToCNY: jest.fn(async () => 1),
+  getExchangeRateInfo: jest.fn((pair: string) => ({
+    pair,
+    rate: 1,
+    source: 'test',
+  })),
 }));
+
+describe('snapshotService - snapshot date timezone', () => {
+  it('uses the Beijing calendar day before subtracting one day', () => {
+    expect(
+      getSnapshotDateForNow(new Date('2026-04-23T22:30:00.013Z'))
+    ).toBe('2026-04-23');
+  });
+});
 
 describe('snapshotService - P0 snapshotDate kline backfill', () => {
   beforeEach(() => {
