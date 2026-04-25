@@ -14,6 +14,7 @@ function createDependencies() {
       listSourceHealth: jest.fn().mockResolvedValue([]),
     },
     getOverviewContext: jest.fn(),
+    getHistoryContext: jest.fn(),
   };
 }
 
@@ -45,6 +46,10 @@ describe('M6 agent tools readonly facade', () => {
       expect.arrayContaining([
         expect.objectContaining({
           name: 'get_portfolio_overview_context',
+          read_only: true,
+        }),
+        expect.objectContaining({
+          name: 'get_portfolio_history_context',
           read_only: true,
         }),
         expect.objectContaining({
@@ -146,6 +151,70 @@ describe('M6 agent tools readonly facade', () => {
 
     expect(response.status).toBe(400);
     expect(response.body.errors[0].code).toBe('invalid_date');
+    expect(dependencies.getOverviewContext).not.toHaveBeenCalled();
+  });
+
+  it('wraps M7 history-context as a thin facade without copying aggregation', async () => {
+    const dependencies = createDependencies();
+    dependencies.getHistoryContext.mockResolvedValue({
+      statusCode: 200,
+      body: {
+        data: {
+          portfolio_year_window: {
+            year: 2026,
+            planned_start: '2026-01-01',
+            effective_start: '2026-04-24',
+            requested_end: '2026-04-25',
+            resolved_end: '2026-04-24',
+            latest_available_date: '2026-04-24',
+            snapshot_days: 1,
+            missing_days: [],
+          },
+          external_data_window: {
+            start: '2026-01-01',
+            end: '2026-04-24',
+            first_phase_min_start: '2024-01-01',
+          },
+          portfolio: { series: [], cashflows: [], positions_by_date: [] },
+          fx: { pairs: [] },
+          market: { requested_assets: [] },
+          yield: { records: [], spreads: {} },
+          macro: { records: [] },
+          source_health: { current: [], runs: [] },
+        },
+        meta: {
+          portfolioId: 'p1',
+          year: 2026,
+          requested_date: '2026-04-25',
+          resolved_date: '2026-04-24',
+          latest_available_date: '2026-04-24',
+          source: 'uht.history-context',
+          contract_version: 'm7.v0.1',
+          generated_at: '2026-04-25T10:00:00.000Z',
+        },
+        warnings: [],
+        errors: [],
+      },
+    });
+
+    const response = await request(createApp(dependencies)).get(
+      '/api/agent-tools/portfolio-history-context?portfolioId=p1&year=2026&date=2026-04-25&include=portfolio,fx'
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.meta).toEqual(
+      expect.objectContaining({
+        source: 'uht.history-context',
+        contract_version: 'm7.v0.1',
+        tool: 'get_portfolio_history_context',
+      })
+    );
+    expect(dependencies.getHistoryContext).toHaveBeenCalledWith({
+      portfolioId: 'p1',
+      year: 2026,
+      requestedDate: '2026-04-25',
+      include: 'portfolio,fx',
+    });
     expect(dependencies.getOverviewContext).not.toHaveBeenCalled();
   });
 

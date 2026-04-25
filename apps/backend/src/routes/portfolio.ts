@@ -17,6 +17,11 @@ import { PeriodCacheBucket } from '@uht/infra/cache/period-cache-service';
 import { periodReportService } from '../services/periodReportService';
 import { fetchQuotes } from '../services/tencentApi';
 import { getPortfolioOverviewContext } from '../services/overviewContextService';
+import {
+  getPortfolioHistoryContext,
+  parseHistoryContextDate,
+  parseHistoryContextYear,
+} from '../services/portfolioHistoryContextService';
 
 const router = Router();
 
@@ -1421,6 +1426,59 @@ router.get(
     const result = await getPortfolioOverviewContext({
       portfolioId,
       requestedDate: date,
+    });
+    res.status(result.statusCode).json(result.body);
+  })
+);
+
+router.get(
+  '/:id/history-context',
+  asyncHandler(async (req: Request, res: Response) => {
+    const portfolioId = req.params.id;
+    const year = queryString(req.query.year);
+    const date = queryString(req.query.date);
+    const include = queryString(req.query.include);
+    const parsedYear = parseHistoryContextYear(year);
+    const parsedDate = date
+      ? parseHistoryContextDate(date)
+      : { ok: true as const, value: undefined };
+
+    if (!parsedYear.ok) {
+      return sendContractError(
+        res,
+        400,
+        true,
+        'Missing or invalid year parameter (format: YYYY)',
+        [parsedYear.error],
+        {
+          portfolioId,
+          year: year ?? null,
+          source: 'uht.history-context',
+        }
+      );
+    }
+
+    if (!parsedDate.ok) {
+      return sendContractError(
+        res,
+        400,
+        true,
+        'Invalid date parameter (format: YYYY-MM-DD)',
+        [parsedDate.error],
+        {
+          portfolioId,
+          year: parsedYear.value,
+          requested_date: date ?? null,
+          source: 'uht.history-context',
+        }
+      );
+    }
+
+    const result = await getPortfolioHistoryContext({
+      portfolioId,
+      year: parsedYear.value,
+      requestedDate: parsedDate.value,
+      include,
     });
     res.status(result.statusCode).json(result.body);
   })

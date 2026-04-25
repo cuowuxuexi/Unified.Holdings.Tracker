@@ -8,6 +8,7 @@ import {
   getExchangeRateInfo,
 } from '../../services/currencyService';
 import { getPortfolioOverviewContext } from '../../services/overviewContextService';
+import { getPortfolioHistoryContext } from '../../services/portfolioHistoryContextService';
 
 jest.mock('../../container', () => ({
   container: {
@@ -54,6 +55,16 @@ jest.mock('../../services/tencentApi', () => ({
 jest.mock('../../services/overviewContextService', () => ({
   getPortfolioOverviewContext: jest.fn(),
 }));
+
+jest.mock('../../services/portfolioHistoryContextService', () => {
+  const actual = jest.requireActual(
+    '../../services/portfolioHistoryContextService'
+  );
+  return {
+    ...actual,
+    getPortfolioHistoryContext: jest.fn(),
+  };
+});
 
 function createTestApp() {
   const app = express();
@@ -227,6 +238,90 @@ describe('portfolio M1 contract', () => {
     expect(getPortfolioOverviewContext).toHaveBeenCalledWith({
       portfolioId: 'p1',
       requestedDate: '2026-04-25',
+    });
+  });
+
+  it('validates history-context year and date before calling service', async () => {
+    const invalidYear = await request(createTestApp()).get(
+      '/api/portfolio/p1/history-context?year=26'
+    );
+    expect(invalidYear.status).toBe(400);
+    expect(invalidYear.body.errors[0].code).toBe('invalid_year');
+
+    const invalidDate = await request(createTestApp()).get(
+      '/api/portfolio/p1/history-context?year=2026&date=2026-99-99'
+    );
+    expect(invalidDate.status).toBe(400);
+    expect(invalidDate.body.errors[0].code).toBe('invalid_date');
+    expect(getPortfolioHistoryContext).not.toHaveBeenCalled();
+  });
+
+  it('returns history-context standard M7 envelope', async () => {
+    (getPortfolioHistoryContext as jest.Mock).mockResolvedValue({
+      statusCode: 200,
+      body: {
+        data: {
+          portfolio_year_window: {
+            year: 2026,
+            planned_start: '2026-01-01',
+            effective_start: '2026-04-24',
+            requested_end: '2026-04-25',
+            resolved_end: '2026-04-24',
+            latest_available_date: '2026-04-24',
+            snapshot_days: 1,
+            missing_days: [],
+          },
+          external_data_window: {
+            start: '2026-01-01',
+            end: '2026-04-24',
+            first_phase_min_start: '2024-01-01',
+          },
+          portfolio: { series: [], cashflows: [], positions_by_date: [] },
+          fx: { pairs: [] },
+          market: { requested_assets: [] },
+          yield: { records: [], spreads: {} },
+          macro: { records: [] },
+          source_health: { current: [], runs: [] },
+        },
+        meta: {
+          portfolioId: 'p1',
+          year: 2026,
+          requested_date: '2026-04-25',
+          resolved_date: '2026-04-24',
+          latest_available_date: '2026-04-24',
+          source: 'uht.history-context',
+          contract_version: 'm7.v0.1',
+          generated_at: '2026-04-25T10:00:00.000Z',
+        },
+        warnings: [
+          {
+            code: 'date_resolved_to_latest_available',
+            message: 'resolved',
+          },
+        ],
+        errors: [],
+      },
+    });
+
+    const response = await request(createTestApp()).get(
+      '/api/portfolio/p1/history-context?year=2026&date=2026-04-25&include=portfolio,fx'
+    );
+
+    expect(response.status).toBe(200);
+    expect(response.body.data.portfolio_year_window).toBeDefined();
+    expect(response.body.data.external_data_window).toBeDefined();
+    expect(response.body.meta).toEqual(
+      expect.objectContaining({
+        source: 'uht.history-context',
+        contract_version: 'm7.v0.1',
+        resolved_date: '2026-04-24',
+      })
+    );
+    expect(getPortfolioHistoryContext).toHaveBeenCalledWith({
+      portfolioId: 'p1',
+      year: 2026,
+      requestedDate: '2026-04-25',
+      include: 'portfolio,fx',
     });
   });
 });

@@ -7,6 +7,13 @@ import type {
   PortfolioOverviewContextRequest,
   PortfolioOverviewContextResponse,
 } from '../services/overviewContextService';
+import {
+  getPortfolioHistoryContext,
+  parseHistoryContextDate,
+  parseHistoryContextYear,
+  type PortfolioHistoryContextRequest,
+  type PortfolioHistoryContextResponse,
+} from '../services/portfolioHistoryContextService';
 
 type ApiWarning = {
   code: string;
@@ -32,10 +39,15 @@ type OverviewContextGetter = (
   request: PortfolioOverviewContextRequest
 ) => Promise<PortfolioOverviewContextResponse>;
 
+type HistoryContextGetter = (
+  request: PortfolioHistoryContextRequest
+) => Promise<PortfolioHistoryContextResponse>;
+
 type AgentToolsDependencies = {
   prisma: AgentToolsPrisma;
   repository: Pick<M2DataRepository, 'listSourceHealth'>;
   getOverviewContext: OverviewContextGetter;
+  getHistoryContext?: HistoryContextGetter;
 };
 
 const SOURCE_HEALTH_STATUSES: SourceHealthStatus[] = [
@@ -61,6 +73,15 @@ const TOOL_DESCRIPTORS = [
     read_only: true,
     description: 'Return the full M5 overview-context envelope data.',
     params: ['portfolioId', 'date?'],
+  },
+  {
+    name: 'get_portfolio_history_context',
+    path: '/api/agent-tools/portfolio-history-context',
+    method: 'GET',
+    read_only: true,
+    description:
+      'Thin facade for M7 history-context; returns the service envelope without duplicating aggregation logic.',
+    params: ['portfolioId', 'year', 'date?', 'include?'],
   },
   {
     name: 'get_fx_context',
@@ -109,6 +130,7 @@ const defaultDependencies: AgentToolsDependencies = {
   prisma: defaultPrisma as unknown as AgentToolsPrisma,
   repository: new PrismaM2DataRepository(),
   getOverviewContext: getPortfolioOverviewContext,
+  getHistoryContext: getPortfolioHistoryContext,
 };
 
 const asyncHandler =
@@ -189,6 +211,10 @@ export function createAgentToolsRouter(
       'get_portfolio_overview_context',
       (data) => data
     )
+  );
+  router.get(
+    '/agent-tools/portfolio-history-context',
+    historyContextHandler(dependencies)
   );
   router.get(
     '/agent-tools/fx-context',
@@ -321,6 +347,62 @@ function overviewBlockHandler(
         overview.body.errors
       )
     );
+  });
+}
+
+function historyContextHandler(dependencies: AgentToolsDependencies) {
+  return asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const tool = 'get_portfolio_history_context';
+    const portfolioId = queryString(req.query.portfolioId);
+    if (!portfolioId) {
+      sendAgentToolError(res, 400, tool, [
+        {
+          code: 'missing_portfolio_id',
+          message: 'Query parameter portfolioId is required.',
+        },
+      ]);
+      return;
+    }
+
+    const year = queryString(req.query.year);
+    const parsedYear = parseHistoryContextYear(year);
+    if (!parsedYear.ok) {
+      sendAgentToolError(res, 400, tool, [parsedYear.error], {
+        portfolioId,
+        year: year ?? null,
+      });
+      return;
+    }
+
+    const date = queryString(req.query.date);
+    const parsedDate = date
+      ? parseHistoryContextDate(date)
+      : { ok: true as const, value: undefined };
+    if (!parsedDate.ok) {
+      sendAgentToolError(res, 400, tool, [parsedDate.error], {
+        portfolioId,
+        year: parsedYear.value,
+        requested_date: date ?? null,
+      });
+      return;
+    }
+
+    const historyGetter =
+      dependencies.getHistoryContext ?? getPortfolioHistoryContext;
+    const result = await historyGetter({
+      portfolioId,
+      year: parsedYear.value,
+      requestedDate: parsedDate.value,
+      include: queryString(req.query.include),
+    });
+
+    res.status(result.statusCode).json({
+      ...result.body,
+      meta: {
+        ...result.body.meta,
+        tool,
+      },
+    });
   });
 }
 

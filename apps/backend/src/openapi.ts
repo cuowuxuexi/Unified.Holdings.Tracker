@@ -668,6 +668,73 @@ export const openApiDocument: UhtOpenApiDocument = {
         },
       },
     },
+    '/portfolio/{id}/history-context': {
+      get: {
+        tags: ['Portfolio'],
+        summary: '读取年度历史上下文',
+        description:
+          'M7 只读聚合端点。按自然年返回 portfolio_year_window、external_data_window 与组合/FX/行情/利率/宏观/source health 历史 block。',
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'year',
+            in: 'query',
+            required: true,
+            schema: { type: 'string', pattern: '^\\d{4}$' },
+            description: '四位自然年，例如 2026。',
+          },
+          {
+            name: 'date',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', format: 'date' },
+            description:
+              '真实日历日期，格式 YYYY-MM-DD；缺省时使用该组合该年最新可用快照。',
+          },
+          {
+            name: 'include',
+            in: 'query',
+            required: false,
+            schema: { type: 'string' },
+            description:
+              '逗号分隔 include：portfolio,positions,cashflows,fx,market,yield,macro,source_health。',
+          },
+        ],
+        responses: {
+          '200': {
+            description: '成功返回年度历史上下文',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/PortfolioHistoryContextEnvelope',
+                },
+              },
+            },
+          },
+          '400': {
+            description: 'year/date 参数错误',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorEnvelope' },
+              },
+            },
+          },
+          '404': {
+            description: '组合不存在',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorEnvelope' },
+              },
+            },
+          },
+        },
+      },
+    },
     '/market/quote': {
       get: {
         tags: ['Market'],
@@ -953,6 +1020,44 @@ export const openApiDocument: UhtOpenApiDocument = {
           },
           '400': { description: '参数错误' },
           '404': { description: '没有可用组合快照' },
+        },
+      },
+    },
+    '/agent-tools/portfolio-history-context': {
+      get: {
+        tags: ['AgentTools'],
+        summary: '工具：get_portfolio_history_context',
+        description:
+          '薄封装 M7 history-context，不复制聚合逻辑；返回 uht.history-context envelope 并附加 meta.tool。',
+        parameters: [
+          {
+            name: 'portfolioId',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'year',
+            in: 'query',
+            required: true,
+            schema: { type: 'string', pattern: '^\\d{4}$' },
+          },
+          { name: 'date', in: 'query', schema: { type: 'string' } },
+          { name: 'include', in: 'query', schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: '成功返回 history-context',
+            content: {
+              'application/json': {
+                schema: {
+                  $ref: '#/components/schemas/PortfolioHistoryContextEnvelope',
+                },
+              },
+            },
+          },
+          '400': { description: '参数错误' },
+          '404': { description: '组合不存在' },
         },
       },
     },
@@ -1380,6 +1485,104 @@ export const openApiDocument: UhtOpenApiDocument = {
             allOf: [{ $ref: '#/components/schemas/PortfolioOverviewContext' }],
           },
           meta: { $ref: '#/components/schemas/ResponseMeta' },
+          warnings: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiWarning' },
+          },
+          errors: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiError' },
+          },
+        },
+      },
+      PortfolioYearWindow: {
+        type: 'object',
+        required: [
+          'year',
+          'planned_start',
+          'effective_start',
+          'requested_end',
+          'resolved_end',
+          'latest_available_date',
+          'snapshot_days',
+          'missing_days',
+        ],
+        properties: {
+          year: { type: 'integer' },
+          planned_start: { type: 'string', format: 'date' },
+          business_start: { type: 'string', format: 'date', nullable: true },
+          effective_start: { type: 'string', format: 'date' },
+          requested_end: { type: 'string', format: 'date' },
+          resolved_end: { type: 'string', format: 'date', nullable: true },
+          latest_available_date: {
+            type: 'string',
+            format: 'date',
+            nullable: true,
+          },
+          snapshot_days: { type: 'integer' },
+          missing_days: { type: 'array', items: { type: 'string' } },
+        },
+      },
+      ExternalDataWindow: {
+        type: 'object',
+        required: ['start', 'end', 'first_phase_min_start'],
+        properties: {
+          start: { type: 'string', format: 'date' },
+          end: { type: 'string', format: 'date' },
+          first_phase_min_start: { type: 'string', format: 'date' },
+        },
+      },
+      PortfolioHistoryContext: {
+        type: 'object',
+        required: [
+          'portfolio_year_window',
+          'external_data_window',
+          'portfolio',
+          'fx',
+          'market',
+          'yield',
+          'macro',
+          'source_health',
+        ],
+        properties: {
+          portfolio_year_window: {
+            $ref: '#/components/schemas/PortfolioYearWindow',
+          },
+          external_data_window: {
+            $ref: '#/components/schemas/ExternalDataWindow',
+          },
+          portfolio: { type: 'object', additionalProperties: true },
+          fx: { type: 'object', additionalProperties: true },
+          market: { type: 'object', additionalProperties: true },
+          yield: { type: 'object', additionalProperties: true },
+          macro: { type: 'object', additionalProperties: true },
+          source_health: { type: 'object', additionalProperties: true },
+        },
+      },
+      PortfolioHistoryContextEnvelope: {
+        type: 'object',
+        required: ['data', 'meta', 'warnings', 'errors'],
+        properties: {
+          data: {
+            nullable: true,
+            allOf: [{ $ref: '#/components/schemas/PortfolioHistoryContext' }],
+          },
+          meta: {
+            allOf: [{ $ref: '#/components/schemas/ResponseMeta' }],
+            properties: {
+              source: {
+                type: 'string',
+                enum: ['uht.history-context'],
+              },
+              contract_version: {
+                type: 'string',
+                enum: ['m7.v0.1'],
+              },
+              portfolioId: { type: 'string' },
+              year: { type: 'integer', nullable: true },
+              tool: { type: 'string', nullable: true },
+            },
+          },
           warnings: {
             type: 'array',
             items: { $ref: '#/components/schemas/ApiWarning' },

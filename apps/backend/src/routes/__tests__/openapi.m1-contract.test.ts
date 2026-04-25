@@ -8,6 +8,9 @@ describe('OpenAPI M1 readonly contract', () => {
     expect(
       openApiDocument.paths['/portfolio/{id}/overview-context']
     ).toBeDefined();
+    expect(
+      openApiDocument.paths['/portfolio/{id}/history-context']
+    ).toBeDefined();
     expect(openApiDocument.paths['/portfolio/exchange-rates']).toBeDefined();
     expect(openApiDocument.paths['/market/quote']).toBeDefined();
     expect(openApiDocument.paths['/market/kline']).toBeDefined();
@@ -20,6 +23,9 @@ describe('OpenAPI M1 readonly contract', () => {
     ).toBeDefined();
     expect(
       openApiDocument.paths['/agent-tools/portfolio-overview-context']
+    ).toBeDefined();
+    expect(
+      openApiDocument.paths['/agent-tools/portfolio-history-context']
     ).toBeDefined();
     expect(openApiDocument.paths['/agent-tools/fx-context']).toBeDefined();
     expect(openApiDocument.paths['/agent-tools/yield-context']).toBeDefined();
@@ -42,6 +48,9 @@ describe('OpenAPI M1 readonly contract', () => {
     expect(schemas.YieldCurveEnvelope).toBeDefined();
     expect(schemas.MacroIndicatorEnvelope).toBeDefined();
     expect(schemas.PortfolioOverviewContextEnvelope).toBeDefined();
+    expect(schemas.PortfolioHistoryContextEnvelope).toBeDefined();
+    expect(schemas.PortfolioYearWindow).toBeDefined();
+    expect(schemas.ExternalDataWindow).toBeDefined();
     expect(schemas.AgentToolEnvelope).toBeDefined();
 
     const planned = (openApiDocument as any)[
