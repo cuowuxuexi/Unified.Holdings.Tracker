@@ -56,7 +56,7 @@ class HttpError extends Error {
 }
 
 const errorHandler = (
-  err: any,
+  err: Error & { statusCode?: number; status?: number },
   _req: Request,
   res: Response,
   _next: NextFunction
@@ -310,6 +310,41 @@ async function initializeDatabase() {
       }
     }
 
+    const m1SnapshotTableStatements = [
+      `
+        CREATE TABLE IF NOT EXISTS "ExchangeRateSnapshot" (
+          "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+          "date" TEXT NOT NULL,
+          "pair" TEXT NOT NULL,
+          "rate" DECIMAL,
+          "source" TEXT,
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `,
+      `
+        CREATE TABLE IF NOT EXISTS "IndexSnapshot" (
+          "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+          "date" TEXT NOT NULL,
+          "indexCode" TEXT NOT NULL,
+          "name" TEXT NOT NULL,
+          "currentPrice" DECIMAL NOT NULL,
+          "changeAmount" DECIMAL,
+          "changePercent" DECIMAL,
+          "weeklyChangePercent" DECIMAL,
+          "monthlyChangePercent" DECIMAL,
+          "yearlyChangePercent" DECIMAL,
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+        )
+      `,
+    ];
+
+    for (const statement of m1SnapshotTableStatements) {
+      await prisma.$executeRawUnsafe(statement);
+    }
+
+    console.log('✓ Table ensured: ExchangeRateSnapshot');
+    console.log('✓ Table ensured: IndexSnapshot');
+
     for (const statement of indexStatements) {
       await prisma.$executeRawUnsafe(statement);
     }
@@ -338,6 +373,63 @@ async function initializeDatabase() {
       } catch {
         // 列已是新名或不存在，忽略
       }
+    }
+
+    const additiveColumnStatements = [
+      `ALTER TABLE "QuoteSnapshot" ADD COLUMN "date" TEXT`,
+      `ALTER TABLE "QuoteSnapshot" ADD COLUMN "weeklyChangePercent" DECIMAL`,
+      `ALTER TABLE "QuoteSnapshot" ADD COLUMN "monthlyChangePercent" DECIMAL`,
+      `ALTER TABLE "QuoteSnapshot" ADD COLUMN "yearlyChangePercent" DECIMAL`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "leverageUsed" DECIMAL`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "leverageTotal" DECIMAL`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "leverageCostRate" DECIMAL`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "leverageCumulativeCost" DECIMAL`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "usdCny" DECIMAL`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "hkdCny" DECIMAL`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "realizedPnl" DECIMAL`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "unrealizedPnl" DECIMAL`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "totalCommission" DECIMAL`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "netDepositedCash" DECIMAL`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "totalDividendIncome" DECIMAL`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "totalPnlPercent" DECIMAL`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "dailyPnlPercent" DECIMAL`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "weeklyReturnPercent" DECIMAL`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "weeklyReturnValue" DECIMAL`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "weeklyBaseDate" TEXT`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "monthlyReturnPercent" DECIMAL`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "monthlyReturnValue" DECIMAL`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "monthlyBaseDate" TEXT`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "yearlyReturnPercent" DECIMAL`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "yearlyReturnValue" DECIMAL`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "yearlyBaseDate" TEXT`,
+      `ALTER TABLE "PortfolioSnapshot" ADD COLUMN "correctedAt" DATETIME`,
+      `ALTER TABLE "PositionSnapshot" ADD COLUMN "costPrice" DECIMAL`,
+      `ALTER TABLE "PositionSnapshot" ADD COLUMN "totalPnl" DECIMAL`,
+      `ALTER TABLE "PositionSnapshot" ADD COLUMN "dailyPnl" DECIMAL`,
+      `ALTER TABLE "PositionSnapshot" ADD COLUMN "dailyPct" DECIMAL`,
+      `ALTER TABLE "PositionSnapshot" ADD COLUMN "totalPnlPercent" DECIMAL`,
+      `ALTER TABLE "PositionSnapshot" ADD COLUMN "floatingPnl" DECIMAL`,
+      `ALTER TABLE "PositionSnapshot" ADD COLUMN "floatingPnlPercent" DECIMAL`,
+    ];
+
+    for (const statement of additiveColumnStatements) {
+      try {
+        await prisma.$executeRawUnsafe(statement);
+        console.log(`✓ Column ensured via additive drift fix: ${statement}`);
+      } catch {
+        // Column already exists; keep existing data and continue.
+      }
+    }
+
+    const m1SnapshotIndexStatements = [
+      `CREATE UNIQUE INDEX IF NOT EXISTS "QuoteSnapshot_assetCode_date_key" ON "QuoteSnapshot"("assetCode", "date")`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS "ExchangeRateSnapshot_date_pair_key" ON "ExchangeRateSnapshot"("date", "pair")`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS "IndexSnapshot_date_indexCode_key" ON "IndexSnapshot"("date", "indexCode")`,
+      `CREATE INDEX IF NOT EXISTS "PositionSnapshot_portfolioId_date_idx" ON "PositionSnapshot"("portfolioId", "date")`,
+    ];
+
+    for (const statement of m1SnapshotIndexStatements) {
+      await prisma.$executeRawUnsafe(statement);
     }
 
     console.log('✅ Database schema ensured successfully');
@@ -385,7 +477,7 @@ const startServer = async () => {
     setInterval(() => {
       try {
         process.kill(parentPid, 0);
-      } catch (e) {
+      } catch {
         console.log(`Parent process ${parentPid} is gone. Exiting...`);
         process.exit(0);
       }

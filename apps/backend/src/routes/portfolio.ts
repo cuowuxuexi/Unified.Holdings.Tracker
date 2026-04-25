@@ -19,6 +19,68 @@ import { fetchQuotes } from '../services/tencentApi';
 
 const router = Router();
 
+type ApiContractWarning = {
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+};
+type ApiContractError = {
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+};
+
+function queryString(value: unknown): string | undefined {
+  return typeof value === 'string' ? value.trim() : undefined;
+}
+
+function wantsEnvelope(req: Request): boolean {
+  const value = queryString(req.query.envelope);
+  return value === 'true' || value === '1' || value === 'yes';
+}
+
+function makeEnvelope<T>(
+  data: T | null,
+  meta: Record<string, unknown>,
+  warnings: ApiContractWarning[] = [],
+  errors: ApiContractError[] = []
+) {
+  return {
+    data,
+    meta: { source: 'uht', generated_at: new Date().toISOString(), ...meta },
+    warnings,
+    errors,
+  };
+}
+
+function sendContractError(
+  res: Response,
+  statusCode: number,
+  envelope: boolean,
+  message: string,
+  errors: ApiContractError[],
+  meta: Record<string, unknown> = {}
+): void {
+  res.status(statusCode).json(
+    envelope
+      ? makeEnvelope(null, meta, [], errors)
+      : {
+          error: message,
+          message,
+          errors,
+        }
+  );
+}
+
+function queryRawUnsafe<T>(query: string, ...values: unknown[]): Promise<T> {
+  return (
+    prisma.$queryRawUnsafe as (
+      query: string,
+      ...values: unknown[]
+    ) => Promise<T>
+  )(query, ...values);
+}
+
 async function fillAssetNameAsync(assetCode: string): Promise<void> {
   try {
     const normalizedCode = assetCode.trim();
@@ -94,25 +156,45 @@ function isPeriodShortcut(value: string): value is PeriodShortcut {
   return PERIOD_SHORTCUTS.includes(value as PeriodShortcut);
 }
 
+type PeriodReportQueryValidation =
+  | { ok: true; value: NormalizedPeriodReportQuery }
+  | { ok: false; message: string; errors: ApiContractError[] };
+
 function normalizePeriodReportQuery(
   query: Request['query']
-): NormalizedPeriodReportQuery | null {
+): PeriodReportQueryValidation {
   const { from: rawFrom, to: rawTo, format: rawFormat, period } = query;
 
-  let from: string | undefined =
-    typeof rawFrom === 'string' ? rawFrom : undefined;
-  let to: string | undefined = typeof rawTo === 'string' ? rawTo : undefined;
+  let from: string | undefined = queryString(rawFrom);
+  let to: string | undefined = queryString(rawTo);
+  const periodValue = queryString(period);
+  const format = queryString(rawFormat);
   let periodType: PeriodShortcut | 'custom' = 'custom';
 
-  if (typeof period === 'string' && isPeriodShortcut(period)) {
-    periodType = period;
+  if (periodValue) {
+    if (!isPeriodShortcut(periodValue)) {
+      return {
+        ok: false,
+        message:
+          'Query parameter period must be one of: daily|weekly|monthly|yearly',
+        errors: [
+          {
+            code: 'invalid_period',
+            message:
+              'Query parameter period must be one of: daily|weekly|monthly|yearly',
+            details: { period: periodValue },
+          },
+        ],
+      };
+    }
+
+    periodType = periodValue;
     const now = new Date();
     const todayStr = now.toISOString().slice(0, 10);
-
     if (!to) to = todayStr;
 
     if (!from) {
-      switch (period) {
+      switch (periodValue) {
         case 'daily': {
           const yesterday = new Date(now);
           yesterday.setDate(yesterday.getDate() - 1);
@@ -137,15 +219,83 @@ function normalizePeriodReportQuery(
     }
   }
 
+  if (format && format !== 'json' && format !== 'markdown') {
+    return {
+      ok: false,
+      message: 'Query parameter format must be json or markdown',
+      errors: [
+        {
+          code: 'invalid_format',
+          message: 'Query parameter format must be json or markdown',
+          details: { format },
+        },
+      ],
+    };
+  }
+
   if (!from || !to) {
-    return null;
+    return {
+      ok: false,
+      message:
+        'Query parameters from and to are required (YYYY-MM-DD), or use period=daily|weekly|monthly|yearly',
+      errors: [
+        {
+          code: 'missing_date_range',
+          message:
+            'Query parameters from and to are required unless a valid period shortcut is provided.',
+        },
+      ],
+    };
+  }
+
+  const invalidDateErrors: ApiContractError[] = [];
+  if (!isValidDateOnly(from)) {
+    invalidDateErrors.push({
+      code: 'invalid_date',
+      message:
+        'Query parameter from must be a real calendar date in YYYY-MM-DD format.',
+      details: { from },
+    });
+  }
+  if (!isValidDateOnly(to)) {
+    invalidDateErrors.push({
+      code: 'invalid_date',
+      message:
+        'Query parameter to must be a real calendar date in YYYY-MM-DD format.',
+      details: { to },
+    });
+  }
+  if (invalidDateErrors.length > 0) {
+    return {
+      ok: false,
+      message:
+        'Query parameters from/to must be real YYYY-MM-DD calendar dates',
+      errors: invalidDateErrors,
+    };
+  }
+
+  if (from > to) {
+    return {
+      ok: false,
+      message: 'Query parameter from must be earlier than or equal to to',
+      errors: [
+        {
+          code: 'invalid_date_range',
+          message: 'Query parameter from must be earlier than or equal to to.',
+          details: { from, to },
+        },
+      ],
+    };
   }
 
   return {
-    from,
-    to,
-    format: typeof rawFormat === 'string' ? rawFormat : undefined,
-    periodType,
+    ok: true,
+    value: {
+      from,
+      to,
+      format: format || undefined,
+      periodType,
+    },
   };
 }
 
@@ -236,7 +386,8 @@ async function sendPeriodReport(
   res: Response,
   portfolioId: string,
   query: NormalizedPeriodReportQuery,
-  routeLabel: string
+  routeLabel: string,
+  envelope: boolean
 ): Promise<void> {
   console.log(
     `[GET ${routeLabel}] Generating ${query.periodType} report for portfolio ${portfolioId} from ${query.from} to ${query.to}`
@@ -252,6 +403,19 @@ async function sendPeriodReport(
   if (query.format === 'markdown') {
     const md = periodReportService.formatReportAsMarkdown(report);
     res.type('text/markdown').send(md);
+    return;
+  }
+
+  if (envelope) {
+    res.json(
+      makeEnvelope(report, {
+        portfolioId,
+        requested_from: query.from,
+        requested_to: query.to,
+        period: query.periodType,
+        source: 'uht.period-report',
+      })
+    );
     return;
   }
 
@@ -305,7 +469,7 @@ router.get(
             : Math.max(latestRateTimestampMs, timestampMs);
       }
 
-      res.json({
+      const exchangeRatePayload = {
         USD: usdRate,
         HKD: hkdRate,
         CNY: 1.0,
@@ -313,7 +477,19 @@ router.get(
           latestRateTimestampMs === null
             ? new Date().toISOString()
             : new Date(latestRateTimestampMs).toISOString(),
-      });
+      };
+
+      if (wantsEnvelope(req)) {
+        res.json(
+          makeEnvelope(exchangeRatePayload, {
+            source: 'uht.exchange-rates',
+            requested_pairs: ['USD-CNY', 'HKD-CNY'],
+          })
+        );
+        return;
+      }
+
+      res.json(exchangeRatePayload);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } catch (error: any) {
       console.error('Error fetching exchange rates:', error);
@@ -324,7 +500,7 @@ router.get(
           error.message.includes('超过每日可允许请求次数'))
       ) {
         console.warn('[Route /exchange-rates] Juhe API rate limit exceeded.');
-        return res.status(503).json({
+        const exchangeRateErrorPayload = {
           message:
             'Exchange rate service unavailable (Rate limit exceeded). Please try again later.',
           error: true,
@@ -332,7 +508,29 @@ router.get(
           HKD: null,
           CNY: 1.0,
           updatedAt: new Date().toISOString(),
-        });
+        };
+
+        if (wantsEnvelope(req)) {
+          return res.status(503).json(
+            makeEnvelope(
+              exchangeRateErrorPayload,
+              {
+                source: 'uht.exchange-rates',
+                requested_pairs: ['USD-CNY', 'HKD-CNY'],
+              },
+              [],
+              [
+                {
+                  code: 'exchange_rate_rate_limited',
+                  message:
+                    'Exchange rate service unavailable (rate limit exceeded).',
+                },
+              ]
+            )
+          );
+        }
+
+        return res.status(503).json(exchangeRateErrorPayload);
       }
       next(error);
     }
@@ -343,12 +541,33 @@ router.get(
 router.get(
   '/period-report',
   asyncHandler(async (req: Request, res: Response) => {
-    const reportQuery = normalizePeriodReportQuery(req.query);
-    if (!reportQuery) {
-      return res.status(400).json({
-        message:
-          'Query parameters from and to are required (YYYY-MM-DD), or use period=daily|weekly|monthly|yearly',
-      });
+    const envelope = wantsEnvelope(req);
+    const reportQueryResult = normalizePeriodReportQuery(req.query);
+    if (!reportQueryResult.ok) {
+      return sendContractError(
+        res,
+        400,
+        envelope,
+        reportQueryResult.message,
+        reportQueryResult.errors
+      );
+    }
+
+    const reportQuery = reportQueryResult.value;
+    if (envelope && reportQuery.format === 'markdown') {
+      return sendContractError(
+        res,
+        400,
+        envelope,
+        'Query parameter envelope cannot be combined with format=markdown',
+        [
+          {
+            code: 'invalid_envelope_format',
+            message:
+              'Query parameter envelope cannot be combined with format=markdown.',
+          },
+        ]
+      );
     }
 
     const resolution = await resolveLegacyPeriodReportPortfolioId(
@@ -368,7 +587,8 @@ router.get(
         res,
         resolution.portfolioId,
         reportQuery,
-        '/period-report'
+        '/period-report',
+        envelope
       );
     } catch (error) {
       console.error(
@@ -1000,13 +1220,33 @@ router.get(
   '/:id/period-report',
   asyncHandler(async (req: Request, res: Response) => {
     const portfolioId = req.params.id;
-    const reportQuery = normalizePeriodReportQuery(req.query);
+    const envelope = wantsEnvelope(req);
+    const reportQueryResult = normalizePeriodReportQuery(req.query);
+    if (!reportQueryResult.ok) {
+      return sendContractError(
+        res,
+        400,
+        envelope,
+        reportQueryResult.message,
+        reportQueryResult.errors
+      );
+    }
 
-    if (!reportQuery) {
-      return res.status(400).json({
-        message:
-          'Query parameters from and to are required (YYYY-MM-DD), or use period=daily|weekly|monthly|yearly',
-      });
+    const reportQuery = reportQueryResult.value;
+    if (envelope && reportQuery.format === 'markdown') {
+      return sendContractError(
+        res,
+        400,
+        envelope,
+        'Query parameter envelope cannot be combined with format=markdown',
+        [
+          {
+            code: 'invalid_envelope_format',
+            message:
+              'Query parameter envelope cannot be combined with format=markdown.',
+          },
+        ]
+      );
     }
 
     try {
@@ -1014,7 +1254,8 @@ router.get(
         res,
         portfolioId,
         reportQuery,
-        '/:id/period-report'
+        '/:id/period-report',
+        envelope
       );
     } catch (error) {
       console.error(
@@ -1108,14 +1349,13 @@ router.post(
     const portfolioId = req.params.id;
     const force = req.query.force === 'true';
 
-    const { prisma } = await import('../lib/prisma');
     const { getSnapshotDateForNow } = await import(
       '../services/snapshotService'
     );
     const snapshotDate = getSnapshotDateForNow();
 
     if (!force) {
-      const existing = await prisma.$queryRawUnsafe<
+      const existing = await queryRawUnsafe<
         Array<{ correctedAt: string | null }>
       >(
         `SELECT "correctedAt" FROM "PortfolioSnapshot"
@@ -1154,11 +1394,28 @@ router.get(
   asyncHandler(async (req: Request, res: Response) => {
     const portfolioId = req.params.id;
     const date = req.query.date as string | undefined;
+    const envelope = wantsEnvelope(req);
 
-    if (!date || !/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      return res.status(400).json({
-        error: 'Missing or invalid date parameter (format: YYYY-MM-DD)',
-      });
+    if (!date || !isValidDateOnly(date)) {
+      return sendContractError(
+        res,
+        400,
+        envelope,
+        'Missing or invalid date parameter (format: YYYY-MM-DD)',
+        [
+          {
+            code: 'invalid_date',
+            message:
+              'Query parameter date must be a real calendar date in YYYY-MM-DD format.',
+            details: { date: date ?? null },
+          },
+        ],
+        {
+          portfolioId,
+          requested_date: date ?? null,
+          source: 'uht.snapshot-data',
+        }
+      );
     }
 
     const [
@@ -1168,12 +1425,12 @@ router.get(
       indexSnaps,
       exchangeRates,
     ] = await Promise.all([
-      prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+      queryRawUnsafe<Record<string, unknown>[]>(
         `SELECT * FROM "PortfolioSnapshot" WHERE "portfolioId" = ? AND "date" = ? LIMIT 1`,
         portfolioId,
         date
       ),
-      prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+      queryRawUnsafe<Record<string, unknown>[]>(
         `SELECT ps.*, a.name as assetName, a.market
            FROM "PositionSnapshot" ps
            LEFT JOIN "Asset" a ON a.code = ps.assetCode
@@ -1182,30 +1439,52 @@ router.get(
         portfolioId,
         date
       ),
-      prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+      queryRawUnsafe<Record<string, unknown>[]>(
         `SELECT qs.* FROM "QuoteSnapshot" qs
            INNER JOIN "PositionSnapshot" ps ON ps.assetCode = qs.assetCode
            WHERE ps."portfolioId" = ? AND qs."date" = ?`,
         portfolioId,
         date
       ),
-      prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+      queryRawUnsafe<Record<string, unknown>[]>(
         `SELECT * FROM "IndexSnapshot" WHERE "date" = ? ORDER BY "indexCode"`,
         date
       ),
-      prisma.$queryRawUnsafe<Record<string, unknown>[]>(
+      queryRawUnsafe<Record<string, unknown>[]>(
         `SELECT * FROM "ExchangeRateSnapshot" WHERE "date" = ?`,
         date
       ),
     ]);
 
     if (portfolioSnap.length === 0) {
+      if (envelope) {
+        return sendContractError(
+          res,
+          404,
+          envelope,
+          `No snapshot found for portfolio ${portfolioId} on ${date}`,
+          [
+            {
+              code: 'snapshot_not_found',
+              message: 'No snapshot found for the requested portfolio/date.',
+              details: { portfolioId, date },
+            },
+          ],
+          {
+            portfolioId,
+            requested_date: date,
+            resolved_date: null,
+            source: 'uht.snapshot-data',
+          }
+        );
+      }
+
       return res.status(404).json({
         error: `No snapshot found for portfolio ${portfolioId} on ${date}`,
       });
     }
 
-    res.json({
+    const snapshotPayload = {
       date,
       portfolioId,
       portfolio: portfolioSnap[0],
@@ -1213,7 +1492,21 @@ router.get(
       quotes: quoteSnaps,
       indices: indexSnaps,
       exchangeRates,
-    });
+    };
+
+    if (envelope) {
+      res.json(
+        makeEnvelope(snapshotPayload, {
+          portfolioId,
+          requested_date: date,
+          resolved_date: date,
+          source: 'uht.snapshot-data',
+        })
+      );
+      return;
+    }
+
+    res.json(snapshotPayload);
   })
 );
 

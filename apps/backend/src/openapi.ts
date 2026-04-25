@@ -1,6 +1,10 @@
 import { OpenAPIV3 } from 'openapi-types';
 
-export const openApiDocument: OpenAPIV3.Document = {
+type UhtOpenApiDocument = OpenAPIV3.Document & {
+  'x-uht-planned-readonly-contracts'?: Record<string, unknown>;
+};
+
+export const openApiDocument: UhtOpenApiDocument = {
   openapi: '3.0.3',
   info: {
     title: 'Unified Holdings Tracker API',
@@ -22,7 +26,21 @@ export const openApiDocument: OpenAPIV3.Document = {
     { name: 'Transaction', description: '交易记录管理' },
     { name: 'Market', description: '市场数据' },
     { name: 'Currency', description: '汇率服务' },
+    { name: 'Freshness', description: '数据新鲜度契约（预留）' },
+    { name: 'Source', description: '数据源健康契约（预留）' },
   ],
+  'x-uht-planned-readonly-contracts': {
+    '/portfolio/{id}/data-freshness': {
+      status: 'reserved',
+      envelope: '#/components/schemas/DataFreshnessEnvelope',
+      note: 'Reserved for M2/M3-backed freshness implementation; not a production route in M1.',
+    },
+    '/source-health': {
+      status: 'reserved',
+      envelope: '#/components/schemas/SourceHealthEnvelope',
+      note: 'Reserved for Source Gateway health implementation; not a production route in M1.',
+    },
+  },
   paths: {
     '/health': {
       get: {
@@ -132,19 +150,25 @@ export const openApiDocument: OpenAPIV3.Document = {
         tags: ['Currency'],
         summary: '获取汇率',
         description: '获取主要货币对人民币的实时汇率',
+        parameters: [
+          {
+            name: 'envelope',
+            in: 'query',
+            schema: { type: 'boolean', default: false },
+            description:
+              'true 时返回工具型 response envelope；默认返回旧结构。',
+          },
+        ],
         responses: {
           '200': {
             description: '成功返回汇率',
             content: {
               'application/json': {
                 schema: {
-                  type: 'object',
-                  properties: {
-                    USD: { type: 'number', nullable: true },
-                    HKD: { type: 'number', nullable: true },
-                    CNY: { type: 'number', example: 1.0 },
-                    updatedAt: { type: 'string', format: 'date-time' },
-                  },
+                  oneOf: [
+                    { $ref: '#/components/schemas/ExchangeRates' },
+                    { $ref: '#/components/schemas/ExchangeRatesEnvelope' },
+                  ],
                 },
               },
             },
@@ -384,13 +408,25 @@ export const openApiDocument: OpenAPIV3.Document = {
             description: '输出格式，支持 json 和 markdown',
             schema: { type: 'string', enum: ['json', 'markdown'] },
           },
+          {
+            name: 'envelope',
+            in: 'query',
+            description:
+              'true 时返回工具型 response envelope；不能与 format=markdown 同用。',
+            schema: { type: 'boolean', default: false },
+          },
         ],
         responses: {
           '200': {
             description: '成功返回报告内容',
             content: {
               'application/json': {
-                schema: { type: 'object', additionalProperties: true },
+                schema: {
+                  oneOf: [
+                    { type: 'object', additionalProperties: true },
+                    { $ref: '#/components/schemas/PeriodReportEnvelope' },
+                  ],
+                },
               },
               'text/markdown': {
                 schema: { type: 'string' },
@@ -441,6 +477,13 @@ export const openApiDocument: OpenAPIV3.Document = {
             schema: { type: 'string', enum: ['json', 'markdown'] },
           },
           {
+            name: 'envelope',
+            in: 'query',
+            description:
+              'true 时返回工具型 response envelope；不能与 format=markdown 同用。',
+            schema: { type: 'boolean', default: false },
+          },
+          {
             name: 'portfolioId',
             in: 'query',
             description: '显式指定组合 ID',
@@ -458,7 +501,12 @@ export const openApiDocument: OpenAPIV3.Document = {
             },
             content: {
               'application/json': {
-                schema: { type: 'object', additionalProperties: true },
+                schema: {
+                  oneOf: [
+                    { type: 'object', additionalProperties: true },
+                    { $ref: '#/components/schemas/PeriodReportEnvelope' },
+                  ],
+                },
               },
               'text/markdown': {
                 schema: { type: 'string' },
@@ -512,6 +560,66 @@ export const openApiDocument: OpenAPIV3.Document = {
         },
       },
     },
+    '/portfolio/{id}/snapshot-data': {
+      get: {
+        tags: ['Portfolio'],
+        summary: '读取指定日期组合完整快照',
+        description:
+          '只读快照端点。默认保持旧结构；传 envelope=true 时返回 data/meta/warnings/errors envelope。',
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string' },
+          },
+          {
+            name: 'date',
+            in: 'query',
+            required: true,
+            schema: { type: 'string', format: 'date' },
+            description: '真实日历日期，格式 YYYY-MM-DD。',
+          },
+          {
+            name: 'envelope',
+            in: 'query',
+            schema: { type: 'boolean', default: false },
+            description: 'true 时返回工具型 response envelope。',
+          },
+        ],
+        responses: {
+          '200': {
+            description: '成功返回快照数据',
+            content: {
+              'application/json': {
+                schema: {
+                  oneOf: [
+                    { $ref: '#/components/schemas/SnapshotData' },
+                    { $ref: '#/components/schemas/SnapshotDataEnvelope' },
+                  ],
+                },
+              },
+            },
+          },
+          '400': {
+            description: '日期缺失或不是实际日历日期',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorEnvelope' },
+              },
+            },
+          },
+          '404': {
+            description: '该组合该日期无快照',
+            content: {
+              'application/json': {
+                schema: { $ref: '#/components/schemas/ErrorEnvelope' },
+              },
+            },
+          },
+        },
+      },
+    },
     '/market/quote': {
       get: {
         tags: ['Market'],
@@ -525,6 +633,13 @@ export const openApiDocument: OpenAPIV3.Document = {
             description: '资产代码列表，逗号分隔',
             example: 'sh600519,hk00700',
           },
+          {
+            name: 'envelope',
+            in: 'query',
+            schema: { type: 'boolean', default: false },
+            description:
+              'true 时返回包含 requested/found/missing/invalid 的工具型 envelope；默认返回旧数组。',
+          },
         ],
         responses: {
           '200': {
@@ -532,8 +647,13 @@ export const openApiDocument: OpenAPIV3.Document = {
             content: {
               'application/json': {
                 schema: {
-                  type: 'array',
-                  items: { $ref: '#/components/schemas/Quote' },
+                  oneOf: [
+                    {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/Quote' },
+                    },
+                    { $ref: '#/components/schemas/QuoteDiagnosticsEnvelope' },
+                  ],
                 },
               },
             },
@@ -559,7 +679,10 @@ export const openApiDocument: OpenAPIV3.Document = {
           {
             name: 'period',
             in: 'query',
-            schema: { type: 'string', enum: ['daily', 'weekly', 'monthly'] },
+            schema: {
+              type: 'string',
+              enum: ['daily', 'weekly', 'monthly', 'yearly'],
+            },
           },
           {
             name: 'startDate',
@@ -576,6 +699,23 @@ export const openApiDocument: OpenAPIV3.Document = {
             in: 'query',
             schema: { type: 'string', enum: ['qfq', 'hfq', 'none'] },
           },
+          {
+            name: 'count',
+            in: 'query',
+            schema: {
+              type: 'integer',
+              minimum: 1,
+              maximum: 1000,
+              default: 400,
+            },
+          },
+          {
+            name: 'envelope',
+            in: 'query',
+            schema: { type: 'boolean', default: false },
+            description:
+              'true 时返回包含 requested/found/missing/invalid 的工具型 envelope；默认返回旧数组。',
+          },
         ],
         responses: {
           '200': {
@@ -583,8 +723,13 @@ export const openApiDocument: OpenAPIV3.Document = {
             content: {
               'application/json': {
                 schema: {
-                  type: 'array',
-                  items: { $ref: '#/components/schemas/KlinePoint' },
+                  oneOf: [
+                    {
+                      type: 'array',
+                      items: { $ref: '#/components/schemas/KlinePoint' },
+                    },
+                    { $ref: '#/components/schemas/KlineDiagnosticsEnvelope' },
+                  ],
                 },
               },
             },
@@ -747,6 +892,284 @@ export const openApiDocument: OpenAPIV3.Document = {
           code: { type: 'string' },
           name: { type: 'string' },
           market: { type: 'string', enum: ['CN', 'HK', 'US'] },
+        },
+      },
+      ApiWarning: {
+        type: 'object',
+        required: ['code', 'message'],
+        properties: {
+          code: { type: 'string' },
+          message: { type: 'string' },
+          details: { type: 'object', additionalProperties: true },
+        },
+      },
+      ApiError: {
+        type: 'object',
+        required: ['code', 'message'],
+        properties: {
+          code: { type: 'string' },
+          message: { type: 'string' },
+          details: { type: 'object', additionalProperties: true },
+        },
+      },
+      ResponseMeta: {
+        type: 'object',
+        properties: {
+          source: { type: 'string' },
+          generated_at: { type: 'string', format: 'date-time' },
+          requested_date: { type: 'string', format: 'date', nullable: true },
+          resolved_date: { type: 'string', format: 'date', nullable: true },
+          latest_available_date: {
+            type: 'string',
+            format: 'date',
+            nullable: true,
+          },
+        },
+        additionalProperties: true,
+      },
+      ErrorEnvelope: {
+        type: 'object',
+        required: ['data', 'meta', 'warnings', 'errors'],
+        properties: {
+          data: { nullable: true },
+          meta: { $ref: '#/components/schemas/ResponseMeta' },
+          warnings: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiWarning' },
+          },
+          errors: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiError' },
+          },
+        },
+      },
+      SnapshotData: {
+        type: 'object',
+        required: [
+          'date',
+          'portfolioId',
+          'portfolio',
+          'positions',
+          'quotes',
+          'indices',
+          'exchangeRates',
+        ],
+        properties: {
+          date: { type: 'string', format: 'date' },
+          portfolioId: { type: 'string' },
+          portfolio: { type: 'object', additionalProperties: true },
+          positions: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
+          quotes: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
+          indices: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
+          exchangeRates: {
+            type: 'array',
+            items: { type: 'object', additionalProperties: true },
+          },
+        },
+      },
+      SnapshotDataEnvelope: {
+        type: 'object',
+        required: ['data', 'meta', 'warnings', 'errors'],
+        properties: {
+          data: { $ref: '#/components/schemas/SnapshotData' },
+          meta: { $ref: '#/components/schemas/ResponseMeta' },
+          warnings: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiWarning' },
+          },
+          errors: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiError' },
+          },
+        },
+      },
+      InvalidCodeDiagnostic: {
+        type: 'object',
+        required: ['code', 'reason'],
+        properties: {
+          code: { type: 'string' },
+          reason: { type: 'string' },
+        },
+      },
+      QuoteDiagnostics: {
+        type: 'object',
+        required: ['requested', 'found', 'missing', 'invalid', 'quotes'],
+        properties: {
+          requested: { type: 'array', items: { type: 'string' } },
+          found: { type: 'array', items: { type: 'string' } },
+          missing: { type: 'array', items: { type: 'string' } },
+          invalid: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/InvalidCodeDiagnostic' },
+          },
+          quotes: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/Quote' },
+          },
+        },
+      },
+      QuoteDiagnosticsEnvelope: {
+        type: 'object',
+        required: ['data', 'meta', 'warnings', 'errors'],
+        properties: {
+          data: { $ref: '#/components/schemas/QuoteDiagnostics' },
+          meta: { $ref: '#/components/schemas/ResponseMeta' },
+          warnings: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiWarning' },
+          },
+          errors: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiError' },
+          },
+        },
+      },
+      KlineDiagnostics: {
+        type: 'object',
+        required: ['requested', 'found', 'missing', 'invalid', 'points'],
+        properties: {
+          requested: { type: 'array', items: { type: 'string' } },
+          found: { type: 'array', items: { type: 'string' } },
+          missing: { type: 'array', items: { type: 'string' } },
+          invalid: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/InvalidCodeDiagnostic' },
+          },
+          points: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/KlinePoint' },
+          },
+        },
+      },
+      KlineDiagnosticsEnvelope: {
+        type: 'object',
+        required: ['data', 'meta', 'warnings', 'errors'],
+        properties: {
+          data: { $ref: '#/components/schemas/KlineDiagnostics' },
+          meta: { $ref: '#/components/schemas/ResponseMeta' },
+          warnings: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiWarning' },
+          },
+          errors: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiError' },
+          },
+        },
+      },
+      ExchangeRates: {
+        type: 'object',
+        required: ['USD', 'HKD', 'CNY', 'updatedAt'],
+        properties: {
+          USD: { type: 'number', nullable: true },
+          HKD: { type: 'number', nullable: true },
+          CNY: { type: 'number' },
+          updatedAt: { type: 'string', format: 'date-time' },
+          error: { type: 'boolean' },
+          message: { type: 'string' },
+        },
+      },
+      ExchangeRatesEnvelope: {
+        type: 'object',
+        required: ['data', 'meta', 'warnings', 'errors'],
+        properties: {
+          data: { $ref: '#/components/schemas/ExchangeRates' },
+          meta: { $ref: '#/components/schemas/ResponseMeta' },
+          warnings: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiWarning' },
+          },
+          errors: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiError' },
+          },
+        },
+      },
+      PeriodReportEnvelope: {
+        type: 'object',
+        required: ['data', 'meta', 'warnings', 'errors'],
+        properties: {
+          data: { type: 'object', additionalProperties: true },
+          meta: { $ref: '#/components/schemas/ResponseMeta' },
+          warnings: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiWarning' },
+          },
+          errors: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiError' },
+          },
+        },
+      },
+      DataFreshnessEnvelope: {
+        type: 'object',
+        description:
+          'Reserved contract for future data-freshness endpoint; not implemented as a production route in M1.',
+        properties: {
+          data: {
+            type: 'object',
+            properties: {
+              portfolioId: { type: 'string' },
+              requested_date: {
+                type: 'string',
+                format: 'date',
+                nullable: true,
+              },
+              resolved_date: { type: 'string', format: 'date', nullable: true },
+              latest_available_date: {
+                type: 'string',
+                format: 'date',
+                nullable: true,
+              },
+              status: {
+                type: 'string',
+                enum: ['fresh', 'stale', 'missing', 'unknown'],
+              },
+            },
+          },
+          meta: { $ref: '#/components/schemas/ResponseMeta' },
+          warnings: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiWarning' },
+          },
+          errors: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiError' },
+          },
+        },
+      },
+      SourceHealthEnvelope: {
+        type: 'object',
+        description:
+          'Reserved contract for future Source Gateway health endpoint; not implemented as a production route in M1.',
+        properties: {
+          data: {
+            type: 'object',
+            properties: {
+              sources: {
+                type: 'array',
+                items: { type: 'object', additionalProperties: true },
+              },
+            },
+          },
+          meta: { $ref: '#/components/schemas/ResponseMeta' },
+          warnings: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiWarning' },
+          },
+          errors: {
+            type: 'array',
+            items: { $ref: '#/components/schemas/ApiError' },
+          },
         },
       },
       Quote: {
