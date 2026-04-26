@@ -274,11 +274,67 @@ if errors:
 PY
 }
 
+extract_runner_report() {
+  local stdout_file="$1"
+  local report_file="$2"
+
+  python3 - "${stdout_file}" "${report_file}" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+stdout_path = Path(sys.argv[1])
+report_path = Path(sys.argv[2])
+text = stdout_path.read_text(encoding='utf-8', errors='replace')
+decoder = json.JSONDecoder()
+required_keys = {'mode', 'status', 'writeAttempted', 'domains', 'countVerification'}
+candidates = []
+index = 0
+
+while True:
+    index = text.find('{', index)
+    if index == -1:
+        break
+    try:
+        value, _end = decoder.raw_decode(text[index:])
+    except json.JSONDecodeError:
+        index += 1
+        continue
+    if isinstance(value, dict) and required_keys.issubset(value):
+        candidates.append((index, value))
+    index += 1
+
+if not candidates:
+    print(
+        json.dumps(
+            {
+                'runnerReportParseFailed': {
+                    'stdoutFile': str(stdout_path),
+                    'requiredKeys': sorted(required_keys),
+                }
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+_offset, report = candidates[-1]
+tmp_path = report_path.with_suffix(report_path.suffix + '.tmp')
+with tmp_path.open('w', encoding='utf-8') as fh:
+    json.dump(report, fh, ensure_ascii=False, indent=2)
+    fh.write('\n')
+tmp_path.replace(report_path)
+PY
+}
+
 run_backfill() {
   local mode="$1"
   shift
-  local stdout_file="${RUN_DIR}/${mode}.stdout.json"
+  local stdout_file="${RUN_DIR}/${mode}.stdout.log"
   local stderr_file="${RUN_DIR}/${mode}.stderr.log"
+  local report_file="${RUN_DIR}/${mode}.report.json"
 
   log "running ${mode} backfill for ${DATE_FROM}..${DATE_TO}, domains=${DOMAINS}, maxRows=${MAX_ROWS}"
   run_in_backend_container node dist/backfill-source-data.js \
@@ -291,8 +347,9 @@ run_backfill() {
     "$@" \
     >"${stdout_file}" 2>"${stderr_file}"
 
-  python3 -m json.tool "${stdout_file}" >"${RUN_DIR}/${mode}.report.json"
-  log "${mode} report saved: ${RUN_DIR}/${mode}.report.json"
+  extract_runner_report "${stdout_file}" "${report_file}"
+  log "${mode} stdout saved: ${stdout_file}"
+  log "${mode} report saved: ${report_file}"
 }
 
 backup_database() {
