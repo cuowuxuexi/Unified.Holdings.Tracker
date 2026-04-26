@@ -267,8 +267,11 @@ const CoreIndicatorsSection: React.FC<CoreIndicatorsCardProps> = ({
   portfolio,
   stats,
 }) => {
-  const leverage = portfolio.leverageInfo || (portfolio as any).leverage;
-  const usedCredit = leverage?.usedCredit || leverage?.usedAmount || 0;
+  const leverage = portfolio.leverageInfo ?? portfolio.leverage;
+  const usedCredit =
+    ('usedCredit' in (leverage ?? {})
+      ? portfolio.leverageInfo?.usedCredit
+      : portfolio.leverage?.usedAmount) ?? 0;
   const totalMarketValueNum = stats?.totalMarketValue || 0;
   const leveragePercent =
     totalMarketValueNum > 0 ? (usedCredit / totalMarketValueNum) * 100 : 0;

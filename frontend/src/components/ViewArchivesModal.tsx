@@ -18,10 +18,22 @@ import {
   ExclamationCircleOutlined,
 } from '@ant-design/icons';
 import { useState, useEffect, useCallback } from 'react';
-import apiClient, { BackupIndexEntry } from '../services/api';
+import apiClient, {
+  BackupIndexEntry,
+  RestoreBackupResponse,
+} from '../services/api';
 import type { ColumnsType } from 'antd/es/table';
 
 const { Text } = Typography;
+
+type RestoreResult = RestoreBackupResponse & {
+  portfolioId?: string;
+  isNewPortfolio?: boolean;
+};
+
+type BackupColumn = ColumnsType<BackupIndexEntry>[number] & {
+  hidden?: boolean;
+};
 
 interface ViewArchivesModalProps {
   open: boolean;
@@ -75,7 +87,7 @@ export function ViewArchivesModal({
   const handleRestore = async (backup: BackupIndexEntry) => {
     setRestoringId(backup.backupId);
     try {
-      let result;
+      let result: RestoreResult;
 
       if (portfolioId) {
         // 有 portfolioId，使用原有的恢复逻辑
@@ -89,11 +101,11 @@ export function ViewArchivesModal({
         const countInfo = result.restoredTransactionCount
           ? `已恢复 ${result.restoredTransactionCount} 条交易记录`
           : '';
-        const newPortfolioInfo = (result as any).isNewPortfolio
+        const newPortfolioInfo = result.isNewPortfolio
           ? '（已自动创建投资组合）'
           : '';
         messageApi.success(`存档恢复成功！${countInfo}${newPortfolioInfo}`);
-        onRestoreSuccess?.((result as any).portfolioId);
+        onRestoreSuccess?.(result.portfolioId);
         onClose();
       } else {
         messageApi.error(result.message || '恢复存档失败');
@@ -176,7 +188,7 @@ export function ViewArchivesModal({
   };
 
   // 表格列定义
-  const columns: ColumnsType<BackupIndexEntry> = [
+  const columns: BackupColumn[] = [
     {
       title: '创建时间',
       dataIndex: 'createdAt',
@@ -332,7 +344,7 @@ export function ViewArchivesModal({
               />
             ) : (
               <Table
-                columns={columns.filter((col) => !(col as any).hidden)}
+                columns={columns.filter((col) => !col.hidden)}
                 dataSource={backups}
                 rowKey="backupId"
                 size="small"

@@ -48,9 +48,15 @@ const SummaryCard: React.FC<SummaryCardProps> = ({ portfolio, stats }) => {
   const netDepositedCash = portfolio.netDepositedCash;
   const availableCash = portfolio.cash;
 
-  const leverage = portfolio.leverageInfo || (portfolio as any).leverage;
-  const totalCredit = leverage?.totalCredit || leverage?.totalAmount || 0;
-  const usedCredit = leverage?.usedCredit || leverage?.usedAmount || 0;
+  const leverage = portfolio.leverageInfo ?? portfolio.leverage;
+  const totalCredit =
+    ('totalCredit' in (leverage ?? {})
+      ? portfolio.leverageInfo?.totalCredit
+      : portfolio.leverage?.totalAmount) ?? 0;
+  const usedCredit =
+    ('usedCredit' in (leverage ?? {})
+      ? portfolio.leverageInfo?.usedCredit
+      : portfolio.leverage?.usedAmount) ?? 0;
   const totalMarketValueNum = stats?.totalMarketValue || 0;
   const leveragePercent =
     totalMarketValueNum > 0 ? (usedCredit / totalMarketValueNum) * 100 : 0;

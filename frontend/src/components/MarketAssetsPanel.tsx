@@ -19,7 +19,12 @@ import TransactionList from './legacy/TransactionList';
 import PositionsTable from './legacy/PositionsTable';
 import { fetchExchangeRates } from '../services/api'; // Correctly import fetchExchangeRates
 import apiClient from '../services/api'; // 添加 apiClient 导入
-import { PositionWithStats, PortfolioStats } from '../store/types'; // Import PositionWithStats type
+import {
+  PositionWithStats,
+  PortfolioStats,
+  Quote,
+  Transaction,
+} from '../store/types'; // Import PositionWithStats type
 import useAppStore from '../store'; // 导入 store
 import useMessageApi from '../hooks/useMessageApi';
 import {
@@ -242,7 +247,7 @@ const SortableMarketItem: React.FC<{
 const MarketAssetsPanel: React.FC<{
   portfolioId: string;
   positions: PositionWithStats[]; // Use specific type from store/types
-  transactions: any[];
+  transactions: Transaction[];
   stats?: PortfolioStats | null;
 }> = ({ portfolioId, positions, transactions, stats }) => {
   console.log(
@@ -260,7 +265,7 @@ const MarketAssetsPanel: React.FC<{
   const [rateError, setRateError] = useState(false);
 
   // 添加行情数据状态
-  const [quoteMap, setQuoteMap] = useState<Record<string, any>>({});
+  const [quoteMap, setQuoteMap] = useState<Record<string, Quote>>({});
   const [loadingQuotes, setLoadingQuotes] = useState(false);
   const [quoteError, setQuoteError] = useState(false);
   const messageApi = useMessageApi();
@@ -362,7 +367,7 @@ const MarketAssetsPanel: React.FC<{
             acc[quote.code] = quote;
             return acc;
           },
-          {} as Record<string, any>
+          {} as Record<string, Quote>
         );
 
         setQuoteMap(newQuoteMap);
@@ -380,7 +385,7 @@ const MarketAssetsPanel: React.FC<{
     };
 
     loadQuotes();
-  }, [positions, messageApi]); // 当持仓数据变化时重新加载
+  }, [positions, transactions, messageApi]); // 当持仓或交易数据变化时重新加载
 
   // 市场配置管理函数
   const handleAddMarket = () => {
@@ -553,7 +558,7 @@ const MarketAssetsPanel: React.FC<{
         0
       );
       const totalPnlCNY = marketPositions.reduce(
-        (sum, p) => sum + (p.totalPnl ?? (p as any).pnlCNY ?? 0),
+        (sum, p) => sum + (p.totalPnl ?? p.pnlCNY ?? 0),
         0
       );
 

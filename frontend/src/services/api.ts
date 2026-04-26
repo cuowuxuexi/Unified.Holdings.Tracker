@@ -4,7 +4,6 @@ import {
   Portfolio,
   PortfolioDetail,
   Transaction,
-  TransactionInput,
   PortfolioInput,
   PortfolioStats,
   PortfolioHistoryContextEnvelope,
@@ -93,6 +92,21 @@ export interface RestoreBackupResponse {
   message: string;
   restoredTransactionCount?: number;
   restoredAssetCount?: number;
+}
+
+export interface AddTransactionPayload {
+  date: string;
+  type: string;
+  assetCode?: string;
+  asset?: {
+    code: string;
+  };
+  quantity?: number;
+  price?: number;
+  amount?: number;
+  commission?: number;
+  leverageUsed?: number;
+  notes?: string;
 }
 
 /**
@@ -236,7 +250,7 @@ const apiClient = {
 
   addTransaction: async (
     portfolioId: string,
-    transactionData: TransactionInput & { leverageUsed?: number }
+    transactionData: AddTransactionPayload
   ): Promise<Transaction> => {
     try {
       // 重构数据结构：将 asset.code 转换为顶层 assetCode

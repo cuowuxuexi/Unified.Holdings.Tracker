@@ -19,14 +19,25 @@ const inferCurrencyCode = (record: PositionWithStats): string => {
 const shouldUseLocalCurrency = (record: PositionWithStats) =>
   inferCurrencyCode(record) !== 'CNY';
 
-const toNumber = (value: any): number | undefined =>
+type PositionDisplayFields = PositionWithStats & {
+  totalCost?: number;
+  totalCostLocal?: number;
+  totalBuyCost?: number;
+  totalBuyCostLocal?: number;
+  dilutedPrice?: number;
+  dilutedPriceLocal?: number;
+  pnlCNY?: number;
+  marketValueCNY?: number;
+};
+
+const toNumber = (value: unknown): number | undefined =>
   typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 
 const getQuantity = (record: PositionWithStats): number =>
   Number.isFinite(record.quantity) ? record.quantity : 0;
 
 const getLocalCostPrice = (record: PositionWithStats): number | undefined => {
-  const data = record as any;
+  const data = record as PositionDisplayFields;
   const costPriceLocal = toNumber(data.costPriceLocal);
   if (costPriceLocal !== undefined) {
     return costPriceLocal;
@@ -40,7 +51,7 @@ const getLocalCostPrice = (record: PositionWithStats): number | undefined => {
 };
 
 const getLocalMarketValue = (record: PositionWithStats): number | undefined => {
-  const data = record as any;
+  const data = record as PositionDisplayFields;
   const marketValueLocal = toNumber(data.marketValueLocal);
   if (marketValueLocal !== undefined) {
     return marketValueLocal;
@@ -52,7 +63,7 @@ const getLocalMarketValue = (record: PositionWithStats): number | undefined => {
 };
 
 const getLocalTotalCost = (record: PositionWithStats): number | undefined => {
-  const data = record as any;
+  const data = record as PositionDisplayFields;
   const totalCostLocal = toNumber(data.totalCostLocal);
   if (totalCostLocal !== undefined) {
     return totalCostLocal;
@@ -65,7 +76,7 @@ const getLocalTotalCost = (record: PositionWithStats): number | undefined => {
 };
 
 const getLocalTotalPnl = (record: PositionWithStats): number | undefined => {
-  const data = record as any;
+  const data = record as PositionDisplayFields;
   const totalPnlLocal = toNumber(data.totalPnlLocal);
   if (totalPnlLocal !== undefined) {
     return totalPnlLocal;
@@ -79,7 +90,7 @@ const getLocalTotalPnl = (record: PositionWithStats): number | undefined => {
 };
 
 const getLocalDailyChange = (record: PositionWithStats): number | undefined => {
-  const data = record as any;
+  const data = record as PositionDisplayFields;
   return toNumber(data.dailyChangeLocal);
 };
 
@@ -96,7 +107,7 @@ const getDisplayCostPrice = (record: PositionWithStats): number | undefined => {
 const getDisplayDilutedPrice = (
   record: PositionWithStats
 ): number | undefined => {
-  const data = record as any;
+  const data = record as PositionDisplayFields;
   if (shouldUseLocalCurrency(record)) {
     const local = toNumber(data.dilutedPriceLocal);
     if (local !== undefined) {
@@ -137,7 +148,7 @@ const getDisplayTotalPnl = (record: PositionWithStats): number | undefined => {
       return local;
     }
   }
-  const data = record as any;
+  const data = record as PositionDisplayFields;
   const pnlCny = toNumber(data.pnlCNY);
   if (record.totalPnl !== undefined) {
     return record.totalPnl;
@@ -154,7 +165,7 @@ const getCostBaseForPercent = (
       return localCost;
     }
   }
-  const data = record as any;
+  const data = record as PositionDisplayFields;
   const totalCost = toNumber(data.totalCost);
   if (totalCost !== undefined && totalCost !== 0) {
     return totalCost;
@@ -385,12 +396,14 @@ const PositionsTable: React.FC<PositionsTableProps> = React.memo(
           title: '占比%',
           key: 'positionRatio',
           // align: 'right', // Removed for global center alignment in CSS
-          render: (_: any, record: PositionWithStats) => {
+          render: (_: unknown, record: PositionWithStats) => {
             if (!totalMarketValue || totalMarketValue === 0) return '-';
             // 使用 marketValueCNY（已换算为人民币的市值）来计算占比
             // 因为 totalMarketValue 是人民币计价的总市值
             const marketValueInCNY =
-              (record as any).marketValueCNY || record.marketValue || 0;
+              (record as PositionDisplayFields).marketValueCNY ||
+              record.marketValue ||
+              0;
             const ratio = (marketValueInCNY / totalMarketValue) * 100;
             return `${ratio.toFixed(2)}%`;
           },
@@ -440,13 +453,13 @@ const PositionsTable: React.FC<PositionsTableProps> = React.memo(
           title: '周期涨幅',
           key: 'periodChange',
           // align: 'right', // Removed for global center alignment in CSS
-          render: (_: any, record: PositionWithStats) =>
+          render: (_: unknown, record: PositionWithStats) =>
             renderPeriodChange(record),
           width: 90,
           // className: 'number-cell period-change-cell', // Optional
         },
       ],
-      [formatNumber, renderPnl, renderPeriodChange]
+      [formatNumber, renderPnl, renderPeriodChange, totalMarketValue]
     );
 
     // 为每个 position 添加明确的 key 属性

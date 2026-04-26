@@ -9,7 +9,9 @@ import {
   Alert,
 } from 'antd';
 import dayjs from 'dayjs';
+import type { Dayjs } from 'dayjs';
 import { useAddTransaction } from '../../../shared/hooks/useTransactions';
+import type { TransactionInput } from '../../../generated/api';
 
 const { Option } = Select;
 const { TextArea } = Input;
@@ -18,6 +20,10 @@ interface AddTransactionFormProps {
   portfolioId: string;
   onSuccess: () => void;
 }
+
+type TransactionFormValues = Omit<TransactionInput, 'date'> & {
+  date: Dayjs;
+};
 
 export function AddTransactionForm({
   portfolioId,
@@ -28,7 +34,7 @@ export function AddTransactionForm({
 
   const transactionType = Form.useWatch('type', form);
 
-  const handleSubmit = async (values: any) => {
+  const handleSubmit = async (values: TransactionFormValues) => {
     try {
       await addTransaction.mutateAsync({
         portfolioId,

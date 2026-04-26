@@ -24,7 +24,7 @@ export function useAddTransaction() {
     }: {
       portfolioId: string;
       transaction: TransactionInput;
-    }) => apiClient.addTransaction(portfolioId, transaction as any),
+    }) => apiClient.addTransaction(portfolioId, transaction),
     onSuccess: (_, variables) => {
       queryClient.invalidateQueries({
         queryKey: ['transactions', variables.portfolioId],
@@ -65,4 +65,3 @@ export function useDeleteTransaction() {
     },
   });
 }
-

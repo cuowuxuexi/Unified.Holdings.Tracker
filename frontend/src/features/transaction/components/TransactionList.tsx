@@ -114,7 +114,7 @@ export function TransactionList({
       title: '操作',
       key: 'action',
       width: 80,
-      render: (_: any, record: Transaction) => (
+      render: (_: unknown, record: Transaction) => (
         <Popconfirm
           title="确定删除这条交易记录？"
           onConfirm={() => record.id && handleDelete(record.id)}

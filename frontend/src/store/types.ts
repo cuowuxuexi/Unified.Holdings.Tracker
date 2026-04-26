@@ -140,6 +140,13 @@ export interface LeverageInfo {
   interestRate: number; // 年利率 (%)
 }
 
+export interface LegacyLeverageInfo {
+  totalAmount?: number;
+  usedAmount?: number;
+  availableAmount?: number;
+  costRate?: number;
+}
+
 // 单条注意信息
 export interface AttentionItem {
   id: string; // 唯一标识
@@ -161,6 +168,7 @@ export interface Portfolio {
   name: string;
   cash: number;
   leverageInfo?: LeverageInfo;
+  leverage?: LegacyLeverageInfo;
   attentionInfo?: string;
 }
 
@@ -601,6 +609,7 @@ export interface AppState {
     portfolioId: string,
     transactionId: string
   ) => Promise<void>;
+  deletePortfolio: (portfolioId: string) => Promise<void>;
   setSelectedIndices: (indices: SelectedIndexItem[]) => void; // Action to set selected indices
   updateTransactionNotes: (
     portfolioId: string,

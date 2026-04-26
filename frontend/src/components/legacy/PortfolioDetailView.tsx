@@ -51,9 +51,7 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({
   const [deleteInput, setDeleteInput] = useState('');
   const [deleteLoading, setDeleteLoading] = useState(false);
 
-  const deletePortfolioAction = useAppStore(
-    (state) => (state as any).deletePortfolio
-  ); // Temporarily cast to any to bypass TS error, should be fixed in store definition
+  const deletePortfolioAction = useAppStore((state) => state.deletePortfolio);
   const fetchPortfolios = useAppStore((state) => state.fetchPortfolios);
   const selectPortfolio = useAppStore((state) => state.selectPortfolio);
   const messageApi = useMessageApi();
@@ -66,7 +64,7 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({
         if (fetchedData.error) {
           messageApi.error('获取实时汇率失败，使用默认值。');
         }
-      } catch (error) {
+      } catch {
         messageApi.error('获取实时汇率失败，使用默认值。');
       }
     };
@@ -85,7 +83,7 @@ const PortfolioDetailView: React.FC<PortfolioDetailViewProps> = ({
       setDeleteInput('');
       await fetchPortfolios();
       selectPortfolio(null);
-    } catch (err) {
+    } catch {
       messageApi.error('删除失败，请重试');
     } finally {
       setDeleteLoading(false);

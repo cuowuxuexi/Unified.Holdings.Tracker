@@ -215,7 +215,7 @@ export const BatchImport: React.FC<BatchImportProps> = ({
       dataIndex: 'value',
       key: 'value',
       width: 120,
-      render: (value: any) => (value !== undefined ? String(value) : '-'),
+      render: (value: unknown) => (value !== undefined ? String(value) : '-'),
     },
   ];
 

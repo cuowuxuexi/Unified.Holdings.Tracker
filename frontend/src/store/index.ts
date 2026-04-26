@@ -9,7 +9,7 @@ import {
   IndexCategory,
 } from './types';
 import apiClient from '../services/api'; // Import the API client
-import { queryClient } from '../app/providers/QueryProvider';
+import { queryClient } from '../app/providers/queryClient';
 // import dayjs from 'dayjs'; // No longer needed here for calculations
 
 // 本地存储键名
@@ -74,8 +74,25 @@ const migrateStringArrayToSelectedIndexItem = (
   }));
 };
 
+type StoredSelectedIndexItem = SelectedIndexItem & {
+  type?: string;
+};
+
+const isStoredSelectedIndexItem = (
+  item: unknown
+): item is StoredSelectedIndexItem => {
+  return (
+    typeof item === 'object' &&
+    item !== null &&
+    'code' in item &&
+    typeof item.code === 'string'
+  );
+};
+
 // 迁移老的 type 字段到新的 categoryId 字段
-const migrateTypeToCategory = (items: any[]): SelectedIndexItem[] => {
+const migrateTypeToCategory = (
+  items: StoredSelectedIndexItem[]
+): SelectedIndexItem[] => {
   return items.map((item) => {
     if (item.type && !item.categoryId) {
       // 有 type 但没有 categoryId，进行迁移
@@ -92,10 +109,7 @@ const getSavedIndicesOrder = (): SelectedIndexItem[] => {
     if (savedOrder) {
       const parsed = JSON.parse(savedOrder);
       // 新对象数组格式
-      if (
-        Array.isArray(parsed) &&
-        parsed.every((item) => typeof item === 'object' && item.code)
-      ) {
+      if (Array.isArray(parsed) && parsed.every(isStoredSelectedIndexItem)) {
         if (parsed.length === 0) {
           console.warn(
             'Saved indices order is empty, returning default indices.'
