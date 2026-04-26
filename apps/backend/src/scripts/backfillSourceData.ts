@@ -41,6 +41,10 @@ type FindManyModel<TRow> = CountModel & {
   findMany(args: unknown): Promise<TRow[]>;
 };
 
+type FactSnapshotModel<TRow> = FindManyModel<TRow> & {
+  upsert(args: unknown): Promise<unknown>;
+};
+
 type SourceRunStatus = 'SUCCESS' | 'PARTIAL' | 'FAILED';
 type SourceHealthStatus = 'HEALTHY' | 'DEGRADED' | 'DOWN' | 'UNKNOWN';
 
@@ -96,9 +100,9 @@ export type BackfillSourceDataPrisma = {
   sourceHealth: UpsertModel;
   yieldCurveSnapshot: FindManyModel<YieldCurveSnapshotRow>;
   macroIndicatorSnapshot: FindManyModel<MacroIndicatorSnapshotRow>;
-  exchangeRateSnapshot: FindManyModel<ExchangeRateSnapshotRow>;
-  quoteSnapshot: FindManyModel<QuoteSnapshotRow>;
-  indexSnapshot: FindManyModel<IndexSnapshotRow>;
+  exchangeRateSnapshot: FactSnapshotModel<ExchangeRateSnapshotRow>;
+  quoteSnapshot: FactSnapshotModel<QuoteSnapshotRow>;
+  indexSnapshot: FactSnapshotModel<IndexSnapshotRow>;
   portfolio: {
     findUnique(args: unknown): Promise<BackfillSourceDataPortfolioRow | null>;
   };
@@ -118,6 +122,7 @@ export type BackfillSourceDataOptions = {
   maxRows: number;
   failOnMissingConfig: boolean;
   allowIsolatedWrite: boolean;
+  allowFactWrite: boolean;
   confirmIsolatedDb?: string;
 };
 
@@ -148,6 +153,25 @@ type BackfillTarget = {
   key: string;
   date: string;
   attributes: Record<string, unknown>;
+};
+
+type BackfillFactWriteSkip = {
+  domain: BackfillSourceDataDomain;
+  key: string;
+  reason: string;
+  message: string;
+  details?: Record<string, unknown>;
+};
+
+type BackfillFactWriteSummary = {
+  enabled: boolean;
+  totalUpserts: number;
+  exchangeRateSnapshotUpserts: number;
+  quoteSnapshotUpserts: number;
+  indexSnapshotUpserts: number;
+  skipped: number;
+  skipReasons: Record<string, number>;
+  skips: BackfillFactWriteSkip[];
 };
 
 export type BackfillDomainPlan = {
@@ -197,6 +221,7 @@ export type BackfillSourceDataReport = {
     sourceRunUpserts: number;
     sourceHealthUpserts: number;
   };
+  factWriteSummary: BackfillFactWriteSummary;
   plans: BackfillDomainPlan[];
   blocked: BackfillBlockedItem[];
   warnings: BackfillWarning[];
@@ -213,6 +238,7 @@ type ParsedCliFlag =
   | 'max-rows'
   | 'fail-on-missing-config'
   | 'allow-isolated-write'
+  | 'allow-fact-write'
   | 'confirm-isolated-db';
 
 const COUNTED_TABLES: CountedTable[] = [
@@ -303,6 +329,7 @@ export function parseBackfillSourceDataArgs(
     maxRows,
     failOnMissingConfig: raw['fail-on-missing-config'] === true,
     allowIsolatedWrite: raw['allow-isolated-write'] === true,
+    allowFactWrite: raw['allow-fact-write'] === true,
     confirmIsolatedDb: confirmIsolatedDb?.trim(),
   };
 }
@@ -376,12 +403,24 @@ export async function runBackfillSourceData(
           new Date(generatedAt)
         )
       : { sourceRunUpserts: 0, sourceHealthUpserts: 0 };
+  const factWriteSummary = await buildFactWriteSummary({
+    plans,
+    prisma: dependencies.prisma,
+    warnings,
+    enabled: mode === 'isolated-write' && options.allowFactWrite,
+    skipReason: buildGlobalFactWriteSkipReason(mode, options, blocked),
+  });
 
   const postCounts = await collectCounts(dependencies.prisma);
   const changedTables = diffCounts(preCounts, postCounts);
   const externalFactChangedTables = changedTables.filter((table) =>
     EXTERNAL_FACT_TABLES.includes(table)
   );
+  const disallowedExternalFactChangedTables =
+    getDisallowedExternalFactChangedTables(
+      externalFactChangedTables,
+      factWriteSummary
+    );
   const auditTableChangedTables = changedTables.filter((table) =>
     AUDIT_TABLES.includes(table)
   );
@@ -394,12 +433,14 @@ export async function runBackfillSourceData(
     });
   }
   if (mode === 'isolated-write' && externalFactChangedTables.length > 0) {
-    blocked.push({
-      code: 'isolated_write_fact_count_changed',
-      message:
-        'Isolated write verification failed: external fact table counts changed.',
-      details: { changedTables: externalFactChangedTables },
-    });
+    if (disallowedExternalFactChangedTables.length > 0) {
+      blocked.push({
+        code: 'isolated_write_fact_count_changed',
+        message:
+          'Isolated write verification failed: external fact table counts changed without matching allowed fact upserts.',
+        details: { changedTables: disallowedExternalFactChangedTables },
+      });
+    }
   }
 
   const status = buildReportStatus({ mode, blocked, options });
@@ -427,12 +468,14 @@ export async function runBackfillSourceData(
       auditTableChangedTables,
     },
     auditWriteSummary,
+    factWriteSummary,
     plans,
     blocked,
     warnings,
     writeAttempted:
       auditWriteSummary.sourceRunUpserts > 0 ||
-      auditWriteSummary.sourceHealthUpserts > 0,
+      auditWriteSummary.sourceHealthUpserts > 0 ||
+      factWriteSummary.totalUpserts > 0,
   };
 }
 
@@ -460,6 +503,316 @@ export function getBackfillSourceDataExitCode(
     return 1;
   }
   return 0;
+}
+
+function buildGlobalFactWriteSkipReason(
+  mode: BackfillSourceDataReport['mode'],
+  options: BackfillSourceDataOptions,
+  blocked: BackfillBlockedItem[]
+): { reason: string; message: string } | null {
+  if (mode === 'dry-run') {
+    return {
+      reason: 'dry_run',
+      message: 'Dry-run mode never writes fact tables.',
+    };
+  }
+
+  if (mode === 'write-rejected') {
+    return {
+      reason: 'write_gate_rejected',
+      message: 'Fact writes are skipped because the write gate failed closed.',
+    };
+  }
+
+  if (hasFatalPreWriteBlock(blocked)) {
+    return {
+      reason: 'pre_write_blocked',
+      message:
+        'Fact writes are skipped because a fatal pre-write block exists.',
+    };
+  }
+
+  if (!options.allowFactWrite) {
+    return {
+      reason: 'fact_write_flag_missing',
+      message: 'Fact writes require --allow-fact-write.',
+    };
+  }
+
+  return null;
+}
+
+async function buildFactWriteSummary(input: {
+  plans: BackfillDomainPlan[];
+  prisma: BackfillSourceDataPrisma;
+  warnings: BackfillWarning[];
+  enabled: boolean;
+  skipReason: { reason: string; message: string } | null;
+}): Promise<BackfillFactWriteSummary> {
+  const summary = createFactWriteSummary(input.enabled);
+  if (input.skipReason) {
+    for (const plan of input.plans) {
+      for (const target of plan.targets) {
+        addFactWriteSkip(summary, {
+          domain: plan.domain,
+          key: target.key,
+          reason: input.skipReason.reason,
+          message: input.skipReason.message,
+        });
+      }
+    }
+    return summary;
+  }
+
+  for (const plan of input.plans) {
+    if (plan.domain === 'fx') {
+      await upsertFxFacts(plan, input.prisma, summary, input.warnings);
+      continue;
+    }
+
+    if (plan.domain === 'market_quote') {
+      await upsertMarketQuoteFacts(plan, input.prisma, summary, input.warnings);
+      continue;
+    }
+
+    if (plan.domain === 'index') {
+      await upsertIndexFacts(plan, input.prisma, summary, input.warnings);
+      continue;
+    }
+
+    for (const target of plan.targets) {
+      addFactWriteSkip(summary, {
+        domain: plan.domain,
+        key: target.key,
+        reason: 'domain_not_configured_for_fact_write',
+        message:
+          'This domain remains blocked/not_configured for M8.3A and is not written to fact tables.',
+      });
+    }
+  }
+
+  return summary;
+}
+
+function createFactWriteSummary(enabled: boolean): BackfillFactWriteSummary {
+  return {
+    enabled,
+    totalUpserts: 0,
+    exchangeRateSnapshotUpserts: 0,
+    quoteSnapshotUpserts: 0,
+    indexSnapshotUpserts: 0,
+    skipped: 0,
+    skipReasons: {},
+    skips: [],
+  };
+}
+
+async function upsertFxFacts(
+  plan: BackfillDomainPlan,
+  prisma: BackfillSourceDataPrisma,
+  summary: BackfillFactWriteSummary,
+  warnings: BackfillWarning[]
+): Promise<void> {
+  for (const target of plan.targets) {
+    const pair = readStringAttribute(target, 'pair');
+    const rate = target.attributes.rate;
+    if (!pair || !hasRealFactValue(rate)) {
+      addMissingFactValueSkip({
+        summary,
+        warnings,
+        domain: plan.domain,
+        target,
+        missingFields: [
+          ...(!pair ? ['pair'] : []),
+          ...(!hasRealFactValue(rate) ? ['rate'] : []),
+        ],
+      });
+      continue;
+    }
+
+    await prisma.exchangeRateSnapshot.upsert({
+      where: { date_pair: { date: target.date, pair } },
+      create: {
+        date: target.date,
+        pair,
+        rate,
+        source: readOptionalStringAttribute(target, 'source') ?? null,
+      },
+      update: {
+        rate,
+        source: readOptionalStringAttribute(target, 'source') ?? null,
+      },
+    });
+    summary.exchangeRateSnapshotUpserts += 1;
+    summary.totalUpserts += 1;
+  }
+}
+
+async function upsertMarketQuoteFacts(
+  plan: BackfillDomainPlan,
+  prisma: BackfillSourceDataPrisma,
+  summary: BackfillFactWriteSummary,
+  warnings: BackfillWarning[]
+): Promise<void> {
+  for (const target of plan.targets) {
+    const assetCode = readStringAttribute(target, 'assetCode');
+    const currentPrice = target.attributes.currentPrice;
+    const timestamp = parseFactTimestamp(target.attributes.timestamp);
+    if (!assetCode || !hasRealFactValue(currentPrice) || !timestamp) {
+      addMissingFactValueSkip({
+        summary,
+        warnings,
+        domain: plan.domain,
+        target,
+        missingFields: [
+          ...(!assetCode ? ['assetCode'] : []),
+          ...(!hasRealFactValue(currentPrice) ? ['currentPrice'] : []),
+          ...(!timestamp ? ['timestamp'] : []),
+        ],
+      });
+      continue;
+    }
+
+    await prisma.quoteSnapshot.upsert({
+      where: { assetCode_date: { assetCode, date: target.date } },
+      create: {
+        assetCode,
+        date: target.date,
+        timestamp,
+        currentPrice,
+      },
+      update: {
+        timestamp,
+        currentPrice,
+      },
+    });
+    summary.quoteSnapshotUpserts += 1;
+    summary.totalUpserts += 1;
+  }
+}
+
+async function upsertIndexFacts(
+  plan: BackfillDomainPlan,
+  prisma: BackfillSourceDataPrisma,
+  summary: BackfillFactWriteSummary,
+  warnings: BackfillWarning[]
+): Promise<void> {
+  for (const target of plan.targets) {
+    const indexCode = readStringAttribute(target, 'indexCode');
+    const name = readStringAttribute(target, 'name');
+    const currentPrice = target.attributes.currentPrice;
+    if (!indexCode || !name || !hasRealFactValue(currentPrice)) {
+      addMissingFactValueSkip({
+        summary,
+        warnings,
+        domain: plan.domain,
+        target,
+        missingFields: [
+          ...(!indexCode ? ['indexCode'] : []),
+          ...(!name ? ['name'] : []),
+          ...(!hasRealFactValue(currentPrice) ? ['currentPrice'] : []),
+        ],
+      });
+      continue;
+    }
+
+    await prisma.indexSnapshot.upsert({
+      where: { date_indexCode: { date: target.date, indexCode } },
+      create: {
+        date: target.date,
+        indexCode,
+        name,
+        currentPrice,
+      },
+      update: {
+        name,
+        currentPrice,
+      },
+    });
+    summary.indexSnapshotUpserts += 1;
+    summary.totalUpserts += 1;
+  }
+}
+
+function addMissingFactValueSkip(input: {
+  summary: BackfillFactWriteSummary;
+  warnings: BackfillWarning[];
+  domain: BackfillSourceDataDomain;
+  target: BackfillTarget;
+  missingFields: string[];
+}): void {
+  const skip = {
+    domain: input.domain,
+    key: input.target.key,
+    reason:
+      input.target.status === 'missing'
+        ? 'target_missing_source_value'
+        : 'missing_required_fact_value',
+    message:
+      input.target.status === 'missing'
+        ? 'No source fact row exists for this target; fact upsert skipped.'
+        : 'A source fact row exists but required real values are missing; fact upsert skipped.',
+    details: { missingFields: input.missingFields },
+  };
+  addFactWriteSkip(input.summary, skip);
+  input.warnings.push({
+    domain: input.domain,
+    code: 'fact_write_skipped',
+    message: skip.message,
+    details: {
+      key: input.target.key,
+      reason: skip.reason,
+      missingFields: input.missingFields,
+    },
+  });
+}
+
+function addFactWriteSkip(
+  summary: BackfillFactWriteSummary,
+  skip: BackfillFactWriteSkip
+): void {
+  summary.skipped += 1;
+  summary.skipReasons[skip.reason] =
+    (summary.skipReasons[skip.reason] ?? 0) + 1;
+  summary.skips.push(skip);
+}
+
+function readStringAttribute(
+  target: BackfillTarget,
+  key: string
+): string | null {
+  const value = target.attributes[key];
+  return typeof value === 'string' && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
+function readOptionalStringAttribute(
+  target: BackfillTarget,
+  key: string
+): string | null {
+  const value = target.attributes[key];
+  if (value === undefined || value === null) return null;
+  return typeof value === 'string' && value.trim().length > 0
+    ? value.trim()
+    : null;
+}
+
+function hasRealFactValue(value: unknown): boolean {
+  return (
+    value !== undefined &&
+    value !== null &&
+    (typeof value !== 'string' || value.trim().length > 0)
+  );
+}
+
+function parseFactTimestamp(value: unknown): Date | null {
+  if (value instanceof Date && !Number.isNaN(value.getTime())) return value;
+  if (typeof value !== 'string' || value.trim().length === 0) return null;
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
 }
 
 async function upsertAuditRecords(
@@ -1008,6 +1361,28 @@ function diffCounts(preCounts: CountMap, postCounts: CountMap): CountedTable[] {
   );
 }
 
+function getDisallowedExternalFactChangedTables(
+  externalFactChangedTables: CountedTable[],
+  factWriteSummary: BackfillFactWriteSummary
+): CountedTable[] {
+  const allowedChangedTables = new Set<CountedTable>();
+  if (factWriteSummary.enabled) {
+    if (factWriteSummary.exchangeRateSnapshotUpserts > 0) {
+      allowedChangedTables.add('ExchangeRateSnapshot');
+    }
+    if (factWriteSummary.quoteSnapshotUpserts > 0) {
+      allowedChangedTables.add('QuoteSnapshot');
+    }
+    if (factWriteSummary.indexSnapshotUpserts > 0) {
+      allowedChangedTables.add('IndexSnapshot');
+    }
+  }
+
+  return externalFactChangedTables.filter(
+    (table) => !allowedChangedTables.has(table)
+  );
+}
+
 function buildReportStatus(input: {
   mode: BackfillSourceDataReport['mode'];
   blocked: BackfillBlockedItem[];
@@ -1231,6 +1606,7 @@ function isParsedCliFlag(value: string): value is ParsedCliFlag {
     'max-rows',
     'fail-on-missing-config',
     'allow-isolated-write',
+    'allow-fact-write',
     'confirm-isolated-db',
   ].includes(value);
 }
@@ -1241,6 +1617,7 @@ function isBooleanCliFlag(flag: ParsedCliFlag): boolean {
     'write',
     'fail-on-missing-config',
     'allow-isolated-write',
+    'allow-fact-write',
   ].includes(flag);
 }
 
