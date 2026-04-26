@@ -1,0 +1,14 @@
+[Unit]
+Description=UHT market/index source-data backfill scheduler wrapper
+Documentation=file:/root/tracker/Unified.Holdings.Tracker-server/deploy/DEPLOY.md
+Wants=docker.service network-online.target
+After=docker.service network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/tracker/Unified.Holdings.Tracker-server
+Environment=UHT_SCHEDULER_LOOKBACK_DAYS=5
+Environment=UHT_SCHEDULER_LOG_ROOT=/root/tracker/uht-source-data-scheduler-logs
+Environment=UHT_SCHEDULER_BACKUP_ROOT=/root/tracker/uht-db-backups
+Environment=UHT_SCHEDULER_MAX_ROWS=256
+ExecStart=/root/tracker/Unified.Holdings.Tracker-server/deploy/uht-source-data-scheduler.sh

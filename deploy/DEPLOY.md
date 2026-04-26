@@ -369,6 +369,62 @@ pm2 restart uht-backend
 
 ---
 
+### 6.5 M8.4 market/index 日常补采 wrapper（示例，默认未启用）
+
+`deploy/uht-source-data-scheduler.sh` 是生产 host 侧的一次性调度 wrapper，
+用于把 M8.3 已验证的 market/index 补采命令固化为可审计流程。它不会改
+crontab 或 live systemd 配置；只有在后续 M8.4 启用门通过后，才可以把
+`*.service.example` / `*.timer.example` 复制到系统目录并启用。
+
+安全门禁：
+
+- 固定只执行 `market_quote,index`，不混入 FX / yield / macro。
+- 固定使用 `docker compose run --rm --no-deps` 的 one-off backend 容器。
+- 固定挂载 `tracker-data:/fact-write`，并设置
+  `DATABASE_URL=file:/fact-write/portfolio.db`、
+  `UHT_BACKFILL_ISOLATED_ROOT=/fact-write`、
+  `--confirm-isolated-db portfolio.db`。
+- 先 dry-run；只有 dry-run report 满足
+  `countVerification.unchanged=true` 且 `changedTables=[]`，并且 wrapper 自己的
+  宽表 count diff 为空，才会备份并进入 write。
+- write 前备份
+  `/var/lib/docker/volumes/tracker-data/_data/portfolio.db` 到 backup root。
+- write 后 count guard 只允许 `SourceRun`、`SourceHealth`、`QuoteSnapshot`、
+  `IndexSnapshot` 的 count 变化；`ExchangeRateSnapshot`、`YieldCurveSnapshot`、
+  `MacroIndicatorSnapshot`、`Portfolio`、`PositionSnapshot`、`Transaction` 等表
+  变化会 fail closed。
+- 每次运行都会落盘 wrapper stdout/stderr、runner stdout/stderr、dry-run report、
+  write report、pre/post counts 和 count diff。
+
+默认配置：
+
+| 环境变量                                            | 默认值                                         | 说明                                             |
+| --------------------------------------------------- | ---------------------------------------------- | ------------------------------------------------ |
+| `UHT_SCHEDULER_PORTFOLIO_ID`                        | `a3c29c28-7a1f-402d-a36d-ca85f5f8276a`         | 生产 2026 组合                                   |
+| `UHT_SCHEDULER_LOOKBACK_DAYS`                       | `5`                                            | 默认最近 5 日；允许 3..5                         |
+| `UHT_SCHEDULER_DATE_FROM` / `UHT_SCHEDULER_DATE_TO` | 空 / 昨天                                      | 显式覆盖日期窗口                                 |
+| `UHT_SCHEDULER_MAX_ROWS`                            | `256`                                          | runner 行数安全上限                              |
+| `UHT_SCHEDULER_LOG_ROOT`                            | `/root/tracker/uht-source-data-scheduler-logs` | 每次运行证据目录根                               |
+| `UHT_SCHEDULER_BACKUP_ROOT`                         | `/root/tracker/uht-db-backups`                 | write 前 DB 备份目录                             |
+| `UHT_SCHEDULER_DRY_RUN_ONLY`                        | `0`                                            | 设置为 `1` / `true` 时只跑 dry-run，不进入 write |
+
+手动预检示例（不会启用调度；`DRY_RUN_ONLY=1` 不写生产 DB）：
+
+```bash
+cd /root/tracker/Unified.Holdings.Tracker-server
+UHT_SCHEDULER_DRY_RUN_ONLY=1 deploy/uht-source-data-scheduler.sh
+```
+
+systemd 示例文件：
+
+- `deploy/uht-source-data-scheduler.service.example`
+- `deploy/uht-source-data-scheduler.timer.example`
+
+> 注意：M8.4.1 只交付 wrapper 和示例文件，不执行 `systemctl enable` /
+> `systemctl start`，也不修改生产 crontab。
+
+---
+
 ## 七、故障排查
 
 ### 问题：502 Bad Gateway

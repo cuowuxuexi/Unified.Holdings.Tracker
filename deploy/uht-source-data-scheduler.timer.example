@@ -1,0 +1,11 @@
+[Unit]
+Description=Run UHT market/index source-data backfill scheduler daily
+
+[Timer]
+# Example only. Do not enable until the M8.4 production scheduling gate is approved.
+OnCalendar=Tue..Sat 07:10:00
+Persistent=true
+Unit=uht-source-data-scheduler.service
+
+[Install]
+WantedBy=timers.target
