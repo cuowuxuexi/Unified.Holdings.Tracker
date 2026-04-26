@@ -13,12 +13,7 @@ RUN sed -i 's#http://deb.debian.org/debian-security#http://mirrors.ustc.edu.cn/d
     && sed -i 's#http://deb.debian.org/debian#http://mirrors.ustc.edu.cn/debian#g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update && apt-get install -y --no-install-recommends \
     openssl \
-    python3 \
-    python3-venv \
     && rm -rf /var/lib/apt/lists/*
-
-RUN python3 -m venv /opt/uht-python \
-    && /opt/uht-python/bin/pip install --no-cache-dir akshare==1.16.58
 
 # Copy package files first (better layer caching)
 COPY package.json package-lock.json ./
@@ -56,7 +51,12 @@ RUN sed -i 's#http://deb.debian.org/debian-security#http://mirrors.ustc.edu.cn/d
     && sed -i 's#http://deb.debian.org/debian#http://mirrors.ustc.edu.cn/debian#g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update && apt-get install -y --no-install-recommends \
     openssl \
+    python3 \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m venv /opt/uht-python \
+    && /opt/uht-python/bin/pip install --no-cache-dir akshare==1.18.57
 
 # Copy only what's needed to run
 COPY --from=builder /app/apps/backend/dist/server-bundle.js* ./dist/
