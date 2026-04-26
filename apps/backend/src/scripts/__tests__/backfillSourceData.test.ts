@@ -1,3 +1,4 @@
+import path from 'path';
 import {
   buildBackfillRunKey,
   getBackfillSourceDataExitCode,
@@ -243,7 +244,7 @@ describe('backfillSourceData runner', () => {
     );
   });
 
-  it('allows only explicit task-scratch isolated write and writes audit tables', async () => {
+  it('allows the default task scratch isolated root and writes audit tables', async () => {
     const prisma = createPrismaMock();
     const report = await runBackfillSourceData(
       {
@@ -282,7 +283,84 @@ describe('backfillSourceData runner', () => {
     expect(getBackfillSourceDataExitCode(report)).toBe(0);
   });
 
-  it('rejects isolated write when DATABASE_URL is not the task scratch copy', async () => {
+  it('allows a configured server isolated root', async () => {
+    const prisma = createPrismaMock();
+    const report = await runBackfillSourceData(
+      {
+        dryRun: true,
+        write: true,
+        portfolioId: 'portfolio-2026',
+        dateFrom: '2026-04-24',
+        dateTo: '2026-04-24',
+        domains: ['fx'],
+        maxRows: 64,
+        failOnMissingConfig: false,
+        allowIsolatedWrite: true,
+        confirmIsolatedDb: 'server-copy.db',
+      },
+      {
+        prisma,
+        env: {
+          DATABASE_URL:
+            'file:/root/tracker/isolated-backfill-smoke/server-copy.db',
+          UHT_BACKFILL_ISOLATED_ROOT: '/root/tracker/isolated-backfill-smoke',
+        },
+        now: () => new Date('2026-04-26T03:30:00.000Z'),
+      }
+    );
+
+    expect(report.mode).toBe('isolated-write');
+    expect(report.status).toBe('isolated_write_completed');
+    expect(report.writeAttempted).toBe(true);
+    expect(report.auditWriteSummary).toEqual({
+      sourceRunUpserts: 1,
+      sourceHealthUpserts: 1,
+    });
+    expect(prisma.sourceRun.upsert).toHaveBeenCalledTimes(1);
+    expect(prisma.sourceHealth.upsert).toHaveBeenCalledTimes(1);
+    expect(getBackfillSourceDataExitCode(report)).toBe(0);
+  });
+
+  it('fails closed when DATABASE_URL is outside the configured isolated root', async () => {
+    const prisma = createPrismaMock();
+    const report = await runBackfillSourceData(
+      {
+        dryRun: true,
+        write: true,
+        portfolioId: 'portfolio-2026',
+        dateFrom: '2026-04-24',
+        dateTo: '2026-04-24',
+        domains: ['fx'],
+        maxRows: 64,
+        failOnMissingConfig: false,
+        allowIsolatedWrite: true,
+        confirmIsolatedDb: 'server-copy.db',
+      },
+      {
+        prisma,
+        env: {
+          DATABASE_URL: 'file:/root/tracker/not-smoke/server-copy.db',
+          UHT_BACKFILL_ISOLATED_ROOT: '/root/tracker/isolated-backfill-smoke',
+        },
+      }
+    );
+
+    expect(report.mode).toBe('write-rejected');
+    expect(report.status).toBe('failed_closed');
+    expect(report.writeAttempted).toBe(false);
+    expect(report.blocked).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'isolated_write_database_not_under_isolated_root',
+        }),
+      ])
+    );
+    expect(prisma.sourceRun.upsert).not.toHaveBeenCalled();
+    expect(prisma.sourceHealth.upsert).not.toHaveBeenCalled();
+    expect(getBackfillSourceDataExitCode(report)).toBe(2);
+  });
+
+  it('rejects isolated write when DATABASE_URL is not under the default task scratch root', async () => {
     const prisma = createPrismaMock();
     const report = await runBackfillSourceData(
       {
@@ -313,7 +391,7 @@ describe('backfillSourceData runner', () => {
           code: 'isolated_write_production_path_rejected',
         }),
         expect.objectContaining({
-          code: 'isolated_write_database_not_under_task_scratch',
+          code: 'isolated_write_database_not_under_isolated_root',
         }),
       ])
     );
@@ -321,4 +399,51 @@ describe('backfillSourceData runner', () => {
     expect(prisma.sourceHealth.upsert).not.toHaveBeenCalled();
     expect(getBackfillSourceDataExitCode(report)).toBe(2);
   });
+
+  it.each([
+    '/app/prisma/data/portfolio.db',
+    '/root/tracker/Unified.Holdings.Tracker-server/apps/backend/prisma/data/portfolio.db',
+    '/root/tracker/Unified.Holdings.Tracker-server/prisma/data/portfolio.db',
+    '/mnt/d/cxks/正在开发的项目/Unified.Holdings.Tracker/apps/backend/prisma/data/portfolio.db',
+  ])(
+    'fails closed for known production/default database path %s even when filename is confirmed',
+    async (databasePath) => {
+      const prisma = createPrismaMock();
+      const report = await runBackfillSourceData(
+        {
+          dryRun: true,
+          write: true,
+          portfolioId: 'portfolio-2026',
+          dateFrom: '2026-04-24',
+          dateTo: '2026-04-24',
+          domains: ['fx'],
+          maxRows: 64,
+          failOnMissingConfig: false,
+          allowIsolatedWrite: true,
+          confirmIsolatedDb: 'portfolio.db',
+        },
+        {
+          prisma,
+          env: {
+            DATABASE_URL: `file:${databasePath}`,
+            UHT_BACKFILL_ISOLATED_ROOT: path.dirname(databasePath),
+          },
+        }
+      );
+
+      expect(report.mode).toBe('write-rejected');
+      expect(report.status).toBe('failed_closed');
+      expect(report.writeAttempted).toBe(false);
+      expect(report.blocked).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            code: 'isolated_write_production_path_rejected',
+          }),
+        ])
+      );
+      expect(prisma.sourceRun.upsert).not.toHaveBeenCalled();
+      expect(prisma.sourceHealth.upsert).not.toHaveBeenCalled();
+      expect(getBackfillSourceDataExitCode(report)).toBe(2);
+    }
+  );
 });

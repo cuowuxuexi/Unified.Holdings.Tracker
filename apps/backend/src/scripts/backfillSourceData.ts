@@ -241,8 +241,9 @@ const INDEX_TARGETS = [
 
 const DEFAULT_MAX_ROWS = 256;
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
-const M8_2_3A_ISOLATED_SCRATCH_DIR =
+const DEFAULT_ISOLATED_BACKFILL_ROOT =
   '/mnt/d/cxks/任务工作台/T0425-UHT投资数据中台优化提案/scratch';
+const ISOLATED_BACKFILL_ROOT_ENV = 'UHT_BACKFILL_ISOLATED_ROOT';
 
 export function parseBackfillSourceDataArgs(
   argv: string[]
@@ -486,7 +487,7 @@ async function upsertAuditRecords(
         runKey: plan.runKey,
         sourceId: plan.sourceId,
         domain: plan.domain,
-        job: 'm8.2.3a-isolated-audit-write',
+        job: 'm8.2.3b-isolated-audit-write',
         targetDate: plan.date,
         startedAt: auditAt,
         finishedAt: auditAt,
@@ -499,7 +500,7 @@ async function upsertAuditRecords(
       update: {
         sourceId: plan.sourceId,
         domain: plan.domain,
-        job: 'm8.2.3a-isolated-audit-write',
+        job: 'm8.2.3b-isolated-audit-write',
         targetDate: plan.date,
         startedAt: auditAt,
         finishedAt: auditAt,
@@ -588,7 +589,7 @@ function buildAuditStatus(plan: BackfillDomainPlan): {
       sourceHealthStatus: 'DEGRADED',
       errorCode: 'external_fact_missing_no_write',
       errorMessage:
-        'External fact rows are missing; M8.2.3A isolated write records audit state only and does not synthesize facts.',
+        'External fact rows are missing; M8.2.3B isolated write records audit state only and does not synthesize facts.',
     };
   }
 
@@ -658,7 +659,7 @@ async function buildDomainPlans(
     const domainBlocked = notConfiguredBlock(
       'macro',
       fredConfigured
-        ? 'Macro production fetcher is not wired for M8.2.3A; isolated write records audit state only.'
+        ? 'Macro production fetcher is not wired for M8.2.3B; isolated write records audit state only.'
         : 'FRED_API_KEY_CONFIGURED=no; macro dry-run cannot plan a real FRED fetch.'
     );
     blocked.push(domainBlocked);
@@ -1052,13 +1053,13 @@ function evaluateIsolatedWriteGate(
 
   const blocked: BackfillBlockedItem[] = [];
   const databasePath = resolveSqliteDatabasePathFromUrl(env.DATABASE_URL);
-  const scratchDir = path.normalize(M8_2_3A_ISOLATED_SCRATCH_DIR);
+  const isolatedRoot = resolveIsolatedBackfillRoot(env);
 
   if (!options.allowIsolatedWrite) {
     blocked.push({
       code: 'isolated_write_gate_missing_flag',
       message:
-        '--write requires --allow-isolated-write for M8.2.3A isolated audit writes.',
+        '--write requires --allow-isolated-write for M8.2.3B isolated audit writes.',
     });
   }
 
@@ -1085,12 +1086,16 @@ function evaluateIsolatedWriteGate(
       });
     }
 
-    if (!isPathInsideDirectory(databasePath, scratchDir)) {
+    if (!isPathInsideDirectory(databasePath, isolatedRoot)) {
       blocked.push({
-        code: 'isolated_write_database_not_under_task_scratch',
+        code: 'isolated_write_database_not_under_isolated_root',
         message:
-          'DATABASE_URL must point to the M8.2.3A task scratch SQLite copy.',
-        details: { databasePath, scratchDir },
+          'DATABASE_URL must point to a SQLite copy under the configured isolated backfill root.',
+        details: {
+          databasePath,
+          isolatedRoot,
+          rootEnv: ISOLATED_BACKFILL_ROOT_ENV,
+        },
       });
     }
 
@@ -1114,11 +1119,28 @@ function evaluateIsolatedWriteGate(
     blocked.unshift({
       code: 'write_not_enabled_without_isolated_gate',
       message:
-        '--write is fail-closed unless the explicit M8.2.3A isolated database gate is satisfied.',
+        '--write is fail-closed unless the explicit M8.2.3B isolated database gate is satisfied.',
     });
   }
 
   return { allowed: blocked.length === 0, blocked };
+}
+
+function resolveIsolatedBackfillRoot(env: NodeJS.ProcessEnv): string {
+  const configuredRoot = env[ISOLATED_BACKFILL_ROOT_ENV]?.trim();
+  const rawRoot =
+    configuredRoot && configuredRoot.length > 0
+      ? configuredRoot
+      : DEFAULT_ISOLATED_BACKFILL_ROOT;
+  const withoutScheme = rawRoot.startsWith('file:')
+    ? rawRoot.slice('file:'.length)
+    : rawRoot;
+
+  return path.normalize(
+    path.isAbsolute(withoutScheme)
+      ? withoutScheme
+      : path.resolve(process.cwd(), withoutScheme)
+  );
 }
 
 function resolveSqliteDatabasePathFromUrl(
@@ -1134,8 +1156,14 @@ function resolveSqliteDatabasePathFromUrl(
 
 function isKnownProductionDatabasePath(databasePath: string): boolean {
   const normalized = path.normalize(databasePath);
+  const knownExactPaths = [
+    '/app/prisma/data/portfolio.db',
+    '/root/tracker/Unified.Holdings.Tracker-server/apps/backend/prisma/data/portfolio.db',
+    '/root/tracker/Unified.Holdings.Tracker-server/prisma/data/portfolio.db',
+  ].map((item) => path.normalize(item));
+
   return (
-    normalized === path.normalize('/app/prisma/data/portfolio.db') ||
+    knownExactPaths.includes(normalized) ||
     normalized.endsWith(
       path.normalize('/apps/backend/prisma/data/portfolio.db')
     )
