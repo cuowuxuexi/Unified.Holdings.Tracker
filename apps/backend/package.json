@@ -30,7 +30,9 @@
     "migrate:json": "ts-node --project tsconfig.scripts.json --transpile-only scripts/migrate-json-to-sqlite.ts",
     "diagnose:data": "ts-node --project tsconfig.scripts.json --transpile-only src/scripts/diagnoseData.ts",
     "verify:exchange-rate": "ts-node --project tsconfig.scripts.json --transpile-only src/scripts/verifyExchangeRate.ts",
-    "start": "node dist/server-bundle.js"
+    "start": "node dist/server-bundle.js",
+    "source-data:backfill": "node dist/backfill-source-data.js",
+    "source-data:backfill:dev": "ts-node --project tsconfig.scripts.json --transpile-only src/scripts/backfillSourceData.ts"
   },
   "keywords": [],
   "author": "",

@@ -1,22 +1,36 @@
 const esbuild = require('esbuild');
 const path = require('path');
 
-console.log('🧹 Building backend bundle with esbuild...');
+console.log('🧹 Building backend bundles with esbuild...');
 
-esbuild.build({
-  entryPoints: [path.join(__dirname, 'src/server.ts')],
+const commonBuildOptions = {
   bundle: true,
   platform: 'node',
   target: 'node18',
-  outfile: path.join(__dirname, 'dist/server-bundle.js'),
   external: ['electron', '@prisma/client', 'sharp'], // Exclude native modules and electron
   sourcemap: true,
   minify: true,
   logLevel: 'info',
-}).then(() => {
-  console.log('✅ Backend bundle built successfully: dist/server-bundle.js');
-}).catch((e) => {
-  console.error('❌ Build failed:', e);
-  process.exit(1);
-});
+};
 
+Promise.all([
+  esbuild.build({
+    ...commonBuildOptions,
+    entryPoints: [path.join(__dirname, 'src/server.ts')],
+    outfile: path.join(__dirname, 'dist/server-bundle.js'),
+  }),
+  esbuild.build({
+    ...commonBuildOptions,
+    entryPoints: [path.join(__dirname, 'src/scripts/backfillSourceData.ts')],
+    outfile: path.join(__dirname, 'dist/backfill-source-data.js'),
+  }),
+])
+  .then(() => {
+    console.log(
+      '✅ Backend bundles built successfully: dist/server-bundle.js, dist/backfill-source-data.js'
+    );
+  })
+  .catch((e) => {
+    console.error('❌ Build failed:', e);
+    process.exit(1);
+  });
