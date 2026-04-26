@@ -9,8 +9,14 @@ import {
 function createPrismaMock(): jest.Mocked<BackfillSourceDataPrisma> {
   const count = jest.fn().mockResolvedValue(0);
   return {
-    sourceRun: { count: jest.fn().mockResolvedValue(0) },
-    sourceHealth: { count: jest.fn().mockResolvedValue(0) },
+    sourceRun: {
+      count: jest.fn().mockResolvedValue(0),
+      upsert: jest.fn().mockResolvedValue({}),
+    },
+    sourceHealth: {
+      count: jest.fn().mockResolvedValue(0),
+      upsert: jest.fn().mockResolvedValue({}),
+    },
     yieldCurveSnapshot: { count, findMany: jest.fn().mockResolvedValue([]) },
     macroIndicatorSnapshot: {
       count: jest.fn().mockResolvedValue(0),
@@ -84,6 +90,8 @@ describe('backfillSourceData runner', () => {
       domains: ['fx', 'market_quote', 'index', 'yield_curve', 'macro'],
       maxRows: 64,
       failOnMissingConfig: false,
+      allowIsolatedWrite: false,
+      confirmIsolatedDb: undefined,
     });
   });
 
@@ -99,6 +107,7 @@ describe('backfillSourceData runner', () => {
         domains: ['fx', 'market_quote', 'index', 'yield_curve', 'macro'],
         maxRows: 64,
         failOnMissingConfig: false,
+        allowIsolatedWrite: false,
       },
       {
         prisma,
@@ -113,6 +122,13 @@ describe('backfillSourceData runner', () => {
     expect(report.countVerification).toEqual({
       unchanged: true,
       changedTables: [],
+      externalFactsUnchanged: true,
+      externalFactChangedTables: [],
+      auditTableChangedTables: [],
+    });
+    expect(report.auditWriteSummary).toEqual({
+      sourceRunUpserts: 0,
+      sourceHealthUpserts: 0,
     });
     expect(report.plans).toEqual(
       expect.arrayContaining([
@@ -171,6 +187,7 @@ describe('backfillSourceData runner', () => {
         domains: ['fx'],
         maxRows: 64,
         failOnMissingConfig: false,
+        allowIsolatedWrite: false,
       },
       { prisma, env: { FRED_API_KEY: 'not-used' } }
     );
@@ -180,9 +197,13 @@ describe('backfillSourceData runner', () => {
     expect(report.writeAttempted).toBe(false);
     expect(report.blocked).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ code: 'write_not_enabled_m8_2_1' }),
+        expect.objectContaining({
+          code: 'write_not_enabled_without_isolated_gate',
+        }),
       ])
     );
+    expect(prisma.sourceRun.upsert).not.toHaveBeenCalled();
+    expect(prisma.sourceHealth.upsert).not.toHaveBeenCalled();
     expect(getBackfillSourceDataExitCode(report)).toBe(2);
   });
 
@@ -198,6 +219,7 @@ describe('backfillSourceData runner', () => {
         domains: ['macro'],
         maxRows: 64,
         failOnMissingConfig: true,
+        allowIsolatedWrite: false,
       },
       { prisma, env: {} }
     );
@@ -219,5 +241,84 @@ describe('backfillSourceData runner', () => {
     expect(buildBackfillRunKey('macro', '2026-04-24')).toBe(
       'backfill:macro:2026-04-24:global'
     );
+  });
+
+  it('allows only explicit task-scratch isolated write and writes audit tables', async () => {
+    const prisma = createPrismaMock();
+    const report = await runBackfillSourceData(
+      {
+        dryRun: true,
+        write: true,
+        portfolioId: 'portfolio-2026',
+        dateFrom: '2026-04-24',
+        dateTo: '2026-04-24',
+        domains: ['fx', 'yield_curve'],
+        maxRows: 64,
+        failOnMissingConfig: false,
+        allowIsolatedWrite: true,
+        confirmIsolatedDb: 'm8-2-3a-isolated-prod-copy.db',
+      },
+      {
+        prisma,
+        env: {
+          DATABASE_URL:
+            'file:/mnt/d/cxks/任务工作台/T0425-UHT投资数据中台优化提案/scratch/m8-2-3a-isolated-prod-copy.db',
+        },
+        now: () => new Date('2026-04-26T03:00:00.000Z'),
+      }
+    );
+
+    expect(report.mode).toBe('isolated-write');
+    expect(report.status).toBe('isolated_write_completed_with_blocks');
+    expect(report.writeAttempted).toBe(true);
+    expect(report.auditWriteSummary).toEqual({
+      sourceRunUpserts: 2,
+      sourceHealthUpserts: 2,
+    });
+    expect(prisma.sourceRun.upsert).toHaveBeenCalledTimes(2);
+    expect(prisma.sourceHealth.upsert).toHaveBeenCalledTimes(2);
+    expect(prisma.yieldCurveSnapshot.count).toHaveBeenCalledTimes(2);
+    expect(prisma.exchangeRateSnapshot.count).toHaveBeenCalledTimes(2);
+    expect(getBackfillSourceDataExitCode(report)).toBe(0);
+  });
+
+  it('rejects isolated write when DATABASE_URL is not the task scratch copy', async () => {
+    const prisma = createPrismaMock();
+    const report = await runBackfillSourceData(
+      {
+        dryRun: true,
+        write: true,
+        portfolioId: 'portfolio-2026',
+        dateFrom: '2026-04-24',
+        dateTo: '2026-04-24',
+        domains: ['fx'],
+        maxRows: 64,
+        failOnMissingConfig: false,
+        allowIsolatedWrite: true,
+        confirmIsolatedDb: 'portfolio.db',
+      },
+      {
+        prisma,
+        env: {
+          DATABASE_URL: 'file:/app/prisma/data/portfolio.db',
+        },
+      }
+    );
+
+    expect(report.mode).toBe('write-rejected');
+    expect(report.status).toBe('failed_closed');
+    expect(report.blocked).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: 'isolated_write_production_path_rejected',
+        }),
+        expect.objectContaining({
+          code: 'isolated_write_database_not_under_task_scratch',
+        }),
+      ])
+    );
+    expect(prisma.sourceRun.upsert).not.toHaveBeenCalled();
+    expect(prisma.sourceHealth.upsert).not.toHaveBeenCalled();
+    expect(getBackfillSourceDataExitCode(report)).toBe(2);
   });
 });

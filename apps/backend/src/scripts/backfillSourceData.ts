@@ -33,9 +33,16 @@ type CountModel = {
   count(): Promise<number>;
 };
 
+type UpsertModel = CountModel & {
+  upsert(args: unknown): Promise<unknown>;
+};
+
 type FindManyModel<TRow> = CountModel & {
   findMany(args: unknown): Promise<TRow[]>;
 };
+
+type SourceRunStatus = 'SUCCESS' | 'PARTIAL' | 'FAILED';
+type SourceHealthStatus = 'HEALTHY' | 'DEGRADED' | 'DOWN' | 'UNKNOWN';
 
 export type BackfillSourceDataPortfolioRow = {
   id: string;
@@ -85,8 +92,8 @@ type PositionSnapshotRow = {
 };
 
 export type BackfillSourceDataPrisma = {
-  sourceRun: CountModel;
-  sourceHealth: CountModel;
+  sourceRun: UpsertModel;
+  sourceHealth: UpsertModel;
   yieldCurveSnapshot: FindManyModel<YieldCurveSnapshotRow>;
   macroIndicatorSnapshot: FindManyModel<MacroIndicatorSnapshotRow>;
   exchangeRateSnapshot: FindManyModel<ExchangeRateSnapshotRow>;
@@ -110,6 +117,8 @@ export type BackfillSourceDataOptions = {
   domains: BackfillSourceDataDomain[];
   maxRows: number;
   failOnMissingConfig: boolean;
+  allowIsolatedWrite: boolean;
+  confirmIsolatedDb?: string;
 };
 
 export type BackfillSourceDataDependencies = {
@@ -157,10 +166,12 @@ export type BackfillDomainPlan = {
 };
 
 export type BackfillSourceDataReport = {
-  mode: 'dry-run' | 'write-rejected';
+  mode: 'dry-run' | 'write-rejected' | 'isolated-write';
   status:
     | 'dry_run_completed'
     | 'dry_run_completed_with_blocks'
+    | 'isolated_write_completed'
+    | 'isolated_write_completed_with_blocks'
     | 'blocked'
     | 'failed_closed';
   generatedAt: string;
@@ -178,11 +189,18 @@ export type BackfillSourceDataReport = {
   countVerification: {
     unchanged: boolean;
     changedTables: CountedTable[];
+    externalFactsUnchanged: boolean;
+    externalFactChangedTables: CountedTable[];
+    auditTableChangedTables: CountedTable[];
+  };
+  auditWriteSummary: {
+    sourceRunUpserts: number;
+    sourceHealthUpserts: number;
   };
   plans: BackfillDomainPlan[];
   blocked: BackfillBlockedItem[];
   warnings: BackfillWarning[];
-  writeAttempted: false;
+  writeAttempted: boolean;
 };
 
 type ParsedCliFlag =
@@ -193,7 +211,9 @@ type ParsedCliFlag =
   | 'date-to'
   | 'domains'
   | 'max-rows'
-  | 'fail-on-missing-config';
+  | 'fail-on-missing-config'
+  | 'allow-isolated-write'
+  | 'confirm-isolated-db';
 
 const COUNTED_TABLES: CountedTable[] = [
   'SourceRun',
@@ -204,6 +224,11 @@ const COUNTED_TABLES: CountedTable[] = [
   'QuoteSnapshot',
   'IndexSnapshot',
 ];
+
+const AUDIT_TABLES: CountedTable[] = ['SourceRun', 'SourceHealth'];
+const EXTERNAL_FACT_TABLES: CountedTable[] = COUNTED_TABLES.filter(
+  (table) => !AUDIT_TABLES.includes(table)
+);
 
 const INDEX_TARGETS = [
   { indexCode: 'sh000001', name: '上证指数' },
@@ -216,6 +241,8 @@ const INDEX_TARGETS = [
 
 const DEFAULT_MAX_ROWS = 256;
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+const M8_2_3A_ISOLATED_SCRATCH_DIR =
+  '/mnt/d/cxks/任务工作台/T0425-UHT投资数据中台优化提案/scratch';
 
 export function parseBackfillSourceDataArgs(
   argv: string[]
@@ -257,6 +284,13 @@ export function parseBackfillSourceDataArgs(
   const write = raw.write === true;
   const domains = parseDomains(raw.domains);
   const maxRows = parseMaxRows(raw['max-rows']);
+  const confirmIsolatedDb = raw['confirm-isolated-db'];
+  if (
+    confirmIsolatedDb !== undefined &&
+    typeof confirmIsolatedDb !== 'string'
+  ) {
+    throw new Error('--confirm-isolated-db must be a database name or path');
+  }
 
   return {
     dryRun: true,
@@ -267,6 +301,8 @@ export function parseBackfillSourceDataArgs(
     domains,
     maxRows,
     failOnMissingConfig: raw['fail-on-missing-config'] === true,
+    allowIsolatedWrite: raw['allow-isolated-write'] === true,
+    confirmIsolatedDb: confirmIsolatedDb?.trim(),
   };
 }
 
@@ -277,9 +313,15 @@ export async function runBackfillSourceData(
   const now = dependencies.now ?? (() => new Date());
   const env = dependencies.env ?? process.env;
   const generatedAt = now().toISOString();
+  const writeGate = evaluateIsolatedWriteGate(options, env);
+  const mode: BackfillSourceDataReport['mode'] = !options.write
+    ? 'dry-run'
+    : writeGate.allowed
+      ? 'isolated-write'
+      : 'write-rejected';
   const preCounts = await collectCounts(dependencies.prisma);
   const warnings: BackfillWarning[] = [];
-  const blocked: BackfillBlockedItem[] = [];
+  const blocked: BackfillBlockedItem[] = [...writeGate.blocked];
 
   const portfolio = await dependencies.prisma.portfolio.findUnique({
     where: { id: options.portfolioId },
@@ -297,14 +339,6 @@ export async function runBackfillSourceData(
       code: 'portfolio_snapshot_disabled',
       message: 'The requested portfolio has snapshotEnabled=false.',
       details: { portfolioId: options.portfolioId },
-    });
-  }
-
-  if (options.write) {
-    blocked.push({
-      code: 'write_not_enabled_m8_2_1',
-      message:
-        '--write is intentionally fail-closed in M8.2.1. This runner only supports auditable dry-run planning.',
     });
   }
 
@@ -333,9 +367,24 @@ export async function runBackfillSourceData(
     });
   }
 
+  const auditWriteSummary =
+    mode === 'isolated-write' && !hasFatalPreWriteBlock(blocked)
+      ? await upsertAuditRecords(
+          plans,
+          dependencies.prisma,
+          new Date(generatedAt)
+        )
+      : { sourceRunUpserts: 0, sourceHealthUpserts: 0 };
+
   const postCounts = await collectCounts(dependencies.prisma);
   const changedTables = diffCounts(preCounts, postCounts);
-  if (changedTables.length > 0) {
+  const externalFactChangedTables = changedTables.filter((table) =>
+    EXTERNAL_FACT_TABLES.includes(table)
+  );
+  const auditTableChangedTables = changedTables.filter((table) =>
+    AUDIT_TABLES.includes(table)
+  );
+  if (mode === 'dry-run' && changedTables.length > 0) {
     blocked.push({
       code: 'dry_run_count_changed',
       message:
@@ -343,8 +392,15 @@ export async function runBackfillSourceData(
       details: { changedTables },
     });
   }
+  if (mode === 'isolated-write' && externalFactChangedTables.length > 0) {
+    blocked.push({
+      code: 'isolated_write_fact_count_changed',
+      message:
+        'Isolated write verification failed: external fact table counts changed.',
+      details: { changedTables: externalFactChangedTables },
+    });
+  }
 
-  const mode = options.write ? 'write-rejected' : 'dry-run';
   const status = buildReportStatus({ mode, blocked, options });
 
   return {
@@ -365,11 +421,17 @@ export async function runBackfillSourceData(
     countVerification: {
       unchanged: changedTables.length === 0,
       changedTables,
+      externalFactsUnchanged: externalFactChangedTables.length === 0,
+      externalFactChangedTables,
+      auditTableChangedTables,
     },
+    auditWriteSummary,
     plans,
     blocked,
     warnings,
-    writeAttempted: false,
+    writeAttempted:
+      auditWriteSummary.sourceRunUpserts > 0 ||
+      auditWriteSummary.sourceHealthUpserts > 0,
   };
 }
 
@@ -377,7 +439,13 @@ export function getBackfillSourceDataExitCode(
   report: BackfillSourceDataReport
 ): number {
   if (report.mode === 'write-rejected') return 2;
-  if (report.blocked.some((item) => item.code === 'dry_run_count_changed')) {
+  if (
+    report.blocked.some((item) =>
+      ['dry_run_count_changed', 'isolated_write_fact_count_changed'].includes(
+        item.code
+      )
+    )
+  ) {
     return 4;
   }
   if (report.blocked.some((item) => item.code === 'fail_on_missing_config')) {
@@ -391,6 +459,160 @@ export function getBackfillSourceDataExitCode(
     return 1;
   }
   return 0;
+}
+
+async function upsertAuditRecords(
+  plans: BackfillDomainPlan[],
+  prisma: BackfillSourceDataPrisma,
+  auditAt: Date
+): Promise<BackfillSourceDataReport['auditWriteSummary']> {
+  const sourceHealthByKey = new Map<
+    string,
+    {
+      sourceId: string;
+      domain: BackfillSourceDataDomain;
+      status: SourceHealthStatus;
+      errorCode?: string;
+      errorMessage?: string;
+    }
+  >();
+  let sourceRunUpserts = 0;
+
+  for (const plan of plans) {
+    const auditStatus = buildAuditStatus(plan);
+    await prisma.sourceRun.upsert({
+      where: { runKey: plan.runKey },
+      create: {
+        runKey: plan.runKey,
+        sourceId: plan.sourceId,
+        domain: plan.domain,
+        job: 'm8.2.3a-isolated-audit-write',
+        targetDate: plan.date,
+        startedAt: auditAt,
+        finishedAt: auditAt,
+        status: auditStatus.sourceRunStatus,
+        rowsWritten: 0,
+        errorCode: auditStatus.errorCode ?? null,
+        errorMessage: auditStatus.errorMessage ?? null,
+        payloadHash: null,
+      },
+      update: {
+        sourceId: plan.sourceId,
+        domain: plan.domain,
+        job: 'm8.2.3a-isolated-audit-write',
+        targetDate: plan.date,
+        startedAt: auditAt,
+        finishedAt: auditAt,
+        status: auditStatus.sourceRunStatus,
+        rowsWritten: 0,
+        errorCode: auditStatus.errorCode ?? null,
+        errorMessage: auditStatus.errorMessage ?? null,
+        payloadHash: null,
+      },
+    });
+    sourceRunUpserts += 1;
+
+    const healthKey = `${plan.sourceId}:${plan.domain}`;
+    const previous = sourceHealthByKey.get(healthKey);
+    const next = {
+      sourceId: plan.sourceId,
+      domain: plan.domain,
+      status: auditStatus.sourceHealthStatus,
+      errorCode: auditStatus.errorCode,
+      errorMessage: auditStatus.errorMessage,
+    };
+    sourceHealthByKey.set(
+      healthKey,
+      previous ? mergeSourceHealth(previous, next) : next
+    );
+  }
+
+  let sourceHealthUpserts = 0;
+  for (const health of sourceHealthByKey.values()) {
+    const healthy = health.status === 'HEALTHY';
+    await prisma.sourceHealth.upsert({
+      where: {
+        sourceId_domain: {
+          sourceId: health.sourceId,
+          domain: health.domain,
+        },
+      },
+      create: {
+        sourceId: health.sourceId,
+        domain: health.domain,
+        status: health.status,
+        checkedAt: auditAt,
+        lastSuccessAt: healthy ? auditAt : null,
+        lastFailureAt: healthy ? null : auditAt,
+        consecutiveFailures: healthy ? 0 : 1,
+        latencyMs: null,
+        errorCode: health.errorCode ?? null,
+        errorMessage: health.errorMessage ?? null,
+      },
+      update: {
+        status: health.status,
+        checkedAt: auditAt,
+        lastSuccessAt: healthy ? auditAt : null,
+        lastFailureAt: healthy ? null : auditAt,
+        consecutiveFailures: healthy ? 0 : 1,
+        latencyMs: null,
+        errorCode: health.errorCode ?? null,
+        errorMessage: health.errorMessage ?? null,
+      },
+    });
+    sourceHealthUpserts += 1;
+  }
+
+  return { sourceRunUpserts, sourceHealthUpserts };
+}
+
+function buildAuditStatus(plan: BackfillDomainPlan): {
+  sourceRunStatus: SourceRunStatus;
+  sourceHealthStatus: SourceHealthStatus;
+  errorCode?: string;
+  errorMessage?: string;
+} {
+  const firstBlock = plan.blocked[0];
+  if (firstBlock) {
+    return {
+      sourceRunStatus: 'FAILED',
+      sourceHealthStatus: 'DEGRADED',
+      errorCode: firstBlock.code,
+      errorMessage: firstBlock.message,
+    };
+  }
+
+  if (plan.missingRows > 0) {
+    return {
+      sourceRunStatus: 'PARTIAL',
+      sourceHealthStatus: 'DEGRADED',
+      errorCode: 'external_fact_missing_no_write',
+      errorMessage:
+        'External fact rows are missing; M8.2.3A isolated write records audit state only and does not synthesize facts.',
+    };
+  }
+
+  return {
+    sourceRunStatus: 'SUCCESS',
+    sourceHealthStatus: 'HEALTHY',
+  };
+}
+
+function mergeSourceHealth<
+  T extends {
+    status: SourceHealthStatus;
+    errorCode?: string;
+    errorMessage?: string;
+  },
+>(previous: T, next: T): T {
+  const healthRank: Record<SourceHealthStatus, number> = {
+    HEALTHY: 0,
+    UNKNOWN: 1,
+    DEGRADED: 2,
+    DOWN: 3,
+  };
+  if (healthRank[next.status] > healthRank[previous.status]) return next;
+  return previous;
 }
 
 async function buildDomainPlans(
@@ -433,20 +655,16 @@ async function buildDomainPlans(
     const fredConfigured = isConfigured(
       (dependencies.env ?? process.env).FRED_API_KEY
     );
-    if (!fredConfigured) {
-      const domainBlocked = notConfiguredBlock(
-        'macro',
-        'FRED_API_KEY_CONFIGURED=no; macro dry-run cannot plan a real FRED fetch.'
-      );
-      blocked.push(domainBlocked);
-      plans.push(
-        ...(await planMacro(options, dates, dependencies.prisma, [
-          domainBlocked,
-        ]))
-      );
-    } else {
-      plans.push(...(await planMacro(options, dates, dependencies.prisma, [])));
-    }
+    const domainBlocked = notConfiguredBlock(
+      'macro',
+      fredConfigured
+        ? 'Macro production fetcher is not wired for M8.2.3A; isolated write records audit state only.'
+        : 'FRED_API_KEY_CONFIGURED=no; macro dry-run cannot plan a real FRED fetch.'
+    );
+    blocked.push(domainBlocked);
+    plans.push(
+      ...(await planMacro(options, dates, dependencies.prisma, [domainBlocked]))
+    );
   }
 
   return plans;
@@ -800,13 +1018,161 @@ function buildReportStatus(input: {
     'portfolio_not_found',
     'max_rows_exceeded',
     'dry_run_count_changed',
+    'isolated_write_fact_count_changed',
     'fail_on_missing_config',
   ]);
   if (input.blocked.some((item) => fatalBlockCodes.has(item.code))) {
     return 'blocked';
   }
+  if (input.mode === 'isolated-write') {
+    if (input.blocked.length > 0) return 'isolated_write_completed_with_blocks';
+    return 'isolated_write_completed';
+  }
   if (input.blocked.length > 0) return 'dry_run_completed_with_blocks';
   return 'dry_run_completed';
+}
+
+function hasFatalPreWriteBlock(blocked: BackfillBlockedItem[]): boolean {
+  const fatalBlockCodes = new Set([
+    'portfolio_not_found',
+    'max_rows_exceeded',
+    'fail_on_missing_config',
+  ]);
+  return blocked.some((item) => fatalBlockCodes.has(item.code));
+}
+
+function evaluateIsolatedWriteGate(
+  options: BackfillSourceDataOptions,
+  env: NodeJS.ProcessEnv
+): {
+  allowed: boolean;
+  blocked: BackfillBlockedItem[];
+} {
+  if (!options.write) return { allowed: false, blocked: [] };
+
+  const blocked: BackfillBlockedItem[] = [];
+  const databasePath = resolveSqliteDatabasePathFromUrl(env.DATABASE_URL);
+  const scratchDir = path.normalize(M8_2_3A_ISOLATED_SCRATCH_DIR);
+
+  if (!options.allowIsolatedWrite) {
+    blocked.push({
+      code: 'isolated_write_gate_missing_flag',
+      message:
+        '--write requires --allow-isolated-write for M8.2.3A isolated audit writes.',
+    });
+  }
+
+  if (!options.confirmIsolatedDb) {
+    blocked.push({
+      code: 'isolated_write_confirm_missing',
+      message:
+        '--write requires --confirm-isolated-db <expected-db-name-or-path>.',
+    });
+  }
+
+  if (!databasePath) {
+    blocked.push({
+      code: 'isolated_write_database_url_not_file',
+      message: 'DATABASE_URL must be a file: SQLite URL for isolated writes.',
+    });
+  } else {
+    if (isKnownProductionDatabasePath(databasePath)) {
+      blocked.push({
+        code: 'isolated_write_production_path_rejected',
+        message:
+          'DATABASE_URL points at a known production/default portfolio.db path; isolated write is rejected.',
+        details: { databasePath },
+      });
+    }
+
+    if (!isPathInsideDirectory(databasePath, scratchDir)) {
+      blocked.push({
+        code: 'isolated_write_database_not_under_task_scratch',
+        message:
+          'DATABASE_URL must point to the M8.2.3A task scratch SQLite copy.',
+        details: { databasePath, scratchDir },
+      });
+    }
+
+    const confirmedBy =
+      options.confirmIsolatedDb &&
+      matchConfirmedDatabase(options.confirmIsolatedDb, databasePath);
+    if (!confirmedBy) {
+      blocked.push({
+        code: 'isolated_write_confirmation_mismatch',
+        message:
+          '--confirm-isolated-db must match the isolated database file name or absolute path.',
+        details: {
+          databasePath,
+          confirmed: options.confirmIsolatedDb,
+        },
+      });
+    }
+  }
+
+  if (blocked.length > 0) {
+    blocked.unshift({
+      code: 'write_not_enabled_without_isolated_gate',
+      message:
+        '--write is fail-closed unless the explicit M8.2.3A isolated database gate is satisfied.',
+    });
+  }
+
+  return { allowed: blocked.length === 0, blocked };
+}
+
+function resolveSqliteDatabasePathFromUrl(
+  rawUrl: string | undefined
+): string | null {
+  const resolvedUrl = resolveSqliteDatabaseUrl(rawUrl);
+  if (!resolvedUrl.startsWith('file:')) return null;
+
+  const rawPath = resolvedUrl.slice('file:'.length).trim();
+  if (rawPath.length === 0) return null;
+  return path.normalize(rawPath);
+}
+
+function isKnownProductionDatabasePath(databasePath: string): boolean {
+  const normalized = path.normalize(databasePath);
+  return (
+    normalized === path.normalize('/app/prisma/data/portfolio.db') ||
+    normalized.endsWith(
+      path.normalize('/apps/backend/prisma/data/portfolio.db')
+    )
+  );
+}
+
+function isPathInsideDirectory(childPath: string, parentDir: string): boolean {
+  const relative = path.relative(parentDir, childPath);
+  return (
+    relative.length > 0 &&
+    !relative.startsWith('..') &&
+    !path.isAbsolute(relative)
+  );
+}
+
+function matchConfirmedDatabase(
+  confirmed: string,
+  databasePath: string
+): 'database-name' | 'database-path' | null {
+  const trimmed = confirmed.trim();
+  if (trimmed.length === 0) return null;
+
+  const withoutScheme = trimmed.startsWith('file:')
+    ? trimmed.slice('file:'.length)
+    : trimmed;
+  if (!withoutScheme.includes('/') && !withoutScheme.includes('\\')) {
+    return withoutScheme === path.basename(databasePath)
+      ? 'database-name'
+      : null;
+  }
+
+  const normalizedConfirmed = path.normalize(
+    path.isAbsolute(withoutScheme)
+      ? withoutScheme
+      : path.resolve(process.cwd(), withoutScheme)
+  );
+  return normalizedConfirmed === databasePath ? 'database-path' : null;
 }
 
 function parseCliToken(token: string): {
@@ -836,11 +1202,18 @@ function isParsedCliFlag(value: string): value is ParsedCliFlag {
     'domains',
     'max-rows',
     'fail-on-missing-config',
+    'allow-isolated-write',
+    'confirm-isolated-db',
   ].includes(value);
 }
 
 function isBooleanCliFlag(flag: ParsedCliFlag): boolean {
-  return ['dry-run', 'write', 'fail-on-missing-config'].includes(flag);
+  return [
+    'dry-run',
+    'write',
+    'fail-on-missing-config',
+    'allow-isolated-write',
+  ].includes(flag);
 }
 
 function requireString(
