@@ -3,6 +3,7 @@ import {
   buildBackfillRunKey,
   getBackfillSourceDataExitCode,
   parseBackfillSourceDataArgs,
+  runBackfillSourceDataCli,
   runBackfillSourceData,
   type BackfillSourceDataPrisma,
 } from '../backfillSourceData';
@@ -73,6 +74,27 @@ function createPrismaMock(): jest.Mocked<BackfillSourceDataPrisma> {
     },
     $disconnect: jest.fn().mockResolvedValue(undefined),
   } as unknown as jest.Mocked<BackfillSourceDataPrisma>;
+}
+
+function createWritableMock() {
+  const chunks: string[] = [];
+  return {
+    chunks,
+    stream: {
+      write: jest.fn(
+        (
+          chunk: string,
+          callback?: ((error?: Error | null) => void) | BufferEncoding
+        ) => {
+          chunks.push(chunk);
+          if (typeof callback === 'function') {
+            callback(null);
+          }
+          return true;
+        }
+      ),
+    },
+  };
 }
 
 describe('backfillSourceData runner', () => {
@@ -231,6 +253,39 @@ describe('backfillSourceData runner', () => {
     expect(prisma.indexSnapshot.upsert).not.toHaveBeenCalled();
     expect(klineFetcher).not.toHaveBeenCalled();
     expect(getBackfillSourceDataExitCode(report)).toBe(0);
+  });
+
+  it('returns a dry-run CLI exit code after flushing the report and disconnecting prisma', async () => {
+    const prisma = createPrismaMock();
+    const stdout = createWritableMock();
+
+    const exitCode = await runBackfillSourceDataCli(
+      [
+        '--dry-run',
+        '--portfolio-id',
+        'portfolio-2026',
+        '--date-from',
+        '2026-04-24',
+        '--date-to',
+        '2026-04-24',
+        '--domains',
+        'market_quote,index',
+        '--max-rows',
+        '64',
+      ],
+      async () => ({
+        prisma,
+        env: {},
+        now: () => new Date('2026-04-26T01:00:00.000Z'),
+      }),
+      { stdout: stdout.stream }
+    );
+
+    expect(exitCode).toBe(0);
+    expect(prisma.$disconnect).toHaveBeenCalledTimes(1);
+    expect(stdout.stream.write).toHaveBeenCalled();
+    expect(stdout.chunks.join('')).toContain('"mode": "dry-run"');
+    expect(stdout.chunks.join('')).toContain('"domains": [');
   });
 
   it('fails closed when --write is requested', async () => {

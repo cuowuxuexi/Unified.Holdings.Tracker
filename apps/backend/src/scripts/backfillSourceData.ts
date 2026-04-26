@@ -176,6 +176,11 @@ export type BackfillSourceDataDependencies = {
   macroProductionFetcher?: BackfillMacroProductionFetcher;
 };
 
+export type BackfillSourceDataCliIo = {
+  stdout?: Pick<NodeJS.WriteStream, 'write'>;
+  stderr?: Pick<NodeJS.WriteStream, 'write'>;
+};
+
 type BackfillBlockedItem = {
   domain?: BackfillSourceDataDomain;
   code: string;
@@ -2771,37 +2776,71 @@ function findRepoRoot(): string | null {
   return null;
 }
 
-async function main(): Promise<void> {
-  const options = parseBackfillSourceDataArgs(process.argv.slice(2));
-  const dependencies = await loadDefaultDependencies();
+async function writeCliStream(
+  stream: Pick<NodeJS.WriteStream, 'write'>,
+  content: string
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const onComplete = (error?: Error | null) => {
+      if (error) {
+        reject(error);
+        return;
+      }
+      resolve();
+    };
+    stream.write(
+      content,
+      onComplete as (error: Error | null | undefined) => void
+    );
+  });
+}
+
+function buildCliErrorReport(error: unknown): string {
+  return `${JSON.stringify(
+    {
+      mode: 'dry-run',
+      status: 'blocked',
+      errors: [
+        {
+          code: 'backfill_source_data_cli_error',
+          message: error instanceof Error ? error.message : String(error),
+        },
+      ],
+      writeAttempted: false,
+    },
+    null,
+    2
+  )}\n`;
+}
+
+export async function runBackfillSourceDataCli(
+  argv: string[],
+  dependenciesFactory: () => Promise<BackfillSourceDataDependencies> = loadDefaultDependencies,
+  io: BackfillSourceDataCliIo = {}
+): Promise<number> {
+  const options = parseBackfillSourceDataArgs(argv);
+  const dependencies = await dependenciesFactory();
+  const stdout = io.stdout ?? process.stdout;
   try {
     const report = await runBackfillSourceData(options, dependencies);
-    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
-    process.exitCode = getBackfillSourceDataExitCode(report);
+    await writeCliStream(stdout, `${JSON.stringify(report, null, 2)}\n`);
+    return getBackfillSourceDataExitCode(report);
   } finally {
     await dependencies.prisma.$disconnect?.();
   }
 }
 
 if (require.main === module) {
-  main().catch((error) => {
-    process.stderr.write(
-      `${JSON.stringify(
-        {
-          mode: 'dry-run',
-          status: 'blocked',
-          errors: [
-            {
-              code: 'backfill_source_data_cli_error',
-              message: error instanceof Error ? error.message : String(error),
-            },
-          ],
-          writeAttempted: false,
-        },
-        null,
-        2
-      )}\n`
-    );
-    process.exitCode = 1;
-  });
+  (async () => {
+    try {
+      const exitCode = await runBackfillSourceDataCli(process.argv.slice(2));
+      process.exit(exitCode);
+    } catch (error) {
+      try {
+        await writeCliStream(process.stderr, buildCliErrorReport(error));
+      } finally {
+        process.exit(1);
+      }
+    }
+  })();
 }
