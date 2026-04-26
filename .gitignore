@@ -29,6 +29,8 @@ Thumbs.db
 .repomix/
 .specstory/
 .omx/
+.codex
+.codex/
 
 # Others
 .env
