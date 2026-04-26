@@ -323,6 +323,7 @@ const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const TENCENT_KLINE_SOURCE_ID = 'tencent.kline';
 const DAILY_KLINE_FETCH_COUNT = 1;
 const FX_SOURCE_FETCH_TIMEOUT_MS = 5000;
+const YIELD_CURVE_SOURCE_FETCH_TIMEOUT_MS = 30_000;
 const DEFAULT_MACRO_FETCH_LOOKBACK_DAYS = 90;
 const DEFAULT_ISOLATED_BACKFILL_ROOT =
   '/mnt/d/cxks/任务工作台/T0425-UHT投资数据中台优化提案/scratch';
@@ -2699,6 +2700,7 @@ async function loadDefaultDependencies(): Promise<BackfillSourceDataDependencies
   });
   const yieldCurveGateway = createProductionYieldCurveGateway({
     repository: NOOP_SOURCE_GATEWAY_REPOSITORY,
+    timeoutMs: YIELD_CURVE_SOURCE_FETCH_TIMEOUT_MS,
     retryPolicy: { maxAttempts: 1 },
   });
 

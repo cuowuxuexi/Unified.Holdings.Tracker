@@ -13,7 +13,12 @@ RUN sed -i 's#http://deb.debian.org/debian-security#http://mirrors.ustc.edu.cn/d
     && sed -i 's#http://deb.debian.org/debian#http://mirrors.ustc.edu.cn/debian#g' /etc/apt/sources.list.d/debian.sources \
     && apt-get update && apt-get install -y --no-install-recommends \
     openssl \
+    python3 \
+    python3-venv \
     && rm -rf /var/lib/apt/lists/*
+
+RUN python3 -m venv /opt/uht-python \
+    && /opt/uht-python/bin/pip install --no-cache-dir akshare==1.16.58
 
 # Copy package files first (better layer caching)
 COPY package.json package-lock.json ./
@@ -68,6 +73,7 @@ ENV NODE_ENV=production
 ENV PORT=3001
 ENV DATABASE_URL=file:./prisma/data/portfolio.db
 ENV API_BASE_PATH=/api
+ENV UHT_YIELD_CURVE_PYTHON_BIN=/opt/uht-python/bin/python
 
 EXPOSE 3001
 
