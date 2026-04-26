@@ -1,12 +1,28 @@
 import fs from 'fs';
 import path from 'path';
-import type { KlinePoint } from '../types';
-import { FX_PAIRS } from '../services/sourceGateway/adapters/fx/types';
-import { MACRO_INDICATORS } from '../services/sourceGateway/adapters/macro/catalog';
+import type { SourceGatewayRepository } from '@uht/domain/repositories';
 import {
+  fetchExchangeRatesHistory,
+  type HistoricalRateRecord,
+} from '@uht/infra';
+import type { KlinePoint } from '../types';
+import { SourceGatewayFailureError } from '../services/sourceGateway';
+import {
+  FRANKFURTER_FX_SOURCE_ID,
+  FX_PAIRS,
+  type FxPair,
+} from '../services/sourceGateway/adapters/fx';
+import {
+  MACRO_INDICATORS,
+  type MacroIndicatorId,
+  type MacroIndicatorSnapshot,
+  type MacroProductionFetchResult,
+} from '../services/sourceGateway/adapters/macro';
+import {
+  type YieldCurveRecord,
   YIELD_CURVE_COUNTRIES,
   YIELD_CURVE_TENORS,
-} from '../services/sourceGateway/adapters/yieldCurve/types';
+} from '../services/sourceGateway/adapters/yieldCurve';
 
 export const BACKFILL_SOURCE_DATA_DOMAINS = [
   'fx',
@@ -97,6 +113,9 @@ type YieldCurveSnapshotRow = {
   tenor: string;
   sourceId: string;
   status: string;
+  yieldPercent?: unknown;
+  sourceTime?: Date | string | null;
+  errorSummary?: string | null;
 };
 
 type MacroIndicatorSnapshotRow = {
@@ -104,6 +123,10 @@ type MacroIndicatorSnapshotRow = {
   indicatorId: string;
   sourceId: string;
   status: string;
+  value?: unknown;
+  unit?: string | null;
+  sourceTime?: Date | string | null;
+  errorSummary?: string | null;
 };
 
 type PositionSnapshotRow = {
@@ -114,8 +137,8 @@ type PositionSnapshotRow = {
 export type BackfillSourceDataPrisma = {
   sourceRun: UpsertModel;
   sourceHealth: UpsertModel;
-  yieldCurveSnapshot: FindManyModel<YieldCurveSnapshotRow>;
-  macroIndicatorSnapshot: FindManyModel<MacroIndicatorSnapshotRow>;
+  yieldCurveSnapshot: FactSnapshotModel<YieldCurveSnapshotRow>;
+  macroIndicatorSnapshot: FactSnapshotModel<MacroIndicatorSnapshotRow>;
   exchangeRateSnapshot: FactSnapshotModel<ExchangeRateSnapshotRow>;
   quoteSnapshot: FactSnapshotModel<QuoteSnapshotRow>;
   indexSnapshot: FactSnapshotModel<IndexSnapshotRow>;
@@ -148,6 +171,9 @@ export type BackfillSourceDataDependencies = {
   env?: NodeJS.ProcessEnv;
   now?: () => Date;
   klineFetcher?: BackfillKlineFetcher;
+  fxHistoryFetcher?: BackfillFxHistoryFetcher;
+  yieldCurveGateway?: BackfillYieldCurveGateway;
+  macroProductionFetcher?: BackfillMacroProductionFetcher;
 };
 
 type BackfillBlockedItem = {
@@ -187,6 +213,8 @@ type BackfillFactWriteSummary = {
   exchangeRateSnapshotUpserts: number;
   quoteSnapshotUpserts: number;
   indexSnapshotUpserts: number;
+  yieldCurveSnapshotUpserts: number;
+  macroIndicatorSnapshotUpserts: number;
   skipped: number;
   skipReasons: Record<string, number>;
   skips: BackfillFactWriteSkip[];
@@ -289,9 +317,34 @@ const DEFAULT_MAX_ROWS = 256;
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 const TENCENT_KLINE_SOURCE_ID = 'tencent.kline';
 const DAILY_KLINE_FETCH_COUNT = 1;
+const FX_SOURCE_FETCH_TIMEOUT_MS = 5000;
+const DEFAULT_MACRO_FETCH_LOOKBACK_DAYS = 90;
 const DEFAULT_ISOLATED_BACKFILL_ROOT =
   '/mnt/d/cxks/任务工作台/T0425-UHT投资数据中台优化提案/scratch';
 const ISOLATED_BACKFILL_ROOT_ENV = 'UHT_BACKFILL_ISOLATED_ROOT';
+
+type BackfillFxHistoryFetcher = (request: {
+  pairs: FxPair[];
+  date?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+}) => Promise<HistoricalRateRecord[]>;
+
+type BackfillYieldCurveGateway = {
+  execute(request: { asOfDate: string }): Promise<{
+    sourceId: string;
+    data: YieldCurveRecord[];
+  }>;
+};
+
+type BackfillMacroProductionFetcher = (request: {
+  indicatorIds: MacroIndicatorId[];
+  dateFrom: string;
+  dateTo: string;
+  asOfDate: string;
+}) => Promise<MacroProductionFetchResult>;
 
 export function parseBackfillSourceDataArgs(
   argv: string[]
@@ -395,7 +448,7 @@ export async function runBackfillSourceData(
 
   const dates = enumerateDates(options.dateFrom, options.dateTo);
   const plans = portfolio
-    ? await buildDomainPlans(options, dates, dependencies, warnings, blocked)
+    ? await buildDomainPlans(options, dates, dependencies, warnings)
     : [];
 
   const plannedRows = plans.reduce((sum, plan) => sum + plan.targetRows, 0);
@@ -408,6 +461,14 @@ export async function runBackfillSourceData(
   }
 
   if (
+    options.allowSourceFetch &&
+    mode !== 'write-rejected' &&
+    !hasFatalPreWriteBlock(blocked)
+  ) {
+    await hydratePlansWithSourceFetch(plans, dependencies, warnings, blocked);
+  }
+
+  if (
     options.failOnMissingConfig &&
     blocked.some((item) => item.code === 'not_configured')
   ) {
@@ -416,14 +477,6 @@ export async function runBackfillSourceData(
       message:
         '--fail-on-missing-config was set and at least one requested domain is not configured.',
     });
-  }
-
-  if (
-    options.allowSourceFetch &&
-    mode !== 'write-rejected' &&
-    !hasFatalPreWriteBlock(blocked)
-  ) {
-    await hydratePlansWithSourceFetch(plans, dependencies, warnings);
   }
 
   const auditWriteSummary =
@@ -597,6 +650,22 @@ async function buildFactWriteSummary(input: {
   }
 
   for (const plan of input.plans) {
+    if (plan.blocked.length > 0) {
+      for (const target of plan.targets) {
+        addFactWriteSkip(summary, {
+          domain: plan.domain,
+          key: target.key,
+          reason: 'plan_blocked',
+          message:
+            'Fact writes are skipped because this domain plan remains blocked.',
+          details: {
+            blockedCodes: plan.blocked.map((item) => item.code),
+          },
+        });
+      }
+      continue;
+    }
+
     if (plan.domain === 'fx') {
       await upsertFxFacts(plan, input.prisma, summary, input.warnings);
       continue;
@@ -612,14 +681,13 @@ async function buildFactWriteSummary(input: {
       continue;
     }
 
-    for (const target of plan.targets) {
-      addFactWriteSkip(summary, {
-        domain: plan.domain,
-        key: target.key,
-        reason: 'domain_not_configured_for_fact_write',
-        message:
-          'This domain remains blocked/not_configured for M8.3A and is not written to fact tables.',
-      });
+    if (plan.domain === 'yield_curve') {
+      await upsertYieldCurveFacts(plan, input.prisma, summary, input.warnings);
+      continue;
+    }
+
+    if (plan.domain === 'macro') {
+      await upsertMacroFacts(plan, input.prisma, summary, input.warnings);
     }
   }
 
@@ -633,6 +701,8 @@ function createFactWriteSummary(enabled: boolean): BackfillFactWriteSummary {
     exchangeRateSnapshotUpserts: 0,
     quoteSnapshotUpserts: 0,
     indexSnapshotUpserts: 0,
+    yieldCurveSnapshotUpserts: 0,
+    macroIndicatorSnapshotUpserts: 0,
     skipped: 0,
     skipReasons: {},
     skips: [],
@@ -788,6 +858,156 @@ async function upsertIndexFacts(
   }
 }
 
+async function upsertYieldCurveFacts(
+  plan: BackfillDomainPlan,
+  prisma: BackfillSourceDataPrisma,
+  summary: BackfillFactWriteSummary,
+  warnings: BackfillWarning[]
+): Promise<void> {
+  for (const target of plan.targets) {
+    const country = readStringAttribute(target, 'country');
+    const tenor = readStringAttribute(target, 'tenor');
+    const sourceId = readStringAttribute(target, 'sourceId');
+    const sourceDate =
+      readOptionalStringAttribute(target, 'sourceDate') ?? target.date;
+    const status = readSnapshotStatusAttribute(target);
+    const sourceTime = parseFactTimestamp(target.attributes.sourceTime);
+    const errorSummary = readOptionalStringAttribute(target, 'errorSummary');
+    const yieldPercent = readOptionalNumberAttribute(target, 'yieldPercent');
+
+    if (
+      !country ||
+      !tenor ||
+      !sourceId ||
+      !status ||
+      (requiresNumericSnapshotValue(status) && yieldPercent === undefined)
+    ) {
+      addMissingFactValueSkip({
+        summary,
+        warnings,
+        domain: plan.domain,
+        target,
+        missingFields: [
+          ...(!country ? ['country'] : []),
+          ...(!tenor ? ['tenor'] : []),
+          ...(!sourceId ? ['sourceId'] : []),
+          ...(!status ? ['status'] : []),
+          ...(requiresNumericSnapshotValue(status) && yieldPercent === undefined
+            ? ['yieldPercent']
+            : []),
+        ],
+      });
+      continue;
+    }
+
+    await prisma.yieldCurveSnapshot.upsert({
+      where: {
+        date_country_tenor_sourceId: {
+          date: sourceDate,
+          country,
+          tenor,
+          sourceId,
+        },
+      },
+      create: {
+        date: sourceDate,
+        country,
+        tenor,
+        yieldPercent: yieldPercent ?? null,
+        sourceId,
+        sourceTime: sourceTime ?? null,
+        status,
+        errorSummary: errorSummary ?? null,
+      },
+      update: {
+        yieldPercent: yieldPercent ?? null,
+        sourceTime: sourceTime ?? null,
+        status,
+        errorSummary: errorSummary ?? null,
+      },
+    });
+    summary.yieldCurveSnapshotUpserts += 1;
+    summary.totalUpserts += 1;
+  }
+}
+
+async function upsertMacroFacts(
+  plan: BackfillDomainPlan,
+  prisma: BackfillSourceDataPrisma,
+  summary: BackfillFactWriteSummary,
+  warnings: BackfillWarning[]
+): Promise<void> {
+  for (const target of plan.targets) {
+    const indicatorId = readStringAttribute(target, 'indicatorId');
+    const sourceId = readStringAttribute(target, 'sourceId');
+    const sourceDate =
+      readOptionalStringAttribute(target, 'sourceDate') ?? target.date;
+    const status = readSnapshotStatusAttribute(target);
+    const unit =
+      readOptionalStringAttribute(target, 'unit') ??
+      (indicatorId
+        ? MACRO_INDICATORS[indicatorId as keyof typeof MACRO_INDICATORS]?.unit
+        : null);
+    const sourceTime = parseFactTimestamp(target.attributes.sourceTime);
+    const errorSummary = readOptionalStringAttribute(target, 'errorSummary');
+    const value = readOptionalNumberAttribute(target, 'value');
+
+    if (
+      !indicatorId ||
+      !sourceId ||
+      !status ||
+      !unit ||
+      (requiresNumericSnapshotValue(status) && value === undefined)
+    ) {
+      addMissingFactValueSkip({
+        summary,
+        warnings,
+        domain: plan.domain,
+        target,
+        missingFields: [
+          ...(!indicatorId ? ['indicatorId'] : []),
+          ...(!sourceId ? ['sourceId'] : []),
+          ...(!status ? ['status'] : []),
+          ...(!unit ? ['unit'] : []),
+          ...(requiresNumericSnapshotValue(status) && value === undefined
+            ? ['value']
+            : []),
+        ],
+      });
+      continue;
+    }
+
+    await prisma.macroIndicatorSnapshot.upsert({
+      where: {
+        date_indicatorId_sourceId: {
+          date: sourceDate,
+          indicatorId,
+          sourceId,
+        },
+      },
+      create: {
+        date: sourceDate,
+        indicatorId,
+        value: value ?? null,
+        unit,
+        sourceId,
+        sourceTime: sourceTime ?? null,
+        status,
+        errorSummary: errorSummary ?? null,
+      },
+      update: {
+        value: value ?? null,
+        unit,
+        sourceTime: sourceTime ?? null,
+        status,
+        errorSummary: errorSummary ?? null,
+      },
+    });
+    summary.macroIndicatorSnapshotUpserts += 1;
+    summary.totalUpserts += 1;
+  }
+}
+
 function addMissingFactValueSkip(input: {
   summary: BackfillFactWriteSummary;
   warnings: BackfillWarning[];
@@ -850,6 +1070,42 @@ function readOptionalStringAttribute(
   return typeof value === 'string' && value.trim().length > 0
     ? value.trim()
     : null;
+}
+
+function readOptionalNumberAttribute(
+  target: BackfillTarget,
+  key: string
+): number | undefined {
+  const value = target.attributes[key];
+  if (typeof value === 'number') {
+    return Number.isFinite(value) ? value : undefined;
+  }
+  if (typeof value === 'string' && value.trim().length > 0) {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  }
+  return undefined;
+}
+
+function readSnapshotStatusAttribute(
+  target: BackfillTarget
+): 'SUCCESS' | 'MISSING' | 'STALE' | 'SOURCE_FAILED' | null {
+  const value = readOptionalStringAttribute(target, 'status');
+  if (
+    value === 'SUCCESS' ||
+    value === 'MISSING' ||
+    value === 'STALE' ||
+    value === 'SOURCE_FAILED'
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function requiresNumericSnapshotValue(
+  status: 'SUCCESS' | 'MISSING' | 'STALE' | 'SOURCE_FAILED' | null
+): boolean {
+  return status === 'SUCCESS' || status === 'STALE';
 }
 
 function hasRealFactValue(value: unknown): boolean {
@@ -1000,6 +1256,41 @@ function buildAuditStatus(plan: BackfillDomainPlan): {
     };
   }
 
+  const snapshotStatuses = unique(
+    plan.targets
+      .map((target) => readSnapshotStatusAttribute(target))
+      .filter(
+        (status): status is 'SUCCESS' | 'MISSING' | 'STALE' | 'SOURCE_FAILED' =>
+          Boolean(status)
+      )
+  );
+
+  if (snapshotStatuses.includes('SOURCE_FAILED')) {
+    return {
+      sourceRunStatus: 'FAILED',
+      sourceHealthStatus: 'DEGRADED',
+      errorCode: 'source_fetch_source_failed',
+      errorMessage:
+        'One or more fetched source records reported SOURCE_FAILED status.',
+    };
+  }
+
+  if (
+    snapshotStatuses.includes('MISSING') ||
+    snapshotStatuses.includes('STALE')
+  ) {
+    return {
+      sourceRunStatus: 'PARTIAL',
+      sourceHealthStatus: 'DEGRADED',
+      errorCode: snapshotStatuses.includes('STALE')
+        ? 'source_fetch_stale_value'
+        : 'source_fetch_missing_value',
+      errorMessage: snapshotStatuses.includes('STALE')
+        ? 'One or more fetched source records are stale for the requested date.'
+        : 'One or more fetched source records still have missing values.',
+    };
+  }
+
   return {
     sourceRunStatus: 'SUCCESS',
     sourceHealthStatus: 'HEALTHY',
@@ -1023,12 +1314,40 @@ function mergeSourceHealth<
   return previous;
 }
 
+function addPlanBlock(
+  plan: BackfillDomainPlan,
+  block: BackfillBlockedItem,
+  blocked: BackfillBlockedItem[]
+): void {
+  if (
+    !plan.blocked.some(
+      (item) =>
+        item.domain === block.domain &&
+        item.code === block.code &&
+        item.message === block.message
+    )
+  ) {
+    plan.blocked.push(block);
+  }
+  plan.status = 'blocked';
+
+  if (
+    !blocked.some(
+      (item) =>
+        item.domain === block.domain &&
+        item.code === block.code &&
+        item.message === block.message
+    )
+  ) {
+    blocked.push(block);
+  }
+}
+
 async function buildDomainPlans(
   options: BackfillSourceDataOptions,
   dates: string[],
   dependencies: BackfillSourceDataDependencies,
-  warnings: BackfillWarning[],
-  blocked: BackfillBlockedItem[]
+  warnings: BackfillWarning[]
 ): Promise<BackfillDomainPlan[]> {
   const plans: BackfillDomainPlan[] = [];
 
@@ -1047,32 +1366,11 @@ async function buildDomainPlans(
   }
 
   if (options.domains.includes('yield_curve')) {
-    const domainBlocked = notConfiguredBlock(
-      'yield_curve',
-      'Yield curve production fetcher is not wired in M8.2.1; dry-run only audits existing/missing targets.'
-    );
-    blocked.push(domainBlocked);
-    plans.push(
-      ...(await planYieldCurve(options, dates, dependencies.prisma, [
-        domainBlocked,
-      ]))
-    );
+    plans.push(...(await planYieldCurve(options, dates, dependencies.prisma)));
   }
 
   if (options.domains.includes('macro')) {
-    const fredConfigured = isConfigured(
-      (dependencies.env ?? process.env).FRED_API_KEY
-    );
-    const domainBlocked = notConfiguredBlock(
-      'macro',
-      fredConfigured
-        ? 'Macro production fetcher is not wired for M8.2.3B; isolated write records audit state only.'
-        : 'FRED_API_KEY_CONFIGURED=no; macro dry-run cannot plan a real FRED fetch.'
-    );
-    blocked.push(domainBlocked);
-    plans.push(
-      ...(await planMacro(options, dates, dependencies.prisma, [domainBlocked]))
-    );
+    plans.push(...(await planMacro(options, dates, dependencies.prisma)));
   }
 
   return plans;
@@ -1081,8 +1379,23 @@ async function buildDomainPlans(
 async function hydratePlansWithSourceFetch(
   plans: BackfillDomainPlan[],
   dependencies: BackfillSourceDataDependencies,
-  warnings: BackfillWarning[]
+  warnings: BackfillWarning[],
+  blocked: BackfillBlockedItem[]
 ): Promise<void> {
+  await hydrateFxPlansWithSourceFetch(plans, dependencies, warnings);
+  await hydrateYieldCurvePlansWithSourceFetch(
+    plans,
+    dependencies,
+    warnings,
+    blocked
+  );
+  await hydrateMacroPlansWithSourceFetch(
+    plans,
+    dependencies,
+    warnings,
+    blocked
+  );
+
   const klineFetcher = dependencies.klineFetcher;
   if (!klineFetcher) {
     warnings.push({
@@ -1115,6 +1428,361 @@ async function hydratePlansWithSourceFetch(
       refreshPlanTargetCounts(plan);
     }
   }
+}
+
+async function hydrateFxPlansWithSourceFetch(
+  plans: BackfillDomainPlan[],
+  dependencies: BackfillSourceDataDependencies,
+  warnings: BackfillWarning[]
+): Promise<void> {
+  const fxPlans = plans.filter((plan) => plan.domain === 'fx');
+  if (fxPlans.length === 0) return;
+
+  const fxHistoryFetcher = dependencies.fxHistoryFetcher;
+  if (!fxHistoryFetcher) {
+    warnings.push({
+      domain: 'fx',
+      code: 'source_fetcher_not_configured',
+      message:
+        '--allow-source-fetch was set, but no FX history fetcher is configured for this runner invocation.',
+      details: { sourceId: FRANKFURTER_FX_SOURCE_ID },
+    });
+    return;
+  }
+
+  try {
+    const request = buildFxHistoryFetchRequest(fxPlans);
+    const rows = await fxHistoryFetcher({
+      ...request,
+      pairs: [...FX_PAIRS],
+      signal: new AbortController().signal,
+      timeoutMs: FX_SOURCE_FETCH_TIMEOUT_MS,
+    });
+    const rowsByKey = new Map(
+      rows.map((row) => [fxKey(row.date, row.pair), row] as const)
+    );
+
+    for (const plan of fxPlans) {
+      let hydrated = false;
+      for (const target of plan.targets) {
+        if (target.status !== 'missing') continue;
+
+        const pair = readStringAttribute(target, 'pair') as FxPair | null;
+        if (!pair) continue;
+
+        const row = rowsByKey.get(fxKey(plan.date, pair));
+        if (!row) continue;
+
+        target.status = 'fetched';
+        target.attributes = {
+          ...target.attributes,
+          rate: row.rate,
+          source: FRANKFURTER_FX_SOURCE_ID,
+          sourceTime: row.timestamp,
+        };
+        hydrated = true;
+      }
+
+      if (hydrated) {
+        plan.sourceId = FRANKFURTER_FX_SOURCE_ID;
+        refreshPlanTargetCounts(plan);
+      }
+    }
+  } catch (error) {
+    warnings.push({
+      domain: 'fx',
+      code: 'source_fetch_failed',
+      message:
+        'Frankfurter FX source fetch failed; runner kept missing FX targets read-only.',
+      details: {
+        sourceId: FRANKFURTER_FX_SOURCE_ID,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    });
+  }
+}
+
+function buildFxHistoryFetchRequest(plans: BackfillDomainPlan[]): {
+  date?: string;
+  dateFrom?: string;
+  dateTo?: string;
+} {
+  const planDates = plans.map((plan) => plan.date).sort();
+  const firstDate = planDates[0];
+  const lastDate = planDates[planDates.length - 1];
+
+  if (firstDate === lastDate) {
+    return { date: firstDate };
+  }
+
+  return {
+    dateFrom: firstDate,
+    dateTo: lastDate,
+  };
+}
+
+async function hydrateYieldCurvePlansWithSourceFetch(
+  plans: BackfillDomainPlan[],
+  dependencies: BackfillSourceDataDependencies,
+  warnings: BackfillWarning[],
+  blocked: BackfillBlockedItem[]
+): Promise<void> {
+  const yieldPlans = plans.filter((plan) => plan.domain === 'yield_curve');
+  if (yieldPlans.length === 0) return;
+
+  const gateway = dependencies.yieldCurveGateway;
+  if (!gateway) {
+    for (const plan of yieldPlans) {
+      addPlanBlock(
+        plan,
+        notConfiguredBlock(
+          'yield_curve',
+          'Yield curve production gateway is not available for this runner invocation.'
+        ),
+        blocked
+      );
+    }
+    return;
+  }
+
+  for (const plan of yieldPlans) {
+    if (plan.missingRows === 0) continue;
+
+    try {
+      const response = await gateway.execute({ asOfDate: plan.date });
+      const recordByKey = new Map(
+        response.data.map((record) => [
+          yieldCurveCountryTenorKey(record.country, record.tenor),
+          record,
+        ])
+      );
+
+      plan.sourceId = response.sourceId;
+
+      let hydrated = false;
+      for (const target of plan.targets) {
+        if (target.status !== 'missing') continue;
+
+        const country = readStringAttribute(target, 'country');
+        const tenor = readStringAttribute(target, 'tenor');
+        if (!country || !tenor) continue;
+
+        const record = recordByKey.get(
+          yieldCurveCountryTenorKey(country, tenor)
+        );
+        if (!record) continue;
+
+        target.status = 'fetched';
+        target.attributes = {
+          ...target.attributes,
+          sourceId: response.sourceId,
+          sourceDate: record.date,
+          sourceTime: record.sourceTime,
+          status: record.status,
+          yieldPercent: record.yieldPercent,
+          errorSummary: record.errorSummary,
+        };
+        hydrated = true;
+      }
+
+      if (hydrated) {
+        refreshPlanTargetCounts(plan);
+      }
+    } catch (error) {
+      handleSourceFetchError({
+        plan,
+        domain: 'yield_curve',
+        blocked,
+        warnings,
+        error,
+        notConfiguredMessage:
+          'Yield curve source fetch is fail-closed because the AkShare bridge is not configured.',
+        failureMessage:
+          'Yield curve source fetch failed; runner kept missing yield targets read-only.',
+      });
+    }
+  }
+}
+
+async function hydrateMacroPlansWithSourceFetch(
+  plans: BackfillDomainPlan[],
+  dependencies: BackfillSourceDataDependencies,
+  warnings: BackfillWarning[],
+  blocked: BackfillBlockedItem[]
+): Promise<void> {
+  const macroPlans = plans.filter((plan) => plan.domain === 'macro');
+  if (macroPlans.length === 0) return;
+
+  const macroProductionFetcher = dependencies.macroProductionFetcher;
+  if (!macroProductionFetcher) {
+    for (const plan of macroPlans) {
+      addPlanBlock(
+        plan,
+        notConfiguredBlock(
+          'macro',
+          'Macro production fetch seam is not available for this runner invocation.'
+        ),
+        blocked
+      );
+    }
+    return;
+  }
+
+  for (const plan of macroPlans) {
+    if (plan.missingRows === 0) continue;
+
+    const indicatorIds = plan.targets
+      .map((target) => readStringAttribute(target, 'indicatorId'))
+      .filter((value): value is MacroIndicatorId => Boolean(value));
+
+    try {
+      const response = await macroProductionFetcher({
+        indicatorIds,
+        dateFrom: shiftIsoDate(plan.date, -DEFAULT_MACRO_FETCH_LOOKBACK_DAYS),
+        dateTo: plan.date,
+        asOfDate: plan.date,
+      });
+
+      plan.sourceId = response.sourceId;
+
+      if (!response.ok) {
+        addPlanBlock(
+          plan,
+          notConfiguredBlock('macro', response.blocked.message),
+          blocked
+        );
+        continue;
+      }
+
+      const latestByIndicator = latestMacroRecordsByIndicator(response.records);
+      let hydrated = false;
+      for (const target of plan.targets) {
+        if (target.status !== 'missing') continue;
+
+        const indicatorId = readStringAttribute(target, 'indicatorId');
+        if (!indicatorId) continue;
+
+        const record = latestByIndicator.get(indicatorId as MacroIndicatorId);
+        if (!record) continue;
+
+        target.status = 'fetched';
+        target.attributes = {
+          ...target.attributes,
+          sourceId: response.sourceId,
+          sourceDate: record.date,
+          sourceTime: toIsoString(record.sourceTime),
+          status: record.status,
+          value: record.value,
+          unit: record.unit,
+          errorSummary: record.errorSummary,
+        };
+        hydrated = true;
+      }
+
+      if (hydrated) {
+        refreshPlanTargetCounts(plan);
+      }
+    } catch (error) {
+      handleSourceFetchError({
+        plan,
+        domain: 'macro',
+        blocked,
+        warnings,
+        error,
+        notConfiguredMessage:
+          'Macro source fetch is fail-closed because FRED_API_KEY is not configured.',
+        failureMessage:
+          'Macro source fetch failed; runner kept missing macro targets read-only.',
+      });
+    }
+  }
+}
+
+function latestMacroRecordsByIndicator(
+  records: MacroIndicatorSnapshot[]
+): Map<MacroIndicatorId, MacroIndicatorSnapshot> {
+  const latestByIndicator = new Map<MacroIndicatorId, MacroIndicatorSnapshot>();
+
+  for (const record of records) {
+    const previous = latestByIndicator.get(record.indicatorId);
+    if (!previous || compareMacroRecords(record, previous) > 0) {
+      latestByIndicator.set(record.indicatorId, record);
+    }
+  }
+
+  return latestByIndicator;
+}
+
+function compareMacroRecords(
+  left: MacroIndicatorSnapshot,
+  right: MacroIndicatorSnapshot
+): number {
+  const dateCompare = left.date.localeCompare(right.date);
+  if (dateCompare !== 0) return dateCompare;
+  const leftSourceTime = toIsoString(left.sourceTime) ?? '';
+  const rightSourceTime = toIsoString(right.sourceTime) ?? '';
+  return leftSourceTime.localeCompare(rightSourceTime);
+}
+
+function handleSourceFetchError(input: {
+  plan: BackfillDomainPlan;
+  domain: Extract<BackfillSourceDataDomain, 'yield_curve' | 'macro'>;
+  blocked: BackfillBlockedItem[];
+  warnings: BackfillWarning[];
+  error: unknown;
+  notConfiguredMessage: string;
+  failureMessage: string;
+}): void {
+  const firstError = getFirstSourceGatewayError(input.error);
+  if (firstError?.code === 'SOURCE_NOT_CONFIGURED') {
+    addPlanBlock(
+      input.plan,
+      notConfiguredBlock(
+        input.domain,
+        firstError.message || input.notConfiguredMessage
+      ),
+      input.blocked
+    );
+    return;
+  }
+
+  input.warnings.push({
+    domain: input.domain,
+    code: 'source_fetch_failed',
+    message: input.failureMessage,
+    details: {
+      runKey: input.plan.runKey,
+      errorCode: firstError?.code,
+      error:
+        firstError?.message ??
+        (input.error instanceof Error
+          ? input.error.message
+          : String(input.error)),
+    },
+  });
+}
+
+function getFirstSourceGatewayError(
+  error: unknown
+): { code?: string; message?: string } | null {
+  if (error instanceof SourceGatewayFailureError) {
+    return error.errors[0] ?? null;
+  }
+
+  if (
+    error &&
+    typeof error === 'object' &&
+    'code' in error &&
+    'message' in error
+  ) {
+    const candidate = error as { code?: string; message?: string };
+    return {
+      code: candidate.code,
+      message: candidate.message,
+    };
+  }
+
+  return null;
 }
 
 async function hydrateMissingTargetFromKline(
@@ -1397,8 +2065,7 @@ async function planIndex(
 async function planYieldCurve(
   options: BackfillSourceDataOptions,
   dates: string[],
-  prisma: BackfillSourceDataPrisma,
-  domainBlocked: BackfillBlockedItem[]
+  prisma: BackfillSourceDataPrisma
 ): Promise<BackfillDomainPlan[]> {
   const countries = [...YIELD_CURVE_COUNTRIES];
   const tenors = [...YIELD_CURVE_TENORS];
@@ -1415,6 +2082,9 @@ async function planYieldCurve(
       tenor: true,
       sourceId: true,
       status: true,
+      yieldPercent: true,
+      sourceTime: true,
+      errorSummary: true,
     },
   });
   const existing = new Map(
@@ -1437,6 +2107,10 @@ async function planYieldCurve(
             tenor,
             sourceId: row?.sourceId,
             status: row?.status,
+            sourceDate: row?.date,
+            yieldPercent: row ? toJsonValue(row.yieldPercent) : undefined,
+            sourceTime: toIsoString(row?.sourceTime),
+            errorSummary: row?.errorSummary ?? undefined,
           },
         } satisfies BackfillTarget;
       })
@@ -1446,9 +2120,8 @@ async function planYieldCurve(
       domain: 'yield_curve',
       date,
       scope: 'global',
-      sourceId: 'yield-curve-source-not-configured',
+      sourceId: 'akshare-yield-curve',
       targets,
-      blocked: domainBlocked,
     });
   });
 }
@@ -1456,8 +2129,7 @@ async function planYieldCurve(
 async function planMacro(
   options: BackfillSourceDataOptions,
   dates: string[],
-  prisma: BackfillSourceDataPrisma,
-  domainBlocked: BackfillBlockedItem[]
+  prisma: BackfillSourceDataPrisma
 ): Promise<BackfillDomainPlan[]> {
   const indicatorIds = Object.keys(MACRO_INDICATORS);
   const existingRows = await prisma.macroIndicatorSnapshot.findMany({
@@ -1471,6 +2143,10 @@ async function planMacro(
       indicatorId: true,
       sourceId: true,
       status: true,
+      value: true,
+      unit: true,
+      sourceTime: true,
+      errorSummary: true,
     },
   });
   const existing = new Map(
@@ -1491,6 +2167,11 @@ async function planMacro(
               .sourceSeriesId,
           sourceId: row?.sourceId,
           status: row?.status,
+          sourceDate: row?.date,
+          value: row ? toJsonValue(row.value) : undefined,
+          unit: row?.unit ?? undefined,
+          sourceTime: toIsoString(row?.sourceTime),
+          errorSummary: row?.errorSummary ?? undefined,
         },
       } satisfies BackfillTarget;
     });
@@ -1499,9 +2180,8 @@ async function planMacro(
       domain: 'macro',
       date,
       scope: 'global',
-      sourceId: domainBlocked.length > 0 ? 'fred-not-configured' : 'fred-macro',
+      sourceId: 'fred-macro',
       targets,
-      blocked: domainBlocked,
     });
   });
 }
@@ -1581,6 +2261,12 @@ function getDisallowedExternalFactChangedTables(
     }
     if (factWriteSummary.indexSnapshotUpserts > 0) {
       allowedChangedTables.add('IndexSnapshot');
+    }
+    if (factWriteSummary.yieldCurveSnapshotUpserts > 0) {
+      allowedChangedTables.add('YieldCurveSnapshot');
+    }
+    if (factWriteSummary.macroIndicatorSnapshotUpserts > 0) {
+      allowedChangedTables.add('MacroIndicatorSnapshot');
     }
   }
 
@@ -1903,6 +2589,12 @@ function enumerateDates(dateFrom: string, dateTo: string): string[] {
   return dates;
 }
 
+function shiftIsoDate(date: string, deltaDays: number): string {
+  const shifted = new Date(`${date}T00:00:00.000Z`);
+  shifted.setUTCDate(shifted.getUTCDate() + deltaDays);
+  return shifted.toISOString().slice(0, 10);
+}
+
 function groupAssetCodesByDate(
   rows: PositionSnapshotRow[]
 ): Map<string, string[]> {
@@ -1951,6 +2643,10 @@ function yieldCurveKey(date: string, country: string, tenor: string): string {
   return `${date}:${country}:${tenor}`;
 }
 
+function yieldCurveCountryTenorKey(country: string, tenor: string): string {
+  return `${country}:${tenor}`;
+}
+
 function macroKey(date: string, indicatorId: string): string {
   return `${date}:${indicatorId}`;
 }
@@ -1975,21 +2671,49 @@ function toIsoString(
   return value;
 }
 
+const NOOP_SOURCE_GATEWAY_REPOSITORY: SourceGatewayRepository = {
+  async recordSourceRun() {
+    return undefined;
+  },
+  async upsertSourceHealth() {
+    return undefined;
+  },
+};
+
 async function loadDefaultDependencies(): Promise<BackfillSourceDataDependencies> {
   await import('../config/env');
   const { PrismaClient } = await import('@prisma/client');
-  const { fetchKline } = await import('../services/tencentApi');
+  const { createProductionYieldCurveGateway } = await import(
+    '../services/sourceGateway/adapters/yieldCurve'
+  );
+  const { runMacroProductionFetch } = await import(
+    '../services/sourceGateway/adapters/macro'
+  );
   const prisma = new PrismaClient({
     datasources: {
       db: { url: resolveSqliteDatabaseUrl(process.env.DATABASE_URL) },
     },
+  });
+  const yieldCurveGateway = createProductionYieldCurveGateway({
+    repository: NOOP_SOURCE_GATEWAY_REPOSITORY,
+    retryPolicy: { maxAttempts: 1 },
   });
 
   return {
     prisma: prisma as unknown as BackfillSourceDataPrisma,
     env: process.env,
     now: () => new Date(),
-    klineFetcher: fetchKline as BackfillKlineFetcher,
+    klineFetcher: async (...args) => {
+      const { fetchKline } = await import('../services/tencentApi');
+      return (fetchKline as BackfillKlineFetcher)(...args);
+    },
+    fxHistoryFetcher: fetchExchangeRatesHistory,
+    yieldCurveGateway,
+    macroProductionFetcher: (request) =>
+      runMacroProductionFetch(request, {
+        gatewayRepository: NOOP_SOURCE_GATEWAY_REPOSITORY,
+        retryPolicy: { maxAttempts: 1 },
+      }),
   };
 }
 

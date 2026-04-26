@@ -1,6 +1,11 @@
 import { toSourceError } from '../../errors';
 import { SourceAdapter, SourceAdapterContext, SourceResult } from '../../types';
-import { getMacroIndicatorDefinition } from './catalog';
+import {
+  getFrozenMacroIndicatorCatalog,
+  isFredMacroConfigured,
+  MACRO_FACT_DATE_SEMANTICS,
+  MACRO_SOURCE_TIME_SEMANTICS,
+} from './catalog';
 import { normalizeFredObservations } from './normalizer';
 import {
   FredObservationResponse,
@@ -39,7 +44,7 @@ export class FredMacroIndicatorAdapter
     request: MacroIndicatorRequest,
     context: SourceAdapterContext
   ): Promise<SourceResult<MacroIndicatorSnapshot[]>> {
-    if (!this.apiKey) {
+    if (!isFredMacroConfigured(this.apiKey)) {
       return {
         ok: false,
         error: toSourceError(
@@ -52,9 +57,9 @@ export class FredMacroIndicatorAdapter
     }
 
     const records: MacroIndicatorSnapshot[] = [];
+    const catalog = getFrozenMacroIndicatorCatalog(request.indicatorIds);
 
-    for (const indicatorId of request.indicatorIds) {
-      const definition = getMacroIndicatorDefinition(indicatorId);
+    for (const definition of catalog) {
       const url = this.buildUrl(definition.sourceSeriesId, request);
       const response = await this.fetcher(url, { signal: context.signal });
 
@@ -65,7 +70,7 @@ export class FredMacroIndicatorAdapter
           error: toSourceError(
             this.id,
             'SOURCE_HTTP_ERROR',
-            `FRED returned HTTP ${response.status} for ${indicatorId}`,
+            `FRED returned HTTP ${response.status} for ${definition.indicatorId}`,
             response.status >= 500,
             response.status
           ),
@@ -74,10 +79,10 @@ export class FredMacroIndicatorAdapter
 
       const payload = (await response.json()) as FredObservationResponse;
       const normalized = normalizeFredObservations(payload, {
-        indicatorId,
+        indicatorId: definition.indicatorId,
         sourceId: this.id,
         asOfDate: request.asOfDate,
-        maxStaleDays: request.maxStaleDays,
+        maxStaleDays: request.maxStaleDays ?? definition.defaultMaxStaleDays,
       });
 
       if (normalized.error) {
@@ -90,7 +95,13 @@ export class FredMacroIndicatorAdapter
     return {
       ok: true,
       data: records,
-      metadata: { source: 'fred', indicatorCount: request.indicatorIds.length },
+      metadata: {
+        source: 'fred',
+        indicatorCount: catalog.length,
+        indicatorIds: catalog.map((definition) => definition.indicatorId),
+        factDateSemantics: MACRO_FACT_DATE_SEMANTICS,
+        sourceTimeSemantics: MACRO_SOURCE_TIME_SEMANTICS,
+      },
     };
   }
 

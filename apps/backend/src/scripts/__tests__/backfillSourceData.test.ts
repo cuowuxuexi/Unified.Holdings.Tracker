@@ -18,9 +18,14 @@ function createPrismaMock(): jest.Mocked<BackfillSourceDataPrisma> {
       count: jest.fn().mockResolvedValue(0),
       upsert: jest.fn().mockResolvedValue({}),
     },
-    yieldCurveSnapshot: { count, findMany: jest.fn().mockResolvedValue([]) },
+    yieldCurveSnapshot: {
+      count,
+      upsert: jest.fn().mockResolvedValue({}),
+      findMany: jest.fn().mockResolvedValue([]),
+    },
     macroIndicatorSnapshot: {
       count: jest.fn().mockResolvedValue(0),
+      upsert: jest.fn().mockResolvedValue({}),
       findMany: jest.fn().mockResolvedValue([]),
     },
     exchangeRateSnapshot: {
@@ -208,25 +213,17 @@ describe('backfillSourceData runner', () => {
         }),
         expect.objectContaining({
           domain: 'yield_curve',
-          status: 'blocked',
+          status: 'planned',
           targetRows: 8,
         }),
         expect.objectContaining({
           domain: 'macro',
-          status: 'blocked',
+          status: 'planned',
           targetRows: 4,
         }),
       ])
     );
-    expect(report.blocked).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          domain: 'yield_curve',
-          code: 'not_configured',
-        }),
-        expect.objectContaining({ domain: 'macro', code: 'not_configured' }),
-      ])
-    );
+    expect(report.blocked).toEqual([]);
     expect(prisma.sourceRun.upsert).not.toHaveBeenCalled();
     expect(prisma.sourceHealth.upsert).not.toHaveBeenCalled();
     expect(prisma.exchangeRateSnapshot.upsert).not.toHaveBeenCalled();
@@ -292,8 +289,26 @@ describe('backfillSourceData runner', () => {
         failOnMissingConfig: true,
         allowIsolatedWrite: false,
         allowFactWrite: false,
+        allowSourceFetch: true,
       },
-      { prisma, env: {} }
+      {
+        prisma,
+        env: {},
+        macroProductionFetcher: jest.fn().mockResolvedValue({
+          ok: false,
+          sourceId: 'fred-macro',
+          requestedIndicatorIds: ['DXY'],
+          catalog: [],
+          records: [],
+          failClosed: true,
+          blocked: {
+            code: 'SOURCE_NOT_CONFIGURED',
+            message:
+              'FRED_API_KEY is not configured; macro production fetch is fail-closed.',
+          },
+          persisted: { attempted: false, rowsWritten: 0 },
+        }),
+      }
     );
 
     expect(report.status).toBe('blocked');
@@ -342,7 +357,7 @@ describe('backfillSourceData runner', () => {
     );
 
     expect(report.mode).toBe('isolated-write');
-    expect(report.status).toBe('isolated_write_completed_with_blocks');
+    expect(report.status).toBe('isolated_write_completed');
     expect(report.writeAttempted).toBe(true);
     expect(report.auditWriteSummary).toEqual({
       sourceRunUpserts: 2,
@@ -1013,12 +1028,25 @@ describe('backfillSourceData runner', () => {
     expect(getBackfillSourceDataExitCode(report)).toBe(0);
   });
 
-  it('does not fetch or synthesize fx history when source fetch is enabled', async () => {
+  it('hydrates missing fx targets from the Frankfurter history seam when source fetch is enabled', async () => {
     const prisma = createPrismaMock();
     (prisma.exchangeRateSnapshot.findMany as jest.Mock).mockResolvedValueOnce(
       []
     );
-    const klineFetcher = jest.fn().mockResolvedValue([]);
+    const fxHistoryFetcher = jest.fn().mockResolvedValue([
+      {
+        date: '2026-04-24',
+        pair: 'USD-CNY',
+        rate: 7.2468,
+        timestamp: '2026-04-24T12:00:00.000Z',
+      },
+      {
+        date: '2026-04-24',
+        pair: 'HKD-CNY',
+        rate: 0.9234,
+        timestamp: '2026-04-24T12:00:00.000Z',
+      },
+    ]);
 
     const report = await runBackfillSourceData(
       {
@@ -1041,21 +1069,34 @@ describe('backfillSourceData runner', () => {
           DATABASE_URL:
             'file:/mnt/d/cxks/任务工作台/T0425-UHT投资数据中台优化提案/scratch/fx-no-fetch.db',
         },
-        klineFetcher,
+        fxHistoryFetcher,
       }
     );
 
-    expect(klineFetcher).not.toHaveBeenCalled();
-    expect(prisma.exchangeRateSnapshot.upsert).not.toHaveBeenCalled();
+    expect(fxHistoryFetcher).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pairs: ['USD-CNY', 'HKD-CNY'],
+        date: '2026-04-24',
+        timeoutMs: 5000,
+      })
+    );
+    expect(report.plans).toEqual([
+      expect.objectContaining({
+        domain: 'fx',
+        sourceId: 'frankfurter.fx.v1',
+        existingRows: 2,
+        missingRows: 0,
+      }),
+    ]);
     expect(report.factWriteSummary).toEqual(
       expect.objectContaining({
         enabled: true,
-        totalUpserts: 0,
-        exchangeRateSnapshotUpserts: 0,
-        skipped: 2,
-        skipReasons: { target_missing_source_value: 2 },
+        totalUpserts: 2,
+        exchangeRateSnapshotUpserts: 2,
+        skipped: 0,
       })
     );
+    expect(prisma.exchangeRateSnapshot.upsert).toHaveBeenCalledTimes(2);
   });
 
   it('does not write fetched source facts without --allow-fact-write', async () => {
@@ -1115,7 +1156,26 @@ describe('backfillSourceData runner', () => {
 
   it('keeps yield_curve and macro blocked/not_configured and outside fact writes', async () => {
     const prisma = createPrismaMock();
-    const klineFetcher = jest.fn().mockResolvedValue([]);
+    const yieldCurveGateway = {
+      execute: jest.fn().mockRejectedValue({
+        code: 'SOURCE_NOT_CONFIGURED',
+        message: 'Python runtime dependency missing: akshare',
+      }),
+    };
+    const macroProductionFetcher = jest.fn().mockResolvedValue({
+      ok: false,
+      sourceId: 'fred-macro',
+      requestedIndicatorIds: ['DXY', 'US_CPI', 'US_PMI', 'US_POLICY_RATE'],
+      catalog: [],
+      records: [],
+      failClosed: true,
+      blocked: {
+        code: 'SOURCE_NOT_CONFIGURED',
+        message:
+          'FRED_API_KEY is not configured; macro production fetch is fail-closed.',
+      },
+      persisted: { attempted: false, rowsWritten: 0 },
+    });
     const report = await runBackfillSourceData(
       {
         dryRun: true,
@@ -1137,7 +1197,8 @@ describe('backfillSourceData runner', () => {
           DATABASE_URL:
             'file:/mnt/d/cxks/任务工作台/T0425-UHT投资数据中台优化提案/scratch/blocked-domains.db',
         },
-        klineFetcher,
+        yieldCurveGateway,
+        macroProductionFetcher,
       }
     );
 
@@ -1156,7 +1217,7 @@ describe('backfillSourceData runner', () => {
         enabled: true,
         totalUpserts: 0,
         skipped: 12,
-        skipReasons: { domain_not_configured_for_fact_write: 12 },
+        skipReasons: { plan_blocked: 12 },
       })
     );
     expect(prisma.sourceRun.upsert).toHaveBeenCalledTimes(2);
@@ -1164,7 +1225,17 @@ describe('backfillSourceData runner', () => {
     expect(prisma.exchangeRateSnapshot.upsert).not.toHaveBeenCalled();
     expect(prisma.quoteSnapshot.upsert).not.toHaveBeenCalled();
     expect(prisma.indexSnapshot.upsert).not.toHaveBeenCalled();
-    expect(klineFetcher).not.toHaveBeenCalled();
+    expect(prisma.yieldCurveSnapshot.upsert).not.toHaveBeenCalled();
+    expect(prisma.macroIndicatorSnapshot.upsert).not.toHaveBeenCalled();
+    expect(yieldCurveGateway.execute).toHaveBeenCalledWith({
+      asOfDate: '2026-04-24',
+    });
+    expect(macroProductionFetcher).toHaveBeenCalledWith({
+      indicatorIds: ['DXY', 'US_CPI', 'US_PMI', 'US_POLICY_RATE'],
+      dateFrom: '2026-01-24',
+      dateTo: '2026-04-24',
+      asOfDate: '2026-04-24',
+    });
     expect(getBackfillSourceDataExitCode(report)).toBe(0);
   });
 

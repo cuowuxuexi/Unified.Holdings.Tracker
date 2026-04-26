@@ -1,11 +1,16 @@
 import { SourceGatewayRepository } from '@uht/domain/repositories';
-import { SourceGateway } from '../../..';
+import { SourceGateway, SourceGatewayFailureError } from '../../..';
 import { createYieldCurveAdapter } from '../adapter';
+import {
+  buildYieldCurveBridgeRequest,
+  createAkshareYieldCurveFetcher,
+} from '../akshareFetcher';
 import {
   calculateBasisPointChanges,
   calculateCnUsTenYearSpreadBp,
   calculateTenYearTwoYearSpreadBp,
 } from '../helpers';
+import { createProductionYieldCurveGateway } from '../gateway';
 import {
   normalizeYieldCurveResponse,
   normalizeYieldCurveSourceFailure,
@@ -24,18 +29,37 @@ function createRepository(): jest.Mocked<SourceGatewayRepository> {
 }
 
 describe('yieldCurve adapter', () => {
-  it('normalizes successful CN/US 2Y,5Y,10Y,30Y records', async () => {
-    const adapter = createYieldCurveAdapter({
-      sourceId: 'fixture-yield-source',
-      fetcher: jest
-        .fn()
-        .mockResolvedValue({ ok: true, data: completeYieldCurveFixture }),
+  it('builds the production bridge request for CN/US 2Y,5Y,10Y,30Y history fetches', async () => {
+    const runner = jest
+      .fn()
+      .mockResolvedValue({ ok: true, data: completeYieldCurveFixture });
+    const fetcher = createAkshareYieldCurveFetcher({
+      lookbackDays: 9,
+      pythonCommand: 'python3',
+      runner,
     });
+
+    await fetcher(
+      { asOfDate: '2026-04-25' },
+      { signal: new AbortController().signal }
+    );
+
+    expect(runner).toHaveBeenCalledWith(
+      buildYieldCurveBridgeRequest({ asOfDate: '2026-04-25' }, 9),
+      expect.objectContaining({ pythonCommand: 'python3' })
+    );
+  });
+
+  it('normalizes successful CN/US 2Y,5Y,10Y,30Y records through the production gateway seam', async () => {
     const repository = createRepository();
-    const gateway = new SourceGateway({
-      operation: 'yield-curve',
-      adapters: [adapter],
+    const gateway = createProductionYieldCurveGateway({
       repository,
+      sourceId: 'fixture-yield-source',
+      fetcherOptions: {
+        runner: jest
+          .fn()
+          .mockResolvedValue({ ok: true, data: completeYieldCurveFixture }),
+      },
       timeoutMs: 100,
     });
 
@@ -178,5 +202,47 @@ describe('yieldCurve adapter', () => {
         prior30dYieldPercent: 4.0,
       })
     ).toEqual({ change7dBp: 11, change30dBp: 31 });
+  });
+
+  it('fails closed when the production bridge dependency is missing', async () => {
+    const repository = createRepository();
+    const gateway = createProductionYieldCurveGateway({
+      repository,
+      fetcherOptions: {
+        runner: jest.fn().mockResolvedValue({
+          ok: false,
+          errorCode: 'SOURCE_NOT_CONFIGURED',
+          error: 'Python runtime dependency missing: akshare',
+          retryable: false,
+        }),
+      },
+      timeoutMs: 100,
+    });
+
+    const execution = gateway.execute({ asOfDate: '2026-04-25' });
+
+    await expect(execution).rejects.toBeInstanceOf(SourceGatewayFailureError);
+    await expect(execution).rejects.toMatchObject({
+      errors: [
+        expect.objectContaining({
+          code: 'SOURCE_NOT_CONFIGURED',
+          message: 'Python runtime dependency missing: akshare',
+        }),
+      ],
+    });
+    expect(repository.recordSourceRun).toHaveBeenCalledWith(
+      expect.objectContaining({
+        operation: 'yield-curve',
+        status: 'failed',
+        errorCode: 'SOURCE_NOT_CONFIGURED',
+      })
+    );
+    expect(repository.upsertSourceHealth).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sourceId: 'akshare-yield-curve',
+        status: 'unhealthy',
+        lastErrorCode: 'SOURCE_NOT_CONFIGURED',
+      })
+    );
   });
 });

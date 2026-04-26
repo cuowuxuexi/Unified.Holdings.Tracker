@@ -16,6 +16,8 @@ export interface FxRateRecord {
 
 export interface FxRateRequest {
   date?: string;
+  dateFrom?: string;
+  dateTo?: string;
   pairs?: FxPair[];
 }
 

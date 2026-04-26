@@ -1,11 +1,15 @@
-// backend/src/services/currencyService.ts
-
 import axios from 'axios';
 import schedule from 'node-schedule';
 import { dataService } from '../data/data-service';
 
 // 汇率数据文件路径
 const RATES_FILE = 'market/rates.json';
+const FRANKFURTER_API_BASE = 'https://api.frankfurter.dev/v1';
+const FRANKFURTER_TIMEOUT_MS = 10_000;
+
+const PAIRS = ['USD-CNY', 'HKD-CNY'] as const;
+
+export type SupportedFxPair = (typeof PAIRS)[number];
 
 type RateInfo = {
   rate: number;
@@ -16,40 +20,216 @@ type RateCache = {
   [pair: string]: RateInfo | null;
 };
 
-const PAIRS = ['USD-CNY', 'HKD-CNY'];
+export type HistoricalRateRecord = {
+  date: string;
+  pair: SupportedFxPair;
+  rate: number | null;
+  timestamp: string;
+};
+
+export type FrankfurterHttpClient = (input: {
+  url: string;
+  signal?: AbortSignal;
+  timeoutMs: number;
+}) => Promise<unknown>;
+
+export type FetchExchangeRatesHistoryRequest = {
+  pairs?: readonly SupportedFxPair[];
+  date?: string;
+  dateFrom?: string;
+  dateTo?: string;
+  signal?: AbortSignal;
+  timeoutMs?: number;
+  now?: () => Date;
+  client?: FrankfurterHttpClient;
+};
 
 let rateCache: RateCache = {};
+
+const defaultFrankfurterHttpClient: FrankfurterHttpClient = async ({
+  url,
+  signal,
+  timeoutMs,
+}) => {
+  const response = await axios.get(url, {
+    signal,
+    timeout: timeoutMs,
+  });
+  return response.data;
+};
 
 /**
  * 从Frankfurter API获取汇率数据
  * 支持USD-CNY和HKD-CNY
- * API文档: https://www.frankfurter.app/docs/
- * 示例: https://api.frankfurter.app/latest?from=USD&to=CNY
+ * API文档: https://frankfurter.dev/v1/
+ * 示例:
+ * - latest: https://api.frankfurter.dev/v1/latest?base=USD&symbols=CNY
+ * - exact-date: https://api.frankfurter.dev/v1/2026-04-24?base=USD&symbols=CNY
+ * - date-range: https://api.frankfurter.dev/v1/2026-04-23..2026-04-24?base=USD&symbols=CNY
  */
 async function fetchExternalRate(pair: string): Promise<number | null> {
   try {
-    const [from, to] = pair.split('-');
-    // 仅支持USD-CNY和HKD-CNY
-    if (!((from === 'USD' || from === 'HKD') && to === 'CNY')) {
-      console.warn(`[fetchExternalRate] 不支持的货币对: ${pair}`);
-      return null;
-    }
-    const url = `https://api.frankfurter.app/latest?from=${from}&to=${to}`;
-    const response = await axios.get(url);
-    if (
-      response.data &&
-      response.data.rates &&
-      typeof response.data.rates[to] === 'number'
-    ) {
-      return response.data.rates[to];
-    } else {
-      console.error(`[fetchExternalRate] API响应格式异常:`, response.data);
-      return null;
-    }
+    const [record] = await fetchExchangeRatesHistory({
+      pairs: [toSupportedPair(pair)],
+    });
+    return record?.rate ?? null;
   } catch (error) {
     console.error(`[fetchExternalRate] 获取${pair}汇率失败:`, error);
     return null;
   }
+}
+
+export async function fetchExchangeRateOnDate(
+  pair: SupportedFxPair,
+  date: string,
+  request: Omit<FetchExchangeRatesHistoryRequest, 'pairs' | 'date'> = {}
+): Promise<HistoricalRateRecord | null> {
+  const [record] = await fetchExchangeRatesHistory({
+    ...request,
+    pairs: [pair],
+    date,
+  });
+  return record ?? null;
+}
+
+export async function fetchExchangeRatesHistory(
+  request: FetchExchangeRatesHistoryRequest = {}
+): Promise<HistoricalRateRecord[]> {
+  const pairs = request.pairs?.length
+    ? request.pairs
+    : ([...PAIRS] as SupportedFxPair[]);
+  const timestamp = (request.now ?? (() => new Date()))().toISOString();
+  const client = request.client ?? defaultFrankfurterHttpClient;
+  const timeoutMs = request.timeoutMs ?? FRANKFURTER_TIMEOUT_MS;
+  const path = buildFrankfurterPath(request);
+
+  const payloads = await Promise.all(
+    pairs.map(async (pair) => {
+      const { base, quote } = splitPair(pair);
+      const payload = await client({
+        url: `${FRANKFURTER_API_BASE}/${path}?base=${encodeURIComponent(base)}&symbols=${encodeURIComponent(quote)}`,
+        signal: request.signal,
+        timeoutMs,
+      });
+
+      return parseFrankfurterPayload(pair, quote, payload, timestamp);
+    })
+  );
+
+  return payloads.flat().sort(compareHistoricalRateRecords);
+}
+
+function splitPair(pair: SupportedFxPair): { base: string; quote: string } {
+  const [base, quote] = pair.split('-');
+  if (!((base === 'USD' || base === 'HKD') && quote === 'CNY')) {
+    throw new Error(`Unsupported FX pair: ${pair}`);
+  }
+  return { base, quote };
+}
+
+function toSupportedPair(pair: string): SupportedFxPair {
+  if (pair === 'USD-CNY' || pair === 'HKD-CNY') {
+    return pair;
+  }
+  throw new Error(`Unsupported FX pair: ${pair}`);
+}
+
+function buildFrankfurterPath(
+  request: Pick<
+    FetchExchangeRatesHistoryRequest,
+    'date' | 'dateFrom' | 'dateTo'
+  >
+): string {
+  if (request.date && (request.dateFrom || request.dateTo)) {
+    throw new Error(
+      'FX history request must use either date or dateFrom/dateTo, not both'
+    );
+  }
+
+  if (request.date) {
+    return request.date;
+  }
+
+  if (request.dateFrom || request.dateTo) {
+    if (!request.dateFrom || !request.dateTo) {
+      throw new Error(
+        'FX history date-range requests require both dateFrom and dateTo'
+      );
+    }
+    return `${request.dateFrom}..${request.dateTo}`;
+  }
+
+  return 'latest';
+}
+
+function parseFrankfurterPayload(
+  pair: SupportedFxPair,
+  quote: string,
+  payload: unknown,
+  timestamp: string
+): HistoricalRateRecord[] {
+  if (!payload || typeof payload !== 'object') {
+    return [];
+  }
+
+  const data = payload as {
+    date?: string;
+    rates?: Record<string, unknown>;
+  };
+
+  const rates = data.rates;
+  if (!rates || typeof rates !== 'object') {
+    return [];
+  }
+
+  const firstValue = Object.values(rates)[0];
+  if (
+    firstValue &&
+    typeof firstValue === 'object' &&
+    !Array.isArray(firstValue)
+  ) {
+    return Object.entries(rates).map(([date, quoteRates]) => ({
+      date,
+      pair,
+      rate: parseRate((quoteRates as Record<string, unknown>)[quote]),
+      timestamp,
+    }));
+  }
+
+  if (!data.date) {
+    return [];
+  }
+
+  return [
+    {
+      date: data.date,
+      pair,
+      rate: parseRate(rates[quote]),
+      timestamp,
+    },
+  ];
+}
+
+function parseRate(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isFinite(value) && value > 0 ? value : null;
+  }
+
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  return null;
+}
+
+function compareHistoricalRateRecords(
+  left: HistoricalRateRecord,
+  right: HistoricalRateRecord
+): number {
+  return (
+    left.date.localeCompare(right.date) || left.pair.localeCompare(right.pair)
+  );
 }
 
 /**
@@ -194,4 +374,6 @@ export default {
   getExchangeRate,
   getExchangeRateInfo,
   getExchangeRateForAssetToCNY,
+  fetchExchangeRateOnDate,
+  fetchExchangeRatesHistory,
 };

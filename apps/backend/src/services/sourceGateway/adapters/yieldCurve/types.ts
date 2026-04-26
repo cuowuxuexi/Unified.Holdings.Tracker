@@ -1,4 +1,5 @@
 import { M2SnapshotStatus } from '@uht/domain/repositories';
+import { SourceGatewayErrorCode } from '../../types';
 
 export type YieldCurveCountry = 'CN' | 'US';
 export type YieldCurveTenor = '2Y' | '5Y' | '10Y' | '30Y';
@@ -47,11 +48,25 @@ export interface YieldCurveFetcherResponse {
   data?: RawYieldCurveResponse;
   statusCode?: number;
   error?: string;
+  errorCode?: SourceGatewayErrorCode;
+  retryable?: boolean;
 }
 
 export type YieldCurveFetcher = (
   request: YieldCurveRequest,
   init: { signal: AbortSignal }
+) => Promise<YieldCurveFetcherResponse>;
+
+export interface YieldCurveBridgeRequest {
+  asOfDate: string;
+  startDate: string;
+  countries: YieldCurveCountry[];
+  tenors: YieldCurveTenor[];
+}
+
+export type YieldCurveBridgeRunner = (
+  request: YieldCurveBridgeRequest,
+  init: { signal: AbortSignal; pythonCommand: string }
 ) => Promise<YieldCurveFetcherResponse>;
 
 export interface YieldCurveSpreadInput {

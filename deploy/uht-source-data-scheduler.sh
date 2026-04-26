@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
-# UHT M8.4 market/index daily source-data scheduler wrapper.
+# UHT source-data scheduler wrapper.
 # This host-side wrapper intentionally uses the same one-off container write
 # gate that M8.3 verified: docker compose run --rm --no-deps, tracker-data
 # mounted at /fact-write, DATABASE_URL=file:/fact-write/portfolio.db,
 # UHT_BACKFILL_ISOLATED_ROOT=/fact-write, and --confirm-isolated-db portfolio.db.
+# Default live domains stay on the proven market_quote,index lane; any wider
+# domain set must be an explicit operator opt-in via UHT_SCHEDULER_DOMAINS.
 
 DEFAULT_PORTFOLIO_ID="a3c29c28-7a1f-402d-a36d-ca85f5f8276a"
 DEFAULT_LOOKBACK_DAYS="5"
@@ -30,7 +32,7 @@ BACKUP_ROOT="${UHT_SCHEDULER_BACKUP_ROOT:-${DEFAULT_BACKUP_ROOT}}"
 DB_VOLUME="${UHT_SCHEDULER_DB_VOLUME:-${DEFAULT_DB_VOLUME}}"
 FACT_MOUNT="${UHT_SCHEDULER_FACT_MOUNT:-${DEFAULT_FACT_MOUNT}}"
 DB_NAME="${UHT_SCHEDULER_DB_NAME:-${DEFAULT_DB_NAME}}"
-DOMAINS="${DEFAULT_ALLOWED_DOMAINS}"
+DOMAINS="${UHT_SCHEDULER_DOMAINS:-${DEFAULT_ALLOWED_DOMAINS}}"
 COMPOSE_FILE="${UHT_SCHEDULER_COMPOSE_FILE:-${REPO_ROOT}/docker-compose.yml}"
 HOST_DB_PATH="${UHT_SCHEDULER_HOST_DB_PATH:-/var/lib/docker/volumes/${DB_VOLUME}/_data/${DB_NAME}}"
 DRY_RUN_ONLY="${UHT_SCHEDULER_DRY_RUN_ONLY:-0}"
@@ -68,6 +70,34 @@ validate_date() {
   date -d "${value}" +%F >/dev/null 2>&1 || fail "${name} is not a valid calendar date: ${value}"
 }
 
+normalize_domains() {
+  local raw="$1"
+  python3 - "${raw}" <<'PY'
+import sys
+
+allowed = {'fx', 'market_quote', 'index', 'yield_curve', 'macro'}
+items = [item.strip() for item in sys.argv[1].split(',') if item.strip()]
+if not items:
+    print('UHT_SCHEDULER_DOMAINS must include at least one domain', file=sys.stderr)
+    sys.exit(1)
+
+normalized = []
+invalid = []
+for item in items:
+    if item not in allowed:
+        invalid.append(item)
+        continue
+    if item not in normalized:
+        normalized.append(item)
+
+if invalid:
+    print(f"UHT_SCHEDULER_DOMAINS includes unsupported domain(s): {', '.join(invalid)}", file=sys.stderr)
+    sys.exit(1)
+
+print(','.join(normalized))
+PY
+}
+
 calculate_date_from() {
   local date_to="$1"
   local lookback_days="$2"
@@ -98,6 +128,7 @@ init_inputs() {
   [[ "${DB_NAME}" == "portfolio.db" ]] || fail "UHT_SCHEDULER_DB_NAME must remain portfolio.db for the confirmed write gate"
   [[ "${FACT_MOUNT}" == "/fact-write" ]] || fail "UHT_SCHEDULER_FACT_MOUNT must remain /fact-write for the confirmed write gate"
   [[ -f "${COMPOSE_FILE}" ]] || fail "compose file not found: ${COMPOSE_FILE}"
+  DOMAINS="$(normalize_domains "${DOMAINS}")" || fail "invalid UHT_SCHEDULER_DOMAINS: ${DOMAINS}"
 }
 
 compose_base() {
@@ -197,11 +228,21 @@ PY
 
 assert_allowed_write_count_diff() {
   local diff_file="$1"
-  python3 - "${diff_file}" <<'PY'
+  local expected_domains="$2"
+  python3 - "${diff_file}" "${expected_domains}" <<'PY'
 import json
 import sys
 
-allowed = {'SourceRun', 'SourceHealth', 'QuoteSnapshot', 'IndexSnapshot'}
+allowed_by_domain = {
+    'fx': 'ExchangeRateSnapshot',
+    'market_quote': 'QuoteSnapshot',
+    'index': 'IndexSnapshot',
+    'yield_curve': 'YieldCurveSnapshot',
+    'macro': 'MacroIndicatorSnapshot',
+}
+domains = [item.strip() for item in sys.argv[2].split(',') if item.strip()]
+allowed = {'SourceRun', 'SourceHealth'}
+allowed.update(allowed_by_domain[domain] for domain in domains)
 with open(sys.argv[1], encoding='utf-8') as fh:
     diff = json.load(fh)
 disallowed = {key: value for key, value in diff.items() if key not in allowed}
@@ -214,19 +255,21 @@ PY
 
 assert_dry_run_report_safe() {
   local report_file="$1"
-  python3 - "${report_file}" <<'PY'
+  local expected_domains="$2"
+  python3 - "${report_file}" "${expected_domains}" <<'PY'
 import json
 import sys
 
 with open(sys.argv[1], encoding='utf-8') as fh:
     report = json.load(fh)
+expected_domains = [item.strip() for item in sys.argv[2].split(',') if item.strip()]
 
 errors = []
 if report.get('mode') != 'dry-run':
     errors.append(f"mode={report.get('mode')!r}")
 if report.get('writeAttempted') is not False:
     errors.append(f"writeAttempted={report.get('writeAttempted')!r}")
-if report.get('domains') != ['market_quote', 'index']:
+if report.get('domains') != expected_domains:
     errors.append(f"domains={report.get('domains')!r}")
 verification = report.get('countVerification') or {}
 if verification.get('unchanged') is not True:
@@ -242,18 +285,28 @@ PY
 
 assert_write_report_safe() {
   local report_file="$1"
-  python3 - "${report_file}" <<'PY'
+  local expected_domains="$2"
+  python3 - "${report_file}" "${expected_domains}" <<'PY'
 import json
 import sys
 
-allowed = {'SourceRun', 'SourceHealth', 'QuoteSnapshot', 'IndexSnapshot'}
+allowed_by_domain = {
+    'fx': 'ExchangeRateSnapshot',
+    'market_quote': 'QuoteSnapshot',
+    'index': 'IndexSnapshot',
+    'yield_curve': 'YieldCurveSnapshot',
+    'macro': 'MacroIndicatorSnapshot',
+}
+expected_domains = [item.strip() for item in sys.argv[2].split(',') if item.strip()]
+allowed = {'SourceRun', 'SourceHealth'}
+allowed.update(allowed_by_domain[domain] for domain in expected_domains)
 with open(sys.argv[1], encoding='utf-8') as fh:
     report = json.load(fh)
 
 errors = []
 if report.get('mode') != 'isolated-write':
     errors.append(f"mode={report.get('mode')!r}")
-if report.get('domains') != ['market_quote', 'index']:
+if report.get('domains') != expected_domains:
     errors.append(f"domains={report.get('domains')!r}")
 if report.get('writeAttempted') is not True:
     errors.append(f"writeAttempted={report.get('writeAttempted')!r}")
@@ -377,7 +430,7 @@ main() {
 
   collect_counts "${RUN_DIR}/pre-dry-run-counts.json" "${RUN_DIR}/pre-dry-run-counts.stderr.log"
   run_backfill dry-run --dry-run
-  assert_dry_run_report_safe "${RUN_DIR}/dry-run.report.json"
+  assert_dry_run_report_safe "${RUN_DIR}/dry-run.report.json" "${DOMAINS}"
   collect_counts "${RUN_DIR}/post-dry-run-counts.json" "${RUN_DIR}/post-dry-run-counts.stderr.log"
   write_count_diff "${RUN_DIR}/pre-dry-run-counts.json" "${RUN_DIR}/post-dry-run-counts.json" "${RUN_DIR}/dry-run-count-diff.json"
   assert_empty_count_diff "${RUN_DIR}/dry-run-count-diff.json"
@@ -392,11 +445,11 @@ main() {
   cp "${RUN_DIR}/post-dry-run-counts.json" "${RUN_DIR}/pre-write-counts.json"
   backup_database
   run_backfill write --write --allow-isolated-write --allow-fact-write --confirm-isolated-db "${DB_NAME}"
-  assert_write_report_safe "${RUN_DIR}/write.report.json"
+  assert_write_report_safe "${RUN_DIR}/write.report.json" "${DOMAINS}"
   collect_counts "${RUN_DIR}/post-write-counts.json" "${RUN_DIR}/post-write-counts.stderr.log"
   write_count_diff "${RUN_DIR}/pre-write-counts.json" "${RUN_DIR}/post-write-counts.json" "${RUN_DIR}/write-count-diff.json"
   cp "${RUN_DIR}/write-count-diff.json" "${RUN_DIR}/count-diff.json"
-  assert_allowed_write_count_diff "${RUN_DIR}/write-count-diff.json" >"${RUN_DIR}/allowed-count-diff.json"
+  assert_allowed_write_count_diff "${RUN_DIR}/write-count-diff.json" "${DOMAINS}" >"${RUN_DIR}/allowed-count-diff.json"
 
   log "write guard passed: only SourceRun/SourceHealth/QuoteSnapshot/IndexSnapshot counts changed"
   log "UHT source-data scheduler finished successfully"
