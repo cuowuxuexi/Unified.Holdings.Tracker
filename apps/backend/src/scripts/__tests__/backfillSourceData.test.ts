@@ -96,16 +96,18 @@ describe('backfillSourceData runner', () => {
       failOnMissingConfig: false,
       allowIsolatedWrite: false,
       allowFactWrite: false,
+      allowSourceFetch: false,
       confirmIsolatedDb: undefined,
     });
   });
 
-  it('parses the explicit fact write CLI flag independently from the isolated write gate', () => {
+  it('parses the explicit fact write and source fetch CLI flags independently from the isolated write gate', () => {
     expect(
       parseBackfillSourceDataArgs([
         '--write',
         '--allow-isolated-write',
         '--allow-fact-write',
+        '--allow-source-fetch',
         '--confirm-isolated-db',
         'copy.db',
         '--portfolio-id',
@@ -122,6 +124,7 @@ describe('backfillSourceData runner', () => {
         write: true,
         allowIsolatedWrite: true,
         allowFactWrite: true,
+        allowSourceFetch: true,
         confirmIsolatedDb: 'copy.db',
       })
     );
@@ -129,6 +132,16 @@ describe('backfillSourceData runner', () => {
 
   it('builds an auditable dry-run report without changing guarded counts', async () => {
     const prisma = createPrismaMock();
+    const klineFetcher = jest.fn().mockResolvedValue([
+      {
+        date: '2026-04-24',
+        open: 10,
+        high: 12,
+        low: 9,
+        close: 11,
+        volume: 100,
+      },
+    ]);
     const report = await runBackfillSourceData(
       {
         dryRun: true,
@@ -146,6 +159,7 @@ describe('backfillSourceData runner', () => {
         prisma,
         env: {},
         now: () => new Date('2026-04-26T01:00:00.000Z'),
+        klineFetcher,
       }
     );
 
@@ -218,6 +232,7 @@ describe('backfillSourceData runner', () => {
     expect(prisma.exchangeRateSnapshot.upsert).not.toHaveBeenCalled();
     expect(prisma.quoteSnapshot.upsert).not.toHaveBeenCalled();
     expect(prisma.indexSnapshot.upsert).not.toHaveBeenCalled();
+    expect(klineFetcher).not.toHaveBeenCalled();
     expect(getBackfillSourceDataExitCode(report)).toBe(0);
   });
 
@@ -762,8 +777,345 @@ describe('backfillSourceData runner', () => {
     expect(prisma.indexSnapshot.upsert).not.toHaveBeenCalled();
   });
 
+  it('fetches a missing market quote target from Tencent daily kline when explicitly allowed', async () => {
+    const prisma = createPrismaMock();
+    (prisma.positionSnapshot.findMany as jest.Mock).mockResolvedValueOnce([
+      { date: '2026-04-24', assetCode: 'sh600276' },
+    ]);
+    const klineFetcher = jest.fn().mockResolvedValue([
+      {
+        date: '2026-04-24',
+        open: 40,
+        high: 43,
+        low: 39,
+        close: 42.5,
+        volume: 1234,
+      },
+    ]);
+
+    const report = await runBackfillSourceData(
+      {
+        dryRun: true,
+        write: true,
+        portfolioId: 'portfolio-2026',
+        dateFrom: '2026-04-24',
+        dateTo: '2026-04-24',
+        domains: ['market_quote'],
+        maxRows: 64,
+        failOnMissingConfig: false,
+        allowIsolatedWrite: true,
+        allowFactWrite: true,
+        allowSourceFetch: true,
+        confirmIsolatedDb: 'market-kline.db',
+      },
+      {
+        prisma,
+        env: {
+          DATABASE_URL:
+            'file:/mnt/d/cxks/任务工作台/T0425-UHT投资数据中台优化提案/scratch/market-kline.db',
+        },
+        klineFetcher,
+      }
+    );
+
+    expect(klineFetcher).toHaveBeenCalledWith(
+      'sh600276',
+      'daily',
+      '2026-04-24',
+      '2026-04-24',
+      'qfq',
+      1
+    );
+    expect(report.plans).toEqual([
+      expect.objectContaining({
+        domain: 'market_quote',
+        sourceId: 'tencent.kline',
+        existingRows: 1,
+        missingRows: 0,
+      }),
+    ]);
+    expect(report.factWriteSummary).toEqual(
+      expect.objectContaining({
+        enabled: true,
+        totalUpserts: 1,
+        quoteSnapshotUpserts: 1,
+        skipped: 0,
+      })
+    );
+    expect(prisma.quoteSnapshot.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          assetCode_date: { assetCode: 'sh600276', date: '2026-04-24' },
+        },
+        create: expect.objectContaining({
+          currentPrice: 42.5,
+          openPrice: 40,
+          highPrice: 43,
+          lowPrice: 39,
+          volume: 1234,
+          timestamp: new Date('2026-04-24T00:00:00.000Z'),
+        }),
+        update: expect.objectContaining({
+          currentPrice: 42.5,
+          openPrice: 40,
+          highPrice: 43,
+          lowPrice: 39,
+          volume: 1234,
+          timestamp: new Date('2026-04-24T00:00:00.000Z'),
+        }),
+      })
+    );
+    expect(getBackfillSourceDataExitCode(report)).toBe(0);
+  });
+
+  it('fetches a missing index target from Tencent daily kline when explicitly allowed', async () => {
+    const prisma = createPrismaMock();
+    const klineFetcher = jest.fn().mockImplementation((code: string) =>
+      Promise.resolve(
+        code === 'sh000001'
+          ? [
+              {
+                date: '2026-04-24',
+                open: 3100,
+                high: 3120,
+                low: 3090,
+                close: 3111.5,
+                volume: 5678,
+              },
+            ]
+          : []
+      )
+    );
+
+    const report = await runBackfillSourceData(
+      {
+        dryRun: true,
+        write: true,
+        portfolioId: 'portfolio-2026',
+        dateFrom: '2026-04-24',
+        dateTo: '2026-04-24',
+        domains: ['index'],
+        maxRows: 64,
+        failOnMissingConfig: false,
+        allowIsolatedWrite: true,
+        allowFactWrite: true,
+        allowSourceFetch: true,
+        confirmIsolatedDb: 'index-kline.db',
+      },
+      {
+        prisma,
+        env: {
+          DATABASE_URL:
+            'file:/mnt/d/cxks/任务工作台/T0425-UHT投资数据中台优化提案/scratch/index-kline.db',
+        },
+        klineFetcher,
+      }
+    );
+
+    expect(klineFetcher).toHaveBeenCalledTimes(6);
+    expect(klineFetcher).toHaveBeenCalledWith(
+      'sh000001',
+      'daily',
+      '2026-04-24',
+      '2026-04-24',
+      'qfq',
+      1
+    );
+    expect(report.factWriteSummary).toEqual(
+      expect.objectContaining({
+        enabled: true,
+        totalUpserts: 1,
+        indexSnapshotUpserts: 1,
+        skipped: 5,
+        skipReasons: { target_missing_source_value: 5 },
+      })
+    );
+    expect(prisma.indexSnapshot.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          date_indexCode: { date: '2026-04-24', indexCode: 'sh000001' },
+        },
+        create: expect.objectContaining({
+          name: '上证指数',
+          currentPrice: 3111.5,
+        }),
+        update: expect.objectContaining({
+          name: '上证指数',
+          currentPrice: 3111.5,
+        }),
+      })
+    );
+    expect(getBackfillSourceDataExitCode(report)).toBe(0);
+  });
+
+  it('skips with warning when kline has no target-date point', async () => {
+    const prisma = createPrismaMock();
+    (prisma.positionSnapshot.findMany as jest.Mock).mockResolvedValueOnce([
+      { date: '2026-04-24', assetCode: 'sh600276' },
+    ]);
+    const klineFetcher = jest.fn().mockResolvedValue([
+      {
+        date: '2026-04-23',
+        open: 40,
+        high: 43,
+        low: 39,
+        close: 42.5,
+        volume: 1234,
+      },
+    ]);
+
+    const report = await runBackfillSourceData(
+      {
+        dryRun: true,
+        write: true,
+        portfolioId: 'portfolio-2026',
+        dateFrom: '2026-04-24',
+        dateTo: '2026-04-24',
+        domains: ['market_quote'],
+        maxRows: 64,
+        failOnMissingConfig: false,
+        allowIsolatedWrite: true,
+        allowFactWrite: true,
+        allowSourceFetch: true,
+        confirmIsolatedDb: 'market-no-date.db',
+      },
+      {
+        prisma,
+        env: {
+          DATABASE_URL:
+            'file:/mnt/d/cxks/任务工作台/T0425-UHT投资数据中台优化提案/scratch/market-no-date.db',
+        },
+        klineFetcher,
+      }
+    );
+
+    expect(prisma.quoteSnapshot.upsert).not.toHaveBeenCalled();
+    expect(report.factWriteSummary).toEqual(
+      expect.objectContaining({
+        enabled: true,
+        totalUpserts: 0,
+        skipped: 1,
+        skipReasons: { target_missing_source_value: 1 },
+      })
+    );
+    expect(report.warnings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          domain: 'market_quote',
+          code: 'source_fetch_target_date_missing',
+          details: expect.objectContaining({
+            targetDate: '2026-04-24',
+            returnedDates: ['2026-04-23'],
+          }),
+        }),
+      ])
+    );
+    expect(getBackfillSourceDataExitCode(report)).toBe(0);
+  });
+
+  it('does not fetch or synthesize fx history when source fetch is enabled', async () => {
+    const prisma = createPrismaMock();
+    (prisma.exchangeRateSnapshot.findMany as jest.Mock).mockResolvedValueOnce(
+      []
+    );
+    const klineFetcher = jest.fn().mockResolvedValue([]);
+
+    const report = await runBackfillSourceData(
+      {
+        dryRun: true,
+        write: true,
+        portfolioId: 'portfolio-2026',
+        dateFrom: '2026-04-24',
+        dateTo: '2026-04-24',
+        domains: ['fx'],
+        maxRows: 64,
+        failOnMissingConfig: false,
+        allowIsolatedWrite: true,
+        allowFactWrite: true,
+        allowSourceFetch: true,
+        confirmIsolatedDb: 'fx-no-fetch.db',
+      },
+      {
+        prisma,
+        env: {
+          DATABASE_URL:
+            'file:/mnt/d/cxks/任务工作台/T0425-UHT投资数据中台优化提案/scratch/fx-no-fetch.db',
+        },
+        klineFetcher,
+      }
+    );
+
+    expect(klineFetcher).not.toHaveBeenCalled();
+    expect(prisma.exchangeRateSnapshot.upsert).not.toHaveBeenCalled();
+    expect(report.factWriteSummary).toEqual(
+      expect.objectContaining({
+        enabled: true,
+        totalUpserts: 0,
+        exchangeRateSnapshotUpserts: 0,
+        skipped: 2,
+        skipReasons: { target_missing_source_value: 2 },
+      })
+    );
+  });
+
+  it('does not write fetched source facts without --allow-fact-write', async () => {
+    const prisma = createPrismaMock();
+    (prisma.positionSnapshot.findMany as jest.Mock).mockResolvedValueOnce([
+      { date: '2026-04-24', assetCode: 'sh600276' },
+    ]);
+    const klineFetcher = jest.fn().mockResolvedValue([
+      {
+        date: '2026-04-24',
+        open: 40,
+        high: 43,
+        low: 39,
+        close: 42.5,
+        volume: 1234,
+      },
+    ]);
+
+    const report = await runBackfillSourceData(
+      {
+        dryRun: true,
+        write: true,
+        portfolioId: 'portfolio-2026',
+        dateFrom: '2026-04-24',
+        dateTo: '2026-04-24',
+        domains: ['market_quote'],
+        maxRows: 64,
+        failOnMissingConfig: false,
+        allowIsolatedWrite: true,
+        allowFactWrite: false,
+        allowSourceFetch: true,
+        confirmIsolatedDb: 'market-no-fact-flag.db',
+      },
+      {
+        prisma,
+        env: {
+          DATABASE_URL:
+            'file:/mnt/d/cxks/任务工作台/T0425-UHT投资数据中台优化提案/scratch/market-no-fact-flag.db',
+        },
+        klineFetcher,
+      }
+    );
+
+    expect(klineFetcher).toHaveBeenCalledTimes(1);
+    expect(prisma.quoteSnapshot.upsert).not.toHaveBeenCalled();
+    expect(report.factWriteSummary).toEqual(
+      expect.objectContaining({
+        enabled: false,
+        totalUpserts: 0,
+        skipped: 1,
+        skipReasons: { fact_write_flag_missing: 1 },
+      })
+    );
+    expect(report.writeAttempted).toBe(true);
+    expect(getBackfillSourceDataExitCode(report)).toBe(0);
+  });
+
   it('keeps yield_curve and macro blocked/not_configured and outside fact writes', async () => {
     const prisma = createPrismaMock();
+    const klineFetcher = jest.fn().mockResolvedValue([]);
     const report = await runBackfillSourceData(
       {
         dryRun: true,
@@ -776,6 +1128,7 @@ describe('backfillSourceData runner', () => {
         failOnMissingConfig: false,
         allowIsolatedWrite: true,
         allowFactWrite: true,
+        allowSourceFetch: true,
         confirmIsolatedDb: 'blocked-domains.db',
       },
       {
@@ -784,6 +1137,7 @@ describe('backfillSourceData runner', () => {
           DATABASE_URL:
             'file:/mnt/d/cxks/任务工作台/T0425-UHT投资数据中台优化提案/scratch/blocked-domains.db',
         },
+        klineFetcher,
       }
     );
 
@@ -810,6 +1164,7 @@ describe('backfillSourceData runner', () => {
     expect(prisma.exchangeRateSnapshot.upsert).not.toHaveBeenCalled();
     expect(prisma.quoteSnapshot.upsert).not.toHaveBeenCalled();
     expect(prisma.indexSnapshot.upsert).not.toHaveBeenCalled();
+    expect(klineFetcher).not.toHaveBeenCalled();
     expect(getBackfillSourceDataExitCode(report)).toBe(0);
   });
 

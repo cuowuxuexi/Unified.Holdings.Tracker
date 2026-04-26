@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import type { KlinePoint } from '../types';
 import { FX_PAIRS } from '../services/sourceGateway/adapters/fx/types';
 import { MACRO_INDICATORS } from '../services/sourceGateway/adapters/macro/catalog';
 import {
@@ -47,6 +48,17 @@ type FactSnapshotModel<TRow> = FindManyModel<TRow> & {
 
 type SourceRunStatus = 'SUCCESS' | 'PARTIAL' | 'FAILED';
 type SourceHealthStatus = 'HEALTHY' | 'DEGRADED' | 'DOWN' | 'UNKNOWN';
+type BackfillKlinePeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
+type BackfillFqType = 'qfq' | 'hfq' | 'none';
+
+export type BackfillKlineFetcher = (
+  code: string,
+  period: BackfillKlinePeriod,
+  startDate: string | undefined,
+  endDate: string | undefined,
+  fq: BackfillFqType,
+  count: number
+) => Promise<KlinePoint[]>;
 
 export type BackfillSourceDataPortfolioRow = {
   id: string;
@@ -66,6 +78,10 @@ type QuoteSnapshotRow = {
   assetCode: string;
   currentPrice?: unknown;
   timestamp?: Date | string | null;
+  openPrice?: unknown;
+  highPrice?: unknown;
+  lowPrice?: unknown;
+  volume?: unknown;
 };
 
 type IndexSnapshotRow = {
@@ -123,6 +139,7 @@ export type BackfillSourceDataOptions = {
   failOnMissingConfig: boolean;
   allowIsolatedWrite: boolean;
   allowFactWrite: boolean;
+  allowSourceFetch?: boolean;
   confirmIsolatedDb?: string;
 };
 
@@ -130,6 +147,7 @@ export type BackfillSourceDataDependencies = {
   prisma: BackfillSourceDataPrisma;
   env?: NodeJS.ProcessEnv;
   now?: () => Date;
+  klineFetcher?: BackfillKlineFetcher;
 };
 
 type BackfillBlockedItem = {
@@ -146,7 +164,7 @@ type BackfillWarning = {
   details?: Record<string, unknown>;
 };
 
-type BackfillTargetStatus = 'existing' | 'missing';
+type BackfillTargetStatus = 'existing' | 'missing' | 'fetched';
 
 type BackfillTarget = {
   status: BackfillTargetStatus;
@@ -207,6 +225,7 @@ export type BackfillSourceDataReport = {
   maxRows: number;
   config: {
     fredApiKeyConfigured: boolean;
+    sourceFetchEnabled: boolean;
   };
   preCounts: CountMap;
   postCounts: CountMap;
@@ -239,6 +258,7 @@ type ParsedCliFlag =
   | 'fail-on-missing-config'
   | 'allow-isolated-write'
   | 'allow-fact-write'
+  | 'allow-source-fetch'
   | 'confirm-isolated-db';
 
 const COUNTED_TABLES: CountedTable[] = [
@@ -267,6 +287,8 @@ const INDEX_TARGETS = [
 
 const DEFAULT_MAX_ROWS = 256;
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+const TENCENT_KLINE_SOURCE_ID = 'tencent.kline';
+const DAILY_KLINE_FETCH_COUNT = 1;
 const DEFAULT_ISOLATED_BACKFILL_ROOT =
   '/mnt/d/cxks/任务工作台/T0425-UHT投资数据中台优化提案/scratch';
 const ISOLATED_BACKFILL_ROOT_ENV = 'UHT_BACKFILL_ISOLATED_ROOT';
@@ -330,6 +352,7 @@ export function parseBackfillSourceDataArgs(
     failOnMissingConfig: raw['fail-on-missing-config'] === true,
     allowIsolatedWrite: raw['allow-isolated-write'] === true,
     allowFactWrite: raw['allow-fact-write'] === true,
+    allowSourceFetch: raw['allow-source-fetch'] === true,
     confirmIsolatedDb: confirmIsolatedDb?.trim(),
   };
 }
@@ -395,6 +418,14 @@ export async function runBackfillSourceData(
     });
   }
 
+  if (
+    options.allowSourceFetch &&
+    mode !== 'write-rejected' &&
+    !hasFatalPreWriteBlock(blocked)
+  ) {
+    await hydratePlansWithSourceFetch(plans, dependencies, warnings);
+  }
+
   const auditWriteSummary =
     mode === 'isolated-write' && !hasFatalPreWriteBlock(blocked)
       ? await upsertAuditRecords(
@@ -457,6 +488,7 @@ export async function runBackfillSourceData(
     maxRows: options.maxRows,
     config: {
       fredApiKeyConfigured: isConfigured(env.FRED_API_KEY),
+      sourceFetchEnabled: options.allowSourceFetch === true,
     },
     preCounts,
     postCounts,
@@ -673,22 +705,44 @@ async function upsertMarketQuoteFacts(
       continue;
     }
 
+    const klineFields = buildMarketQuoteKlineFactFields(target);
+    const payload = {
+      timestamp,
+      currentPrice,
+      ...klineFields,
+    };
+
     await prisma.quoteSnapshot.upsert({
       where: { assetCode_date: { assetCode, date: target.date } },
       create: {
         assetCode,
         date: target.date,
-        timestamp,
-        currentPrice,
+        ...payload,
       },
-      update: {
-        timestamp,
-        currentPrice,
-      },
+      update: payload,
     });
     summary.quoteSnapshotUpserts += 1;
     summary.totalUpserts += 1;
   }
+}
+
+function buildMarketQuoteKlineFactFields(
+  target: BackfillTarget
+): Record<string, unknown> {
+  return {
+    ...optionalFactField(target, 'openPrice'),
+    ...optionalFactField(target, 'highPrice'),
+    ...optionalFactField(target, 'lowPrice'),
+    ...optionalFactField(target, 'volume'),
+  };
+}
+
+function optionalFactField(
+  target: BackfillTarget,
+  key: string
+): Record<string, unknown> {
+  const value = target.attributes[key];
+  return hasRealFactValue(value) ? { [key]: value } : {};
 }
 
 async function upsertIndexFacts(
@@ -942,7 +996,7 @@ function buildAuditStatus(plan: BackfillDomainPlan): {
       sourceHealthStatus: 'DEGRADED',
       errorCode: 'external_fact_missing_no_write',
       errorMessage:
-        'External fact rows are missing; M8.2.3B isolated write records audit state only and does not synthesize facts.',
+        'External fact rows are missing after optional source fetch; the runner does not synthesize facts.',
     };
   }
 
@@ -1022,6 +1076,150 @@ async function buildDomainPlans(
   }
 
   return plans;
+}
+
+async function hydratePlansWithSourceFetch(
+  plans: BackfillDomainPlan[],
+  dependencies: BackfillSourceDataDependencies,
+  warnings: BackfillWarning[]
+): Promise<void> {
+  const klineFetcher = dependencies.klineFetcher;
+  if (!klineFetcher) {
+    warnings.push({
+      code: 'source_fetcher_not_configured',
+      message:
+        '--allow-source-fetch was set, but no kline fetcher is configured for this runner invocation.',
+      details: { sourceId: TENCENT_KLINE_SOURCE_ID },
+    });
+    return;
+  }
+
+  for (const plan of plans) {
+    if (plan.domain !== 'market_quote' && plan.domain !== 'index') continue;
+
+    let attempted = false;
+    for (const target of plan.targets) {
+      if (target.status !== 'missing') continue;
+
+      attempted = true;
+      await hydrateMissingTargetFromKline(
+        plan.domain,
+        target,
+        klineFetcher,
+        warnings
+      );
+    }
+
+    if (attempted) {
+      plan.sourceId = TENCENT_KLINE_SOURCE_ID;
+      refreshPlanTargetCounts(plan);
+    }
+  }
+}
+
+async function hydrateMissingTargetFromKline(
+  domain: Extract<BackfillSourceDataDomain, 'market_quote' | 'index'>,
+  target: BackfillTarget,
+  klineFetcher: BackfillKlineFetcher,
+  warnings: BackfillWarning[]
+): Promise<void> {
+  const code =
+    domain === 'market_quote'
+      ? readStringAttribute(target, 'assetCode')
+      : readStringAttribute(target, 'indexCode');
+
+  if (!code) {
+    warnings.push({
+      domain,
+      code: 'source_fetch_target_code_missing',
+      message:
+        'Kline source fetch skipped because the missing target has no asset/index code.',
+      details: { key: target.key, targetDate: target.date },
+    });
+    return;
+  }
+
+  let points: KlinePoint[];
+  try {
+    points = await klineFetcher(
+      code,
+      'daily',
+      target.date,
+      target.date,
+      'qfq',
+      DAILY_KLINE_FETCH_COUNT
+    );
+  } catch (error) {
+    warnings.push({
+      domain,
+      code: 'source_fetch_failed',
+      message:
+        'Tencent kline source fetch failed; target fact remains missing.',
+      details: {
+        key: target.key,
+        targetDate: target.date,
+        sourceCode: code,
+        error: error instanceof Error ? error.message : String(error),
+      },
+    });
+    return;
+  }
+
+  const matched = points.find((point) => isTargetDateKline(point, target.date));
+  if (!matched) {
+    warnings.push({
+      domain,
+      code: 'source_fetch_target_date_missing',
+      message:
+        'Tencent kline returned no valid daily point for the requested target date; fact upsert skipped.',
+      details: {
+        key: target.key,
+        targetDate: target.date,
+        sourceCode: code,
+        returnedDates: points.map((point) => point.date).filter(Boolean),
+      },
+    });
+    return;
+  }
+
+  target.status = 'fetched';
+  target.attributes = {
+    ...target.attributes,
+    ...klinePointToTargetAttributes(matched),
+    source: TENCENT_KLINE_SOURCE_ID,
+  };
+}
+
+function isTargetDateKline(point: KlinePoint, targetDate: string): boolean {
+  return point.date === targetDate && safeNumber(point.close) !== undefined;
+}
+
+function klinePointToTargetAttributes(
+  point: KlinePoint
+): Record<string, unknown> {
+  return {
+    currentPrice: safeNumber(point.close),
+    openPrice: safeNumber(point.open),
+    highPrice: safeNumber(point.high),
+    lowPrice: safeNumber(point.low),
+    volume: safeNumber(point.volume),
+    timestamp: `${point.date}T00:00:00.000Z`,
+    sourceDate: point.date,
+  };
+}
+
+function safeNumber(value: unknown): number | undefined {
+  const numeric =
+    typeof value === 'number' ? value : Number.parseFloat(String(value));
+  return Number.isFinite(numeric) ? numeric : undefined;
+}
+
+function refreshPlanTargetCounts(plan: BackfillDomainPlan): void {
+  const existingRows = plan.targets.filter(
+    (target) => target.status !== 'missing'
+  ).length;
+  plan.existingRows = existingRows;
+  plan.missingRows = plan.targets.length - existingRows;
 }
 
 async function planFx(
@@ -1111,6 +1309,10 @@ async function planMarketQuote(
             assetCode: true,
             currentPrice: true,
             timestamp: true,
+            openPrice: true,
+            highPrice: true,
+            lowPrice: true,
+            volume: true,
           },
         });
   const existing = new Map(
@@ -1130,6 +1332,10 @@ async function planMarketQuote(
           assetCode,
           currentPrice: row ? toJsonValue(row.currentPrice) : undefined,
           timestamp: toIsoString(row?.timestamp),
+          openPrice: row ? toJsonValue(row.openPrice) : undefined,
+          highPrice: row ? toJsonValue(row.highPrice) : undefined,
+          lowPrice: row ? toJsonValue(row.lowPrice) : undefined,
+          volume: row ? toJsonValue(row.volume) : undefined,
         },
       } satisfies BackfillTarget;
     });
@@ -1311,7 +1517,7 @@ function buildPlan(input: {
 }): BackfillDomainPlan {
   const blocked = input.blocked ?? [];
   const existingRows = input.targets.filter(
-    (target) => target.status === 'existing'
+    (target) => target.status !== 'missing'
   ).length;
   return {
     domain: input.domain,
@@ -1607,6 +1813,7 @@ function isParsedCliFlag(value: string): value is ParsedCliFlag {
     'fail-on-missing-config',
     'allow-isolated-write',
     'allow-fact-write',
+    'allow-source-fetch',
     'confirm-isolated-db',
   ].includes(value);
 }
@@ -1618,6 +1825,7 @@ function isBooleanCliFlag(flag: ParsedCliFlag): boolean {
     'fail-on-missing-config',
     'allow-isolated-write',
     'allow-fact-write',
+    'allow-source-fetch',
   ].includes(flag);
 }
 
@@ -1770,6 +1978,7 @@ function toIsoString(
 async function loadDefaultDependencies(): Promise<BackfillSourceDataDependencies> {
   await import('../config/env');
   const { PrismaClient } = await import('@prisma/client');
+  const { fetchKline } = await import('../services/tencentApi');
   const prisma = new PrismaClient({
     datasources: {
       db: { url: resolveSqliteDatabaseUrl(process.env.DATABASE_URL) },
@@ -1780,6 +1989,7 @@ async function loadDefaultDependencies(): Promise<BackfillSourceDataDependencies
     prisma: prisma as unknown as BackfillSourceDataPrisma,
     env: process.env,
     now: () => new Date(),
+    klineFetcher: fetchKline as BackfillKlineFetcher,
   };
 }
 
