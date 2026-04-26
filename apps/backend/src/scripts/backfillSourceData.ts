@@ -1470,8 +1470,6 @@ async function hydrateFxPlansWithSourceFetch(
     for (const plan of fxPlans) {
       let hydrated = false;
       for (const target of plan.targets) {
-        if (target.status !== 'missing') continue;
-
         const pair = readStringAttribute(target, 'pair') as FxPair | null;
         if (!pair) continue;
 

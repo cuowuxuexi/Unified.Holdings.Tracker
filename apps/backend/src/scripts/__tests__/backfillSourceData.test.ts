@@ -1154,6 +1154,79 @@ describe('backfillSourceData runner', () => {
     expect(prisma.exchangeRateSnapshot.upsert).toHaveBeenCalledTimes(2);
   });
 
+  it('does not fall back to existing-only when FX source fetch is enabled for already-present target dates', async () => {
+    const prisma = createPrismaMock();
+    (prisma.exchangeRateSnapshot.findMany as jest.Mock).mockResolvedValueOnce([
+      {
+        date: '2026-04-24',
+        pair: 'USD-CNY',
+        rate: 7.2,
+        source: 'cache:test',
+      },
+      {
+        date: '2026-04-24',
+        pair: 'HKD-CNY',
+        rate: 0.92,
+        source: 'cache:test',
+      },
+    ]);
+    const fxHistoryFetcher = jest.fn().mockResolvedValue([
+      {
+        date: '2026-04-24',
+        pair: 'USD-CNY',
+        rate: 7.2468,
+        timestamp: '2026-04-24T12:00:00.000Z',
+      },
+      {
+        date: '2026-04-24',
+        pair: 'HKD-CNY',
+        rate: 0.9234,
+        timestamp: '2026-04-24T12:00:00.000Z',
+      },
+    ]);
+
+    const report = await runBackfillSourceData(
+      {
+        dryRun: true,
+        write: false,
+        portfolioId: 'portfolio-2026',
+        dateFrom: '2026-04-24',
+        dateTo: '2026-04-24',
+        domains: ['fx'],
+        maxRows: 64,
+        failOnMissingConfig: false,
+        allowIsolatedWrite: false,
+        allowFactWrite: false,
+        allowSourceFetch: true,
+      },
+      {
+        prisma,
+        env: {},
+        fxHistoryFetcher,
+      }
+    );
+
+    expect(fxHistoryFetcher).toHaveBeenCalledWith(
+      expect.objectContaining({
+        pairs: ['USD-CNY', 'HKD-CNY'],
+        date: '2026-04-24',
+      })
+    );
+    expect(report.plans).toEqual([
+      expect.objectContaining({
+        domain: 'fx',
+        sourceId: 'frankfurter.fx.v1',
+        existingRows: 2,
+        missingRows: 0,
+        targets: [
+          expect.objectContaining({ status: 'fetched' }),
+          expect.objectContaining({ status: 'fetched' }),
+        ],
+      }),
+    ]);
+    expect(report.writeAttempted).toBe(false);
+  });
+
   it('does not write fetched source facts without --allow-fact-write', async () => {
     const prisma = createPrismaMock();
     (prisma.positionSnapshot.findMany as jest.Mock).mockResolvedValueOnce([
