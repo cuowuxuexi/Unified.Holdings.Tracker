@@ -319,6 +319,198 @@ export interface PeriodReturnStat {
   fallbackDays?: number;
 }
 
+export interface ApiContractWarning {
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+export interface ApiContractError {
+  code: string;
+  message: string;
+  details?: Record<string, unknown>;
+}
+
+export interface PortfolioHistorySeriesPoint {
+  date: string;
+  net_assets: number;
+  cash: number;
+  total_market_value: number;
+  daily_pnl: number;
+  total_pnl: number;
+  realized_pnl: number | null;
+  unrealized_pnl: number | null;
+  net_deposited_cash: number | null;
+  total_commission: number | null;
+  total_dividend_income: number | null;
+  leverage_used: number | null;
+  leverage_total: number | null;
+  leverage_cost_rate: number | null;
+  leverage_cumulative_cost: number | null;
+  daily_pnl_percent: number | null;
+  total_pnl_percent: number | null;
+  weekly_return_percent: number | null;
+  weekly_return_value: number | null;
+  weekly_base_date: string | null;
+  monthly_return_percent: number | null;
+  monthly_return_value: number | null;
+  monthly_base_date: string | null;
+  ytd_return_percent: number | null;
+  ytd_return_value: number | null;
+  ytd_base_date: string | null;
+  usd_cny: number | null;
+  hkd_cny: number | null;
+}
+
+export interface PortfolioHistoryCashflow {
+  date: string;
+  type: string;
+  amount_cny: number | null;
+  amount: number | null;
+  currency: string;
+  exchange_rate: number | null;
+  transaction_id?: string;
+  asset_code?: string;
+  notes?: string;
+}
+
+export interface PortfolioHistoryContextData {
+  portfolio_year_window: {
+    year: number;
+    planned_start: string;
+    business_start: string | null;
+    effective_start: string;
+    requested_end: string;
+    resolved_end: string | null;
+    latest_available_date: string | null;
+    snapshot_days: number;
+    missing_days: string[];
+  };
+  external_data_window: {
+    start: string;
+    end: string;
+    first_phase_min_start: string;
+  };
+  portfolio: {
+    series: PortfolioHistorySeriesPoint[];
+    cashflows: PortfolioHistoryCashflow[];
+    positions_by_date: Array<{
+      date: string;
+      positions: Array<Record<string, unknown>>;
+    }>;
+  };
+  fx: {
+    pairs: Array<{
+      pair: string;
+      points: Array<{
+        date: string;
+        pair: string;
+        rate: number;
+        source: string | null;
+      }>;
+      current_date: string | null;
+      current_rate: number | null;
+      change_7d_percent: number | null;
+      change_30d_percent: number | null;
+      change_ytd_percent: number | null;
+    }>;
+    warnings: ApiContractWarning[];
+  };
+  market: {
+    quote_coverage: {
+      requested: string[];
+      found: string[];
+      missing: string[];
+    };
+    benchmark_index_coverage: {
+      requested: string[];
+      found: string[];
+      missing: string[];
+    };
+    benchmark_index_points: Array<{
+      index_code: string;
+      name: string | null;
+      baseline_date: string | null;
+      baseline_price: number | null;
+      points: Array<{
+        date: string;
+        current_price: number;
+        change_from_baseline_percent: number;
+      }>;
+    }>;
+    warnings: ApiContractWarning[];
+  };
+  yield: {
+    latest_curve: {
+      latest_date: string | null;
+      records: Array<{
+        date: string;
+        country: string;
+        tenor: string;
+        yieldPercent: number | null;
+        sourceId: string | null;
+        status: string;
+        errorSummary: string | null;
+      }>;
+    };
+    spreads: {
+      us_10y_2y_bp: number | null;
+      cn_10y_2y_bp: number | null;
+      cn_us_10y_bp: number | null;
+    };
+    warnings: ApiContractWarning[];
+  };
+  macro: {
+    latest_values: Record<
+      string,
+      {
+        date: string;
+        value: number;
+        unit: string | null;
+        source_id: string;
+        status: string;
+      } | null
+    >;
+    warnings: ApiContractWarning[];
+  };
+  source_health: {
+    current: Array<{
+      source_id: string;
+      domain: string;
+      status: string;
+      checked_at: string;
+      error_code: string | null;
+      error_message: string | null;
+    }>;
+    run_summary: Array<{
+      source_id: string;
+      domain: string;
+      total_runs: number;
+      rows_written: number;
+      latest_status: string;
+      latest_error_code: string | null;
+      latest_error_message: string | null;
+    }>;
+    warnings: ApiContractWarning[];
+  };
+}
+
+export interface PortfolioHistoryContextEnvelope {
+  data: PortfolioHistoryContextData | null;
+  meta: {
+    portfolioId: string;
+    year: number | null;
+    requested_date: string | null;
+    resolved_date: string | null;
+    latest_available_date: string | null;
+    source: 'uht.history-context';
+    contract_version: string;
+    generated_at: string;
+  };
+  warnings: ApiContractWarning[];
+  errors: ApiContractError[];
+}
+
 // Type for creating new portfolios (omits id)
 export type PortfolioInput = Omit<Portfolio, 'id'>;
 

@@ -7,6 +7,7 @@ import {
   TransactionInput,
   PortfolioInput,
   PortfolioStats,
+  PortfolioHistoryContextEnvelope,
 } from '../store/types'; // 添加 PortfolioStats 导入
 import { frontendEnv } from '../env';
 
@@ -116,7 +117,7 @@ export interface ValidationError {
   rowNumber: number;
   field: string;
   message: string;
-  value?: any;
+  value?: unknown;
 }
 
 export interface ImportPreview {
@@ -320,6 +321,24 @@ const apiClient = {
         error
       );
       throw error; // Re-throw error to be handled by the caller (e.g., store action)
+    }
+  },
+  fetchPortfolioHistoryContext: async (
+    portfolioId: string,
+    params: { year: number; date?: string }
+  ): Promise<PortfolioHistoryContextEnvelope> => {
+    try {
+      const response = await axios.get<PortfolioHistoryContextEnvelope>(
+        `${API_BASE_URL}/api/portfolio/${portfolioId}/history-context`,
+        { params }
+      );
+      return response.data;
+    } catch (error) {
+      console.error(
+        `Error fetching portfolio history context for ${portfolioId}:`,
+        error
+      );
+      throw error;
     }
   },
   deletePortfolio: async (portfolioId: string): Promise<void> => {

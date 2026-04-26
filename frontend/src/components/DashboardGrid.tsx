@@ -5,6 +5,7 @@ import {
   PortfolioDetail,
   PortfolioStats,
   PositionWithStats,
+  Transaction,
 } from '../store/types';
 import { formatDate as formatDateTime } from '../shared/utils/formatters';
 import { ErrorBoundary } from './ErrorBoundary';
@@ -15,6 +16,7 @@ import PeriodReturnCard from './cards/PeriodReturnCard';
 import { PnlCardsRow } from './cards/CoreIndicatorsCard';
 import CoreIndicatorsSection from './cards/CoreIndicatorsCard';
 import AttentionSection from './cards/AttentionSection';
+import PortfolioHistoryPanel from './PortfolioHistoryPanel';
 
 interface DashboardGridProps {
   portfolioId: string;
@@ -25,7 +27,7 @@ interface DashboardGridProps {
   onRefresh: () => void;
   lastUpdated?: number;
   mappedPositions: (PositionWithStats & { marketDisplay: string })[];
-  transactions: any[];
+  transactions: Transaction[];
 }
 
 const DashboardGrid: React.FC<DashboardGridProps> = ({
@@ -122,6 +124,19 @@ const DashboardGrid: React.FC<DashboardGridProps> = ({
           <AttentionSection portfolio={portfolio} />
         </ErrorBoundary>
       </Card>
+
+      <ErrorBoundary
+        fallback={
+          <Alert
+            type="error"
+            showIcon
+            message="年度历史渲染失败"
+            description="请刷新页面或检查控制台日志。"
+          />
+        }
+      >
+        <PortfolioHistoryPanel portfolioId={portfolioId} />
+      </ErrorBoundary>
 
       {/* 资产明细 */}
       <ErrorBoundary
