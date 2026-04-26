@@ -216,3 +216,25 @@ export interface PortfolioStats {
   positions: Position[]; // Assuming Position type includes necessary fields
   timestamp: number;
 }
+
+export interface HistoricalLeverageInfo {
+  totalAmount: number | null;
+  usedAmount: number;
+  availableAmount: number | null;
+  costRate: number | null;
+}
+
+export interface HistoricalPortfolioStats
+  extends Omit<PortfolioStats, 'leverage' | 'leverageCost'> {
+  date: string;
+  leverage: HistoricalLeverageInfo;
+  leverageCost: number | null;
+  transactions: Transaction[];
+  meta: {
+    requestedDate: string;
+    snapshotDate: string;
+    quoteSnapshotUsed: boolean;
+    exchangeRateSnapshotUsed: boolean;
+    limitations: string[];
+  };
+}
