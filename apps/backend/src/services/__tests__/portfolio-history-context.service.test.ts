@@ -183,6 +183,13 @@ describe('portfolio history-context service', () => {
       end: '2026-04-24',
       first_phase_min_start: '2024-01-01',
     });
+    expect(
+      dependencies.prisma.exchangeRateSnapshot.findMany
+    ).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { date: { gte: '2016-04-17', lte: '2026-04-24' } },
+      })
+    );
     expect(result.body.warnings.map((warning) => warning.code)).toContain(
       'date_resolved_to_latest_available'
     );

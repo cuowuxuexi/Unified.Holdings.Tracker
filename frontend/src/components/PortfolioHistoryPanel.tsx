@@ -40,7 +40,9 @@ type FxHistoryPairRow = PortfolioHistoryContextData['fx']['pairs'][number];
 type FxChangeKey =
   | 'change_7d_percent'
   | 'change_30d_percent'
-  | 'change_ytd_percent';
+  | 'change_ytd_percent'
+  | 'change_5y_percent'
+  | 'change_10y_percent';
 type YieldCurveRecord =
   PortfolioHistoryContextData['yield']['latest_curve']['records'][number];
 
@@ -287,7 +289,7 @@ function FxHistoryTable({ history }: { history: PortfolioHistoryContextData }) {
           pagination={false}
           rowKey="pair"
           dataSource={history.fx.pairs}
-          scroll={{ x: 720 }}
+          scroll={{ x: 960 }}
           columns={[
             {
               title: '货币对',
@@ -319,6 +321,20 @@ function FxHistoryTable({ history }: { history: PortfolioHistoryContextData }) {
               dataIndex: 'change_ytd_percent',
               render: (_value: number | null, row: FxHistoryPairRow) => (
                 <FxChangeCell row={row} changeKey="change_ytd_percent" />
+              ),
+            },
+            {
+              title: '近5年',
+              dataIndex: 'change_5y_percent',
+              render: (_value: number | null, row: FxHistoryPairRow) => (
+                <FxChangeCell row={row} changeKey="change_5y_percent" />
+              ),
+            },
+            {
+              title: '近10年',
+              dataIndex: 'change_10y_percent',
+              render: (_value: number | null, row: FxHistoryPairRow) => (
+                <FxChangeCell row={row} changeKey="change_10y_percent" />
               ),
             },
           ]}

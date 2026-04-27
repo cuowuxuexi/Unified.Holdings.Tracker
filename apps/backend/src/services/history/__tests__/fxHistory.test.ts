@@ -85,34 +85,32 @@ describe('buildFxHistoryWindow', () => {
       { year: '2026', endDate: '2026-04-24' }
     );
 
-    expect(result.pairs).toEqual([
-      expect.objectContaining({
-        pair: 'USD-CNY',
-        change_7d_percent: null,
-        change_30d_percent: null,
-        change_ytd_percent: null,
-        baselines: {
-          change_7d_percent: expect.objectContaining({
-            target_date: '2026-04-17',
-            actual_date: null,
-          }),
-          change_30d_percent: expect.objectContaining({
-            target_date: '2026-03-25',
-            actual_date: null,
-          }),
-          change_ytd_percent: expect.objectContaining({
-            target_date: '2026-01-01',
-            actual_date: null,
-          }),
+    expect(result.pairs[0]).toMatchObject({
+      pair: 'USD-CNY',
+      change_7d_percent: null,
+      change_30d_percent: null,
+      change_ytd_percent: null,
+      baselines: {
+        change_7d_percent: {
+          target_date: '2026-04-17',
+          actual_date: null,
         },
-      }),
-      expect.objectContaining({
-        pair: 'HKD-CNY',
-        change_7d_percent: null,
-        change_30d_percent: null,
-        change_ytd_percent: null,
-      }),
-    ]);
+        change_30d_percent: {
+          target_date: '2026-03-25',
+          actual_date: null,
+        },
+        change_ytd_percent: {
+          target_date: '2026-01-01',
+          actual_date: null,
+        },
+      },
+    });
+    expect(result.pairs[1]).toMatchObject({
+      pair: 'HKD-CNY',
+      change_7d_percent: null,
+      change_30d_percent: null,
+      change_ytd_percent: null,
+    });
     expect(result.warnings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -178,6 +176,51 @@ describe('buildFxHistoryWindow', () => {
           target_date: '2026-04-17',
           actual_date: '2026-04-16',
           rate: 7.14,
+          fallback: true,
+        },
+      },
+    });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('calculates 5-year and 10-year changes from baselines outside the annual point window', () => {
+    const result = buildFxHistoryWindow(
+      [
+        { date: '2016-04-22', pair: 'USD-CNY', rate: 6.4955 },
+        { date: '2021-04-23', pair: 'USD-CNY', rate: 6.491 },
+        { date: '2026-01-02', pair: 'USD-CNY', rate: 6.9937 },
+        { date: '2026-03-25', pair: 'USD-CNY', rate: 6.8995 },
+        { date: '2026-04-17', pair: 'USD-CNY', rate: 6.8223 },
+        { date: '2026-04-24', pair: 'USD-CNY', rate: 6.8363 },
+      ],
+      {
+        year: 2026,
+        endDate: '2026-04-24',
+        baselineStartDate: '2016-04-17',
+        pairs: ['USD-CNY'],
+      }
+    );
+
+    expect(result.pairs[0].points.map((point) => point.date)).toEqual([
+      '2026-01-02',
+      '2026-03-25',
+      '2026-04-17',
+      '2026-04-24',
+    ]);
+    expect(result.pairs[0]).toMatchObject({
+      change_5y_percent: 5.319673,
+      change_10y_percent: 5.246709,
+      baselines: {
+        change_5y_percent: {
+          target_date: '2021-04-24',
+          actual_date: '2021-04-23',
+          rate: 6.491,
+          fallback: true,
+        },
+        change_10y_percent: {
+          target_date: '2016-04-24',
+          actual_date: '2016-04-22',
+          rate: 6.4955,
           fallback: true,
         },
       },

@@ -31,6 +31,7 @@ export type ExchangeRateSnapshotLike = {
 export type FxHistoryWindowRequest = {
   year: number | string;
   endDate: string;
+  baselineStartDate?: string;
   pairs?: readonly string[];
 };
 
@@ -57,10 +58,14 @@ export type FxHistoryPairWindow = {
   change_7d_percent: number | null;
   change_30d_percent: number | null;
   change_ytd_percent: number | null;
+  change_5y_percent: number | null;
+  change_10y_percent: number | null;
   baselines: {
     change_7d_percent: FxHistoryBaseline;
     change_30d_percent: FxHistoryBaseline;
     change_ytd_percent: FxHistoryBaseline;
+    change_5y_percent: FxHistoryBaseline;
+    change_10y_percent: FxHistoryBaseline;
   };
 };
 
@@ -78,7 +83,7 @@ type IndexedFxHistoryPoint = FxHistoryPoint & {
   fromCanonicalPair: boolean;
 };
 
-type ChangeWindow = '7d' | '30d' | 'ytd' | 'current';
+type ChangeWindow = '7d' | '30d' | 'ytd' | '5y' | '10y' | 'current';
 
 type ResolvedFxBaseline = {
   targetDate: string;
@@ -99,6 +104,11 @@ const CHANGE_WINDOWS = [
   { key: 'change_30d_percent', label: '30d', daysBack: 30 },
 ] as const;
 
+const LONG_CHANGE_WINDOWS = [
+  { key: 'change_5y_percent', label: '5y', yearsBack: 5 },
+  { key: 'change_10y_percent', label: '10y', yearsBack: 10 },
+] as const;
+
 const BASELINE_FALLBACK_MAX_DAYS = 7;
 
 export function buildFxHistoryWindow(
@@ -111,9 +121,17 @@ export function buildFxHistoryWindow(
     validateDateOnly(request.endDate, 'endDate'),
     `${year}-12-31`
   );
+  const baselineStart = request.baselineStartDate
+    ? minDate(
+        validateDateOnly(request.baselineStartDate, 'baselineStartDate'),
+        start
+      )
+    : start;
   const warnings: FxHistoryWarning[] = [];
   const requestedPairs = normalizeRequestedPairs(request.pairs, warnings);
   const pointsByPair = groupPointsByPair(rows, start, end);
+  const baselinePointsByPair = groupPointsByPair(rows, baselineStart, end);
+  const enableLongWindows = baselineStart < start;
 
   return {
     window: { year, start, end },
@@ -121,8 +139,10 @@ export function buildFxHistoryWindow(
       buildPairWindow({
         pair,
         points: pointsByPair.get(pair) ?? [],
+        baselinePoints: baselinePointsByPair.get(pair) ?? [],
         start,
         end,
+        enableLongWindows,
         warnings,
       })
     ),
@@ -218,8 +238,10 @@ function groupPointsByPair(
 function buildPairWindow(input: {
   pair: FxHistoryPair;
   points: FxHistoryPoint[];
+  baselinePoints: FxHistoryPoint[];
   start: string;
   end: string;
+  enableLongWindows: boolean;
   warnings: FxHistoryWarning[];
 }): FxHistoryPairWindow {
   const current = findLatestOnOrBefore(input.points, input.end, input.start);
@@ -230,7 +252,7 @@ function buildPairWindow(input: {
   const rollingBaselines = CHANGE_WINDOWS.map((window) => ({
     ...window,
     baseline: resolveBaselinePoint({
-      points: input.points,
+      points: input.baselinePoints,
       targetDate: subtractDays(input.end, window.daysBack),
       currentDate: current?.date ?? null,
       preferOnOrAfter: false,
@@ -266,7 +288,7 @@ function buildPairWindow(input: {
   }
 
   const ytdBaseline = resolveBaselinePoint({
-    points: input.points,
+    points: input.baselinePoints,
     targetDate: input.start,
     currentDate: null,
     preferOnOrAfter: true,
@@ -279,6 +301,41 @@ function buildPairWindow(input: {
     pushIncompleteWarning(input.warnings, input.pair, 'ytd', input.start);
   }
 
+  const longBaselines = LONG_CHANGE_WINDOWS.map((window) => ({
+    ...window,
+    baseline: resolveBaselinePoint({
+      points: input.baselinePoints,
+      targetDate: subtractYears(input.end, window.yearsBack),
+      currentDate: current?.date ?? null,
+      preferOnOrAfter: false,
+    }),
+  }));
+  const fiveYearBaseline = longBaselines[0].baseline;
+  const tenYearBaseline = longBaselines[1].baseline;
+  const fiveYearChange = input.enableLongWindows
+    ? calculatePercentChange(current?.rate ?? null, fiveYearBaseline.point)
+    : null;
+  const tenYearChange = input.enableLongWindows
+    ? calculatePercentChange(current?.rate ?? null, tenYearBaseline.point)
+    : null;
+
+  if (input.enableLongWindows && fiveYearChange === null) {
+    pushIncompleteWarning(
+      input.warnings,
+      input.pair,
+      '5y',
+      fiveYearBaseline.targetDate
+    );
+  }
+  if (input.enableLongWindows && tenYearChange === null) {
+    pushIncompleteWarning(
+      input.warnings,
+      input.pair,
+      '10y',
+      tenYearBaseline.targetDate
+    );
+  }
+
   return {
     pair: input.pair,
     points: input.points,
@@ -287,10 +344,14 @@ function buildPairWindow(input: {
     change_7d_percent: sevenDayChange,
     change_30d_percent: thirtyDayChange,
     change_ytd_percent: ytdChange,
+    change_5y_percent: fiveYearChange,
+    change_10y_percent: tenYearChange,
     baselines: {
       change_7d_percent: serializeBaseline(sevenDayBaseline),
       change_30d_percent: serializeBaseline(thirtyDayBaseline),
       change_ytd_percent: serializeBaseline(ytdBaseline),
+      change_5y_percent: serializeBaseline(fiveYearBaseline),
+      change_10y_percent: serializeBaseline(tenYearBaseline),
     },
   };
 }
@@ -425,6 +486,21 @@ function subtractDays(date: string, days: number): string {
   const parsed = new Date(`${date}T00:00:00.000Z`);
   parsed.setUTCDate(parsed.getUTCDate() - days);
   return parsed.toISOString().slice(0, 10);
+}
+
+function subtractYears(date: string, years: number): string {
+  const [year, month, day] = date.split('-').map(Number);
+  const targetYear = year - years;
+  const targetDay = Math.min(day, daysInMonth(targetYear, month));
+  return [
+    String(targetYear).padStart(4, '0'),
+    String(month).padStart(2, '0'),
+    String(targetDay).padStart(2, '0'),
+  ].join('-');
+}
+
+function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
 function daysBetween(left: string, right: string): number {

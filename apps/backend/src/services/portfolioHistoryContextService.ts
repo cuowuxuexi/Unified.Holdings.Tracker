@@ -138,6 +138,7 @@ export type PortfolioHistoryContextResponse = {
 const CONTRACT_SOURCE = 'uht.history-context' as const;
 const CONTRACT_VERSION = 'm7.v0.1' as const;
 const FIRST_PHASE_MIN_START = '2024-01-01';
+const FX_LONG_BASELINE_YEARS = 10;
 
 const DEFAULT_DEPENDENCIES: PortfolioHistoryContextDependencies = {
   prisma: defaultPrisma as unknown as PortfolioHistoryContextPrisma,
@@ -273,6 +274,10 @@ export async function getPortfolioHistoryContext(
   const requestedEnd = portfolioHistory.portfolio_year_window.requested_end;
   const externalEnd =
     portfolioHistory.portfolio_year_window.resolved_end ?? requestedEnd;
+  const fxBaselineStart = addDays(
+    subtractYears(externalEnd, FX_LONG_BASELINE_YEARS),
+    -7
+  );
   const assetCodes = unique(
     positionSnapshots
       .filter(
@@ -291,7 +296,7 @@ export async function getPortfolioHistoryContext(
     current,
   ] = await Promise.all([
     dependencies.prisma.exchangeRateSnapshot.findMany({
-      where: { date: { gte: start, lte: externalEnd } },
+      where: { date: { gte: fxBaselineStart, lte: externalEnd } },
       orderBy: [{ pair: 'asc' }, { date: 'asc' }],
       select: { date: true, pair: true, rate: true, source: true },
     }),
@@ -339,6 +344,7 @@ export async function getPortfolioHistoryContext(
   const fx = buildFxHistoryWindow(exchangeRates, {
     year,
     endDate: externalEnd,
+    baselineStartDate: fxBaselineStart,
   });
   const market = buildMarketHistory({
     assetCodes,
@@ -658,6 +664,21 @@ function addDays(date: string, days: number): string {
   const next = dateTimeAtStart(date);
   next.setUTCDate(next.getUTCDate() + days);
   return next.toISOString().slice(0, 10);
+}
+
+function subtractYears(date: string, years: number): string {
+  const [year, month, day] = date.split('-').map(Number);
+  const targetYear = year - years;
+  const targetDay = Math.min(day, daysInMonth(targetYear, month));
+  return [
+    String(targetYear).padStart(4, '0'),
+    String(month).padStart(2, '0'),
+    String(targetDay).padStart(2, '0'),
+  ].join('-');
+}
+
+function daysInMonth(year: number, month: number): number {
+  return new Date(Date.UTC(year, month, 0)).getUTCDate();
 }
 
 function unique(values: string[]): string[] {

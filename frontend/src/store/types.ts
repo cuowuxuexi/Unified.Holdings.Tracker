@@ -421,10 +421,14 @@ export interface PortfolioHistoryContextData {
       change_7d_percent: number | null;
       change_30d_percent: number | null;
       change_ytd_percent: number | null;
+      change_5y_percent: number | null;
+      change_10y_percent: number | null;
       baselines?: {
         change_7d_percent: PortfolioHistoryFxBaseline;
         change_30d_percent: PortfolioHistoryFxBaseline;
         change_ytd_percent: PortfolioHistoryFxBaseline;
+        change_5y_percent: PortfolioHistoryFxBaseline;
+        change_10y_percent: PortfolioHistoryFxBaseline;
       };
     }>;
     warnings: ApiContractWarning[];
