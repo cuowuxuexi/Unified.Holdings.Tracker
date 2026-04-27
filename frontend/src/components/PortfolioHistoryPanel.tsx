@@ -36,6 +36,12 @@ type PortfolioHistoryPanelProps = {
   portfolioId: string;
 };
 
+type FxHistoryPairRow = PortfolioHistoryContextData['fx']['pairs'][number];
+type FxChangeKey =
+  | 'change_7d_percent'
+  | 'change_30d_percent'
+  | 'change_ytd_percent';
+
 export function PortfolioHistoryPanel({
   portfolioId,
 }: PortfolioHistoryPanelProps) {
@@ -265,39 +271,94 @@ function FxHistoryTable({ history }: { history: PortfolioHistoryContextData }) {
 
   return (
     <>
-      <Title level={5}>汇率</Title>
-      <Table
-        size="small"
-        pagination={false}
-        rowKey="pair"
-        dataSource={history.fx.pairs}
-        columns={[
-          { title: '货币对', dataIndex: 'pair' },
-          { title: '日期', dataIndex: 'current_date' },
-          {
-            title: '汇率',
-            dataIndex: 'current_rate',
-            render: (value: number | null) => formatNullableNumber(value, 4),
-          },
-          {
-            title: '7d',
-            dataIndex: 'change_7d_percent',
-            render: (value: number | null) => formatNullablePercent(value),
-          },
-          {
-            title: '30d',
-            dataIndex: 'change_30d_percent',
-            render: (value: number | null) => formatNullablePercent(value),
-          },
-          {
-            title: 'YTD',
-            dataIndex: 'change_ytd_percent',
-            render: (value: number | null) => formatNullablePercent(value),
-          },
-        ]}
-      />
+      <Space direction="vertical" style={{ width: '100%' }} size={8}>
+        <div>
+          <Title level={5} style={{ marginBottom: 0 }}>
+            汇率变化（兑人民币）
+          </Title>
+          <Text type="secondary">
+            正数表示外币兑人民币变贵；基准日是实际用于计算变化率的日期。
+          </Text>
+        </div>
+        <Table
+          size="small"
+          pagination={false}
+          rowKey="pair"
+          dataSource={history.fx.pairs}
+          scroll={{ x: 720 }}
+          columns={[
+            {
+              title: '货币对',
+              dataIndex: 'pair',
+              render: (value: string) => value.replace('-', '/'),
+            },
+            { title: '最新日期', dataIndex: 'current_date' },
+            {
+              title: '当前汇率',
+              dataIndex: 'current_rate',
+              render: (value: number | null) => formatNullableNumber(value, 4),
+            },
+            {
+              title: '近7日',
+              dataIndex: 'change_7d_percent',
+              render: (_value: number | null, row: FxHistoryPairRow) => (
+                <FxChangeCell row={row} changeKey="change_7d_percent" />
+              ),
+            },
+            {
+              title: '近30日',
+              dataIndex: 'change_30d_percent',
+              render: (_value: number | null, row: FxHistoryPairRow) => (
+                <FxChangeCell row={row} changeKey="change_30d_percent" />
+              ),
+            },
+            {
+              title: '年初至今',
+              dataIndex: 'change_ytd_percent',
+              render: (_value: number | null, row: FxHistoryPairRow) => (
+                <FxChangeCell row={row} changeKey="change_ytd_percent" />
+              ),
+            },
+          ]}
+        />
+      </Space>
     </>
   );
+}
+
+function FxChangeCell({
+  row,
+  changeKey,
+}: {
+  row: FxHistoryPairRow;
+  changeKey: FxChangeKey;
+}) {
+  const value = row[changeKey];
+  const baseline = row.baselines?.[changeKey];
+  const valueColor =
+    value === null || value === undefined
+      ? undefined
+      : value >= 0
+        ? '#cf1322'
+        : '#3f8600';
+
+  return (
+    <Space direction="vertical" size={0}>
+      <Text style={{ color: valueColor }}>{formatNullablePercent(value)}</Text>
+      {baseline ? (
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          {formatFxBaselineLabel(baseline)}
+        </Text>
+      ) : null}
+    </Space>
+  );
+}
+
+function formatFxBaselineLabel(
+  baseline: NonNullable<FxHistoryPairRow['baselines']>[FxChangeKey]
+) {
+  if (!baseline.actual_date) return `无基准 ${baseline.target_date}`;
+  return `基准 ${baseline.actual_date}${baseline.fallback ? '（近似）' : ''}`;
 }
 
 function YieldMacroSummary({

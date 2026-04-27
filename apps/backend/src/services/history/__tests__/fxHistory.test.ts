@@ -49,6 +49,23 @@ describe('buildFxHistoryWindow', () => {
       change_7d_percent: 0.980392,
       change_30d_percent: 1.549296,
       change_ytd_percent: 3,
+      baselines: {
+        change_7d_percent: {
+          target_date: '2026-04-17',
+          actual_date: '2026-04-17',
+          fallback: false,
+        },
+        change_30d_percent: {
+          target_date: '2026-03-25',
+          actual_date: '2026-03-25',
+          fallback: false,
+        },
+        change_ytd_percent: {
+          target_date: '2026-01-01',
+          actual_date: '2026-01-01',
+          fallback: false,
+        },
+      },
     });
     expect(hkd).toMatchObject({
       current_rate: 0.93,
@@ -74,6 +91,20 @@ describe('buildFxHistoryWindow', () => {
         change_7d_percent: null,
         change_30d_percent: null,
         change_ytd_percent: null,
+        baselines: {
+          change_7d_percent: expect.objectContaining({
+            target_date: '2026-04-17',
+            actual_date: null,
+          }),
+          change_30d_percent: expect.objectContaining({
+            target_date: '2026-03-25',
+            actual_date: null,
+          }),
+          change_ytd_percent: expect.objectContaining({
+            target_date: '2026-01-01',
+            actual_date: null,
+          }),
+        },
       }),
       expect.objectContaining({
         pair: 'HKD-CNY',
@@ -102,6 +133,56 @@ describe('buildFxHistoryWindow', () => {
         }),
       ])
     );
+  });
+
+  it('uses the nearest annual baseline when the exact year-start FX date is unavailable', () => {
+    const result = buildFxHistoryWindow(
+      [
+        { date: '2026-01-02', pair: 'USD-CNY', rate: 6.9937 },
+        { date: '2026-03-25', pair: 'USD-CNY', rate: 6.8995 },
+        { date: '2026-04-17', pair: 'USD-CNY', rate: 6.8223 },
+        { date: '2026-04-24', pair: 'USD-CNY', rate: 6.8363 },
+      ],
+      { year: 2026, endDate: '2026-04-24', pairs: ['USD-CNY'] }
+    );
+
+    expect(result.pairs[0]).toMatchObject({
+      change_ytd_percent: -2.250597,
+      baselines: {
+        change_ytd_percent: {
+          target_date: '2026-01-01',
+          actual_date: '2026-01-02',
+          rate: 6.9937,
+          fallback: true,
+        },
+      },
+    });
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('uses the nearest rolling baseline without stretching to the current point', () => {
+    const result = buildFxHistoryWindow(
+      [
+        { date: '2026-01-01', pair: 'USD-CNY', rate: 7 },
+        { date: '2026-03-25', pair: 'USD-CNY', rate: 7.1 },
+        { date: '2026-04-16', pair: 'USD-CNY', rate: 7.14 },
+        { date: '2026-04-24', pair: 'USD-CNY', rate: 7.21 },
+      ],
+      { year: 2026, endDate: '2026-04-24', pairs: ['USD-CNY'] }
+    );
+
+    expect(result.pairs[0]).toMatchObject({
+      change_7d_percent: 0.980392,
+      baselines: {
+        change_7d_percent: {
+          target_date: '2026-04-17',
+          actual_date: '2026-04-16',
+          rate: 7.14,
+          fallback: true,
+        },
+      },
+    });
+    expect(result.warnings).toEqual([]);
   });
 
   it('keeps USD-HKD as an explicit extension point without adding it to defaults', () => {

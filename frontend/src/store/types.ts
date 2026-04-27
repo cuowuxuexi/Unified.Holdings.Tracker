@@ -421,6 +421,11 @@ export interface PortfolioHistoryContextData {
       change_7d_percent: number | null;
       change_30d_percent: number | null;
       change_ytd_percent: number | null;
+      baselines?: {
+        change_7d_percent: PortfolioHistoryFxBaseline;
+        change_30d_percent: PortfolioHistoryFxBaseline;
+        change_ytd_percent: PortfolioHistoryFxBaseline;
+      };
     }>;
     warnings: ApiContractWarning[];
   };
@@ -501,6 +506,14 @@ export interface PortfolioHistoryContextData {
     }>;
     warnings: ApiContractWarning[];
   };
+}
+
+export interface PortfolioHistoryFxBaseline {
+  target_date: string;
+  actual_date: string | null;
+  rate: number | null;
+  source: string | null;
+  fallback: boolean;
 }
 
 export interface PortfolioHistoryContextEnvelope {

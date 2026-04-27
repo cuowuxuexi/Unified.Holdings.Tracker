@@ -41,6 +41,14 @@ export type FxHistoryPoint = {
   source: string | null;
 };
 
+export type FxHistoryBaseline = {
+  target_date: string;
+  actual_date: string | null;
+  rate: number | null;
+  source: string | null;
+  fallback: boolean;
+};
+
 export type FxHistoryPairWindow = {
   pair: FxHistoryPair;
   points: FxHistoryPoint[];
@@ -49,6 +57,11 @@ export type FxHistoryPairWindow = {
   change_7d_percent: number | null;
   change_30d_percent: number | null;
   change_ytd_percent: number | null;
+  baselines: {
+    change_7d_percent: FxHistoryBaseline;
+    change_30d_percent: FxHistoryBaseline;
+    change_ytd_percent: FxHistoryBaseline;
+  };
 };
 
 export type FxHistoryWindow = {
@@ -67,6 +80,11 @@ type IndexedFxHistoryPoint = FxHistoryPoint & {
 
 type ChangeWindow = '7d' | '30d' | 'ytd' | 'current';
 
+type ResolvedFxBaseline = {
+  targetDate: string;
+  point: FxHistoryPoint | null;
+};
+
 const PAIR_ALIASES: Record<string, FxHistoryPair> = {
   'USD-CNY': 'USD-CNY',
   USDCNY: 'USD-CNY',
@@ -80,6 +98,8 @@ const CHANGE_WINDOWS = [
   { key: 'change_7d_percent', label: '7d', daysBack: 7 },
   { key: 'change_30d_percent', label: '30d', daysBack: 30 },
 ] as const;
+
+const BASELINE_FALLBACK_MAX_DAYS = 7;
 
 export function buildFxHistoryWindow(
   rows: readonly ExchangeRateSnapshotLike[],
@@ -207,29 +227,54 @@ function buildPairWindow(input: {
     pushIncompleteWarning(input.warnings, input.pair, 'current', input.end);
   }
 
-  const changes = CHANGE_WINDOWS.reduce(
-    (memo, window) => {
-      const baselineDate = subtractDays(input.end, window.daysBack);
-      const baseline = findPointOnDate(input.points, baselineDate);
-      const change = calculatePercentChange(current?.rate ?? null, baseline);
-      if (change === null) {
-        pushIncompleteWarning(
-          input.warnings,
-          input.pair,
-          window.label,
-          baselineDate
-        );
-      }
-      return { ...memo, [window.key]: change };
-    },
-    {
-      change_7d_percent: null,
-      change_30d_percent: null,
-    } as Pick<FxHistoryPairWindow, 'change_7d_percent' | 'change_30d_percent'>
+  const rollingBaselines = CHANGE_WINDOWS.map((window) => ({
+    ...window,
+    baseline: resolveBaselinePoint({
+      points: input.points,
+      targetDate: subtractDays(input.end, window.daysBack),
+      currentDate: current?.date ?? null,
+      preferOnOrAfter: false,
+    }),
+  }));
+
+  const sevenDayBaseline = rollingBaselines[0].baseline;
+  const thirtyDayBaseline = rollingBaselines[1].baseline;
+  const sevenDayChange = calculatePercentChange(
+    current?.rate ?? null,
+    sevenDayBaseline.point
+  );
+  const thirtyDayChange = calculatePercentChange(
+    current?.rate ?? null,
+    thirtyDayBaseline.point
   );
 
-  const ytdBaseline = findPointOnDate(input.points, input.start);
-  const ytdChange = calculatePercentChange(current?.rate ?? null, ytdBaseline);
+  if (sevenDayChange === null) {
+    pushIncompleteWarning(
+      input.warnings,
+      input.pair,
+      '7d',
+      sevenDayBaseline.targetDate
+    );
+  }
+  if (thirtyDayChange === null) {
+    pushIncompleteWarning(
+      input.warnings,
+      input.pair,
+      '30d',
+      thirtyDayBaseline.targetDate
+    );
+  }
+
+  const ytdBaseline = resolveBaselinePoint({
+    points: input.points,
+    targetDate: input.start,
+    currentDate: null,
+    preferOnOrAfter: true,
+  });
+  const ytdChange = calculatePercentChange(
+    current?.rate ?? null,
+    ytdBaseline.point
+  );
   if (ytdChange === null) {
     pushIncompleteWarning(input.warnings, input.pair, 'ytd', input.start);
   }
@@ -239,8 +284,14 @@ function buildPairWindow(input: {
     points: input.points,
     current_date: current?.date ?? null,
     current_rate: current?.rate ?? null,
-    ...changes,
+    change_7d_percent: sevenDayChange,
+    change_30d_percent: thirtyDayChange,
     change_ytd_percent: ytdChange,
+    baselines: {
+      change_7d_percent: serializeBaseline(sevenDayBaseline),
+      change_30d_percent: serializeBaseline(thirtyDayBaseline),
+      change_ytd_percent: serializeBaseline(ytdBaseline),
+    },
   };
 }
 
@@ -285,6 +336,53 @@ function findPointOnDate(
   return points.find((point) => point.date === date) ?? null;
 }
 
+function resolveBaselinePoint(input: {
+  points: readonly FxHistoryPoint[];
+  targetDate: string;
+  currentDate: string | null;
+  preferOnOrAfter: boolean;
+}): ResolvedFxBaseline {
+  const exact = findPointOnDate(input.points, input.targetDate);
+  if (exact) return { targetDate: input.targetDate, point: exact };
+
+  const nearest =
+    input.points
+      .filter((point) => point.date !== input.currentDate)
+      .map((point) => ({
+        point,
+        distance: daysBetween(point.date, input.targetDate),
+      }))
+      .filter((candidate) => candidate.distance <= BASELINE_FALLBACK_MAX_DAYS)
+      .sort((left, right) => {
+        const byDistance = left.distance - right.distance;
+        if (byDistance !== 0) return byDistance;
+
+        const leftAfter = left.point.date >= input.targetDate;
+        const rightAfter = right.point.date >= input.targetDate;
+        if (leftAfter !== rightAfter) {
+          if (input.preferOnOrAfter) return leftAfter ? -1 : 1;
+          return leftAfter ? 1 : -1;
+        }
+
+        return input.preferOnOrAfter
+          ? left.point.date.localeCompare(right.point.date)
+          : right.point.date.localeCompare(left.point.date);
+      })[0]?.point ?? null;
+
+  return { targetDate: input.targetDate, point: nearest };
+}
+
+function serializeBaseline(baseline: ResolvedFxBaseline): FxHistoryBaseline {
+  return {
+    target_date: baseline.targetDate,
+    actual_date: baseline.point?.date ?? null,
+    rate: baseline.point?.rate ?? null,
+    source: baseline.point?.source ?? null,
+    fallback:
+      baseline.point !== null && baseline.point.date !== baseline.targetDate,
+  };
+}
+
 function shouldReplaceDuplicate(
   existingCanonical: boolean,
   nextCanonical: boolean
@@ -327,6 +425,17 @@ function subtractDays(date: string, days: number): string {
   const parsed = new Date(`${date}T00:00:00.000Z`);
   parsed.setUTCDate(parsed.getUTCDate() - days);
   return parsed.toISOString().slice(0, 10);
+}
+
+function daysBetween(left: string, right: string): number {
+  const msPerDay = 24 * 60 * 60 * 1000;
+  return Math.abs(
+    Math.round(
+      (Date.parse(`${left}T00:00:00.000Z`) -
+        Date.parse(`${right}T00:00:00.000Z`)) /
+        msPerDay
+    )
+  );
 }
 
 function toPositiveNumber(value: NumericLike): number | null {
