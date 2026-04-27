@@ -284,71 +284,84 @@ function FxHistoryTable({ history }: { history: PortfolioHistoryContextData }) {
             正数表示外币兑人民币变贵；基准日是实际用于计算变化率的日期。
           </Text>
         </div>
-        <Table
-          size="small"
-          pagination={false}
-          rowKey="pair"
-          dataSource={history.fx.pairs}
-          scroll={{ x: 960 }}
-          columns={[
-            {
-              title: '货币对',
-              dataIndex: 'pair',
-              render: (value: string) => value.replace('-', '/'),
-            },
-            { title: '最新日期', dataIndex: 'current_date' },
-            {
-              title: '当前汇率',
-              dataIndex: 'current_rate',
-              render: (value: number | null) => formatNullableNumber(value, 4),
-            },
-            {
-              title: '近7日',
-              dataIndex: 'change_7d_percent',
-              render: (_value: number | null, row: FxHistoryPairRow) => (
-                <FxChangeCell row={row} changeKey="change_7d_percent" />
-              ),
-            },
-            {
-              title: '近30日',
-              dataIndex: 'change_30d_percent',
-              render: (_value: number | null, row: FxHistoryPairRow) => (
-                <FxChangeCell row={row} changeKey="change_30d_percent" />
-              ),
-            },
-            {
-              title: '年初至今',
-              dataIndex: 'change_ytd_percent',
-              render: (_value: number | null, row: FxHistoryPairRow) => (
-                <FxChangeCell row={row} changeKey="change_ytd_percent" />
-              ),
-            },
-            {
-              title: '近5年',
-              dataIndex: 'change_5y_percent',
-              render: (_value: number | null, row: FxHistoryPairRow) => (
-                <FxChangeCell row={row} changeKey="change_5y_percent" />
-              ),
-            },
-            {
-              title: '近10年',
-              dataIndex: 'change_10y_percent',
-              render: (_value: number | null, row: FxHistoryPairRow) => (
-                <FxChangeCell row={row} changeKey="change_10y_percent" />
-              ),
-            },
-          ]}
-        />
+        <Space direction="vertical" size={10} style={{ width: '100%' }}>
+          {history.fx.pairs.map((row) => (
+            <FxPairSummary key={row.pair} row={row} />
+          ))}
+        </Space>
       </Space>
     </>
   );
 }
 
-function FxChangeCell({
+function FxPairSummary({ row }: { row: FxHistoryPairRow }) {
+  return (
+    <div
+      style={{
+        border: '1px solid #f0f0f0',
+        borderRadius: 8,
+        padding: 12,
+        background: '#fafafa',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          gap: 12,
+          flexWrap: 'wrap',
+          marginBottom: 10,
+        }}
+      >
+        <div>
+          <Text strong style={{ fontSize: 16 }}>
+            {row.pair.replace('-', '/')}
+          </Text>
+          <br />
+          <Text type="secondary">最新 {row.current_date ?? 'N/A'}</Text>
+        </div>
+        <div style={{ textAlign: 'right' }}>
+          <Text type="secondary">当前汇率</Text>
+          <br />
+          <Text strong>{formatNullableNumber(row.current_rate, 4)}</Text>
+        </div>
+      </div>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(104px, 1fr))',
+          gap: 8,
+        }}
+      >
+        <FxChangeMetric row={row} label="近7日" changeKey="change_7d_percent" />
+        <FxChangeMetric
+          row={row}
+          label="近30日"
+          changeKey="change_30d_percent"
+        />
+        <FxChangeMetric
+          row={row}
+          label="年初至今"
+          changeKey="change_ytd_percent"
+        />
+        <FxChangeMetric row={row} label="近5年" changeKey="change_5y_percent" />
+        <FxChangeMetric
+          row={row}
+          label="近10年"
+          changeKey="change_10y_percent"
+        />
+      </div>
+    </div>
+  );
+}
+
+function FxChangeMetric({
   row,
+  label,
   changeKey,
 }: {
   row: FxHistoryPairRow;
+  label: string;
   changeKey: FxChangeKey;
 }) {
   const value = row[changeKey];
@@ -361,8 +374,23 @@ function FxChangeCell({
         : '#3f8600';
 
   return (
-    <Space direction="vertical" size={0}>
-      <Text style={{ color: valueColor }}>{formatNullablePercent(value)}</Text>
+    <Space
+      direction="vertical"
+      size={0}
+      style={{
+        minHeight: 78,
+        padding: '8px 10px',
+        border: '1px solid #f0f0f0',
+        borderRadius: 6,
+        background: '#fff',
+      }}
+    >
+      <Text type="secondary" style={{ fontSize: 12 }}>
+        {label}
+      </Text>
+      <Text strong style={{ color: valueColor, fontSize: 16 }}>
+        {formatNullablePercent(value)}
+      </Text>
       {baseline ? (
         <Text type="secondary" style={{ fontSize: 12 }}>
           {formatFxBaselineLabel(baseline)}
@@ -376,7 +404,11 @@ function formatFxBaselineLabel(
   baseline: NonNullable<FxHistoryPairRow['baselines']>[FxChangeKey]
 ) {
   if (!baseline.actual_date) return `无基准 ${baseline.target_date}`;
-  return `基准 ${baseline.actual_date}${baseline.fallback ? '（近似）' : ''}`;
+  const rateText =
+    baseline.rate === null || baseline.rate === undefined
+      ? ''
+      : ` · ${formatNumber(baseline.rate, 4)}`;
+  return `基准 ${baseline.actual_date}${rateText}${baseline.fallback ? '（近似）' : ''}`;
 }
 
 function YieldMacroSummary({
