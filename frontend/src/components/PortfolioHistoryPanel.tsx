@@ -41,6 +41,8 @@ type FxChangeKey =
   | 'change_7d_percent'
   | 'change_30d_percent'
   | 'change_ytd_percent';
+type YieldCurveRecord =
+  PortfolioHistoryContextData['yield']['latest_curve']['records'][number];
 
 export function PortfolioHistoryPanel({
   portfolioId,
@@ -367,29 +369,49 @@ function YieldMacroSummary({
   history: PortfolioHistoryContextData;
 }) {
   const spreads = history.yield.spreads;
+  const yieldRows = buildYieldCurveRows(history.yield.latest_curve.records);
   const macroEntries = Object.entries(history.macro.latest_values);
 
   return (
     <>
       <Title level={5}>利率与宏观</Title>
       <Space direction="vertical" style={{ width: '100%' }} size={10}>
+        <Table
+          size="small"
+          pagination={false}
+          rowKey="country"
+          dataSource={yieldRows}
+          columns={[
+            { title: '地区', dataIndex: 'label' },
+            {
+              title: '2年利率',
+              dataIndex: 'twoYear',
+              render: renderYieldRate,
+            },
+            {
+              title: '10年利率',
+              dataIndex: 'tenYear',
+              render: renderYieldRate,
+            },
+            {
+              title: '10年-2年利差',
+              dataIndex: 'spreadBp',
+              render: formatBasisPoint,
+            },
+            { title: '日期', dataIndex: 'date', render: renderNullableText },
+          ]}
+        />
         <Row gutter={12}>
-          <Col span={8}>
+          <Col span={12}>
             <Statistic
-              title="US 10Y-2Y"
-              value={formatBasisPoint(spreads.us_10y_2y_bp)}
-            />
-          </Col>
-          <Col span={8}>
-            <Statistic
-              title="CN 10Y-2Y"
-              value={formatBasisPoint(spreads.cn_10y_2y_bp)}
-            />
-          </Col>
-          <Col span={8}>
-            <Statistic
-              title="CN-US 10Y"
+              title="中美10年利差"
               value={formatBasisPoint(spreads.cn_us_10y_bp)}
+            />
+          </Col>
+          <Col span={12}>
+            <Statistic
+              title="利率曲线日期"
+              value={history.yield.latest_curve.latest_date ?? 'N/A'}
             />
           </Col>
         </Row>
@@ -398,7 +420,7 @@ function YieldMacroSummary({
           pagination={false}
           rowKey="indicator"
           dataSource={macroEntries.map(([indicator, value]) => ({
-            indicator,
+            indicator: formatMacroIndicatorName(indicator),
             ...value,
           }))}
           columns={[
@@ -416,6 +438,55 @@ function YieldMacroSummary({
       </Space>
     </>
   );
+}
+
+function buildYieldCurveRows(records: YieldCurveRecord[]) {
+  return [
+    {
+      country: 'US',
+      label: '美国国债',
+      twoYear: findYieldRate(records, 'US', '2Y'),
+      tenYear: findYieldRate(records, 'US', '10Y'),
+      spreadBp: calculateLocalSpread(records, 'US'),
+      date: findYieldDate(records, 'US'),
+    },
+    {
+      country: 'CN',
+      label: '中国国债',
+      twoYear: findYieldRate(records, 'CN', '2Y'),
+      tenYear: findYieldRate(records, 'CN', '10Y'),
+      spreadBp: calculateLocalSpread(records, 'CN'),
+      date: findYieldDate(records, 'CN'),
+    },
+  ];
+}
+
+function findYieldRate(
+  records: YieldCurveRecord[],
+  country: string,
+  tenor: string
+) {
+  return (
+    records.find(
+      (record) => record.country === country && record.tenor === tenor
+    )?.yieldPercent ?? null
+  );
+}
+
+function findYieldDate(records: YieldCurveRecord[], country: string) {
+  return (
+    records
+      .filter((record) => record.country === country)
+      .map((record) => record.date)
+      .sort((left, right) => right.localeCompare(left))[0] ?? null
+  );
+}
+
+function calculateLocalSpread(records: YieldCurveRecord[], country: string) {
+  const tenYear = findYieldRate(records, country, '10Y');
+  const twoYear = findYieldRate(records, country, '2Y');
+  if (tenYear === null || twoYear === null) return null;
+  return Number(((tenYear - twoYear) * 100).toFixed(2));
 }
 
 function MarketCoverageSummary({
@@ -570,6 +641,22 @@ function renderStatusTag(value: string | undefined) {
 
 function renderNullableText(value: string | null | undefined) {
   return value ?? <Text type="secondary">N/A</Text>;
+}
+
+function renderYieldRate(value: number | null | undefined) {
+  return value === null || value === undefined
+    ? 'N/A'
+    : `${formatNumber(value)}%`;
+}
+
+function formatMacroIndicatorName(indicator: string) {
+  const names: Record<string, string> = {
+    DXY: '美元指数',
+    US_CPI: '美国 CPI',
+    US_PMI: '美国 PMI',
+    US_POLICY_RATE: '美国政策利率',
+  };
+  return names[indicator] ?? indicator;
 }
 
 function formatNullableNumber(value: number | null | undefined, decimals = 2) {
