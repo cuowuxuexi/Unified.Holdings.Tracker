@@ -56,7 +56,9 @@ RUN sed -i 's#http://deb.debian.org/debian-security#http://mirrors.ustc.edu.cn/d
     && rm -rf /var/lib/apt/lists/*
 
 RUN python3 -m venv /opt/uht-python \
-    && /opt/uht-python/bin/pip install --no-cache-dir akshare==1.18.57
+    && /opt/uht-python/bin/pip install --no-cache-dir --timeout 60 --retries 5 \
+    -i https://pypi.tuna.tsinghua.edu.cn/simple \
+    akshare==1.18.57
 
 # Copy only what's needed to run
 COPY --from=builder /app/apps/backend/dist/server-bundle.js* ./dist/
