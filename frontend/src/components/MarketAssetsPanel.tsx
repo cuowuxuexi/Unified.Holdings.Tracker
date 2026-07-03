@@ -17,7 +17,7 @@ import {
 } from '@ant-design/icons'; // 添加图标
 import TransactionList from './legacy/TransactionList';
 import PositionsTable from './legacy/PositionsTable';
-import { fetchExchangeRates } from '../services/api'; // Correctly import fetchExchangeRates
+import { fetchExchangeRates, FALLBACK_EXCHANGE_RATES } from '../services/api';
 import apiClient from '../services/api'; // 添加 apiClient 导入
 import {
   PositionWithStats,
@@ -107,7 +107,9 @@ const ExchangeRateBar: React.FC<{
       更新时间：{updatedAt}
     </span>
     {error && (
-      <span style={{ marginLeft: 16, color: '#cf1322' }}>已使用上次数据</span>
+      <span style={{ marginLeft: 16, color: '#cf1322' }}>
+        获取失败，以上为估算值
+      </span>
     )}
   </div>
 );
@@ -300,10 +302,14 @@ const MarketAssetsPanel: React.FC<{
         const fetchedData = await fetchExchangeRates();
         if (fetchedData.error) {
           setRateError(true);
-          // Use fallback rates if API fails
-          setRates({ USD: 7.25, HKD: 0.92, CNY: 1.0 });
+          // fetchExchangeRates 失败时已返回统一兜底值
+          setRates({
+            USD: fetchedData.USD,
+            HKD: fetchedData.HKD,
+            CNY: 1.0,
+          });
           setUpdatedAt(new Date(fetchedData.updatedAt).toLocaleString()); // Use fallback time
-          messageApi.error('获取实时汇率失败，使用默认值。');
+          messageApi.error('获取实时汇率失败，使用估算值。');
         } else {
           setRateError(false);
           // Ensure CNY rate is included if missing from API response
@@ -313,9 +319,9 @@ const MarketAssetsPanel: React.FC<{
       } catch (err) {
         console.error('Error in loadRates (MarketAssetsPanel):', err);
         setRateError(true);
-        setRates({ USD: 7.25, HKD: 0.92, CNY: 1.0 }); // Use fallback
+        setRates({ ...FALLBACK_EXCHANGE_RATES });
         setUpdatedAt(new Date().toLocaleString());
-        messageApi.error('获取实时汇率时发生错误，使用默认值。');
+        messageApi.error('获取实时汇率时发生错误，使用估算值。');
       } finally {
         setLoadingRates(false);
       }

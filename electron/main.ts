@@ -419,11 +419,19 @@ async function createWindow() {
     });
 
     if (response === 0) {
-      // 重试
+      // 重试前先结束旧的后端子进程，避免反复重试堆叠多个后端进程
+      if (backendProcess) {
+        backendProcess.kill();
+        backendProcess = null;
+      }
       createWindow(); // 重新调用 createWindow 尝试连接
       return; // 阻止当前函数继续执行
     } else if (response === 1) {
       // 清理进程
+      if (backendProcess) {
+        backendProcess.kill();
+        backendProcess = null;
+      }
       await cleanupNodeProcesses();
       await new Promise((resolve) => setTimeout(resolve, 2000));
       return createWindow();

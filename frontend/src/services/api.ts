@@ -154,6 +154,13 @@ export interface ImportResult {
 
 const API_BASE_URL = frontendEnv.apiBaseUrl.replace(/\/api\/?$/, ''); // Remove /api suffix if present
 
+// 汇率获取失败时的兜底估算值（全局唯一定义，UI 侧需标注"估算值"）
+export const FALLBACK_EXCHANGE_RATES = {
+  USD: 7.25,
+  HKD: 0.92,
+  CNY: 1.0,
+} as const;
+
 const apiClient = {
   // Add the /api prefix back to specific routes that need it (assuming routes are defined with /api in server.ts)
   fetchQuotes: async (codes: string[]): Promise<Quote[]> => {
@@ -732,12 +739,9 @@ export const fetchExchangeRates = async (): Promise<{
     }
   } catch (error) {
     console.error('Error fetching exchange rates:', error);
-    // 返回包含错误标记和默认值的对象，以便 UI 可以处理
-    // 恢复原始默认值，尽管后端现在应该提供模拟值
+    // 返回包含错误标记和兜底估算值的对象，UI 侧需据 error 标注"估算值"
     return {
-      USD: 7.25, // Default fallback
-      HKD: 0.92, // Default fallback
-      CNY: 1.0,
+      ...FALLBACK_EXCHANGE_RATES,
       updatedAt: new Date().toISOString(),
       error: true,
     };
