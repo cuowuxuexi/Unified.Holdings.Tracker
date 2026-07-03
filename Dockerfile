@@ -63,6 +63,7 @@ RUN python3 -m venv /opt/uht-python \
 # Copy only what's needed to run
 COPY --from=builder /app/apps/backend/dist/server-bundle.js* ./dist/
 COPY --from=builder /app/apps/backend/dist/backfill-source-data.js* ./dist/
+COPY --from=builder /app/apps/backend/dist/backfill-portfolio-snapshots.js* ./dist/
 COPY --from=builder /app/apps/backend/prisma/schema.prisma ./prisma/
 COPY --from=builder /app/node_modules/@prisma/ ./node_modules/@prisma/
 COPY --from=builder /app/node_modules/.prisma/ ./node_modules/.prisma/

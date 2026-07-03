@@ -136,10 +136,16 @@ compose_base() {
 }
 
 run_in_backend_container() {
+  local extra_env=()
+  # macro 域需要 FRED_API_KEY；由 systemd EnvironmentFile 注入宿主环境后透传给容器
+  if [[ -n "${FRED_API_KEY:-}" ]]; then
+    extra_env+=(-e "FRED_API_KEY=${FRED_API_KEY}")
+  fi
   compose_base run --rm --no-deps \
     -v "${DB_VOLUME}:${FACT_MOUNT}" \
     -e "DATABASE_URL=file:${FACT_MOUNT}/${DB_NAME}" \
     -e "UHT_BACKFILL_ISOLATED_ROOT=${FACT_MOUNT}" \
+    ${extra_env[@]+"${extra_env[@]}"} \
     backend "$@"
 }
 
@@ -451,7 +457,7 @@ main() {
   cp "${RUN_DIR}/write-count-diff.json" "${RUN_DIR}/count-diff.json"
   assert_allowed_write_count_diff "${RUN_DIR}/write-count-diff.json" "${DOMAINS}" >"${RUN_DIR}/allowed-count-diff.json"
 
-  log "write guard passed: only SourceRun/SourceHealth/QuoteSnapshot/IndexSnapshot counts changed"
+  log "write guard passed: only SourceRun/SourceHealth and domain-allowed fact tables changed (domains=${DOMAINS})"
   log "UHT source-data scheduler finished successfully"
 }
 

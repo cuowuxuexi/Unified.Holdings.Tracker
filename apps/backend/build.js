@@ -24,10 +24,17 @@ Promise.all([
     entryPoints: [path.join(__dirname, 'src/scripts/backfillSourceData.ts')],
     outfile: path.join(__dirname, 'dist/backfill-source-data.js'),
   }),
+  esbuild.build({
+    ...commonBuildOptions,
+    entryPoints: [
+      path.join(__dirname, 'src/scripts/backfillPortfolioSnapshots.ts'),
+    ],
+    outfile: path.join(__dirname, 'dist/backfill-portfolio-snapshots.js'),
+  }),
 ])
   .then(() => {
     console.log(
-      '✅ Backend bundles built successfully: dist/server-bundle.js, dist/backfill-source-data.js'
+      '✅ Backend bundles built successfully: dist/server-bundle.js, dist/backfill-source-data.js, dist/backfill-portfolio-snapshots.js'
     );
   })
   .catch((e) => {

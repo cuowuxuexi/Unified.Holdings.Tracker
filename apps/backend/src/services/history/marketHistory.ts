@@ -124,7 +124,10 @@ export function buildMarketHistory(
 
   const quotePoints = requestedAssets.map((assetCode) => {
     const rows = quoteRowsByAsset.get(assetCode) ?? [];
-    const baseline = rows.find((row) => row.date === request.startDate);
+    // 基准优先精确匹配 startDate；startDate 为非交易日（如 1 月 1 日）时
+    // 回退到窗口内第一个可用交易日
+    const baseline =
+      rows.find((row) => row.date === request.startDate) ?? rows[0];
 
     if (!baseline) {
       quoteBaselineMissing.push(assetCode);
@@ -146,7 +149,9 @@ export function buildMarketHistory(
 
   const benchmarkIndexPoints = benchmarkCodes.map((indexCode) => {
     const rows = indexRowsByCode.get(indexCode) ?? [];
-    const baseline = rows.find((row) => row.date === request.startDate);
+    // 同上：非交易日基准回退到窗口内第一个可用交易日
+    const baseline =
+      rows.find((row) => row.date === request.startDate) ?? rows[0];
     const name = rows.find((row) => row.name !== null)?.name ?? null;
 
     if (!baseline) {

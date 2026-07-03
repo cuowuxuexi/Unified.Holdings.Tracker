@@ -58,23 +58,25 @@ export class FredMacroIndicatorAdapter
 
     const records: MacroIndicatorSnapshot[] = [];
     const catalog = getFrozenMacroIndicatorCatalog(request.indicatorIds);
+    // 单个序列失败（如 NAPM 已从 FRED 下架）不拖垮整体：记录错误并继续其余指标，
+    // 仅当全部序列失败时才整体 fail-closed
+    const seriesErrors: Array<{
+      indicatorId: string;
+      message: string;
+      statusCode?: number;
+    }> = [];
 
     for (const definition of catalog) {
       const url = this.buildUrl(definition.sourceSeriesId, request);
       const response = await this.fetcher(url, { signal: context.signal });
 
       if (!response.ok) {
-        return {
-          ok: false,
+        seriesErrors.push({
+          indicatorId: definition.indicatorId,
+          message: `FRED returned HTTP ${response.status} for ${definition.indicatorId}`,
           statusCode: response.status,
-          error: toSourceError(
-            this.id,
-            'SOURCE_HTTP_ERROR',
-            `FRED returned HTTP ${response.status} for ${definition.indicatorId}`,
-            response.status >= 500,
-            response.status
-          ),
-        };
+        });
+        continue;
       }
 
       const payload = (await response.json()) as FredObservationResponse;
@@ -86,10 +88,29 @@ export class FredMacroIndicatorAdapter
       });
 
       if (normalized.error) {
-        return { ok: false, error: normalized.error };
+        seriesErrors.push({
+          indicatorId: definition.indicatorId,
+          message: normalized.error.message,
+        });
+        continue;
       }
 
       records.push(...normalized.records);
+    }
+
+    if (records.length === 0 && seriesErrors.length > 0) {
+      const firstStatus = seriesErrors.find((e) => e.statusCode)?.statusCode;
+      return {
+        ok: false,
+        statusCode: firstStatus,
+        error: toSourceError(
+          this.id,
+          'SOURCE_HTTP_ERROR',
+          seriesErrors.map((e) => e.message).join('; '),
+          seriesErrors.some((e) => (e.statusCode ?? 0) >= 500),
+          firstStatus
+        ),
+      };
     }
 
     return {
@@ -101,6 +122,7 @@ export class FredMacroIndicatorAdapter
         indicatorIds: catalog.map((definition) => definition.indicatorId),
         factDateSemantics: MACRO_FACT_DATE_SEMANTICS,
         sourceTimeSemantics: MACRO_SOURCE_TIME_SEMANTICS,
+        ...(seriesErrors.length > 0 ? { seriesErrors } : {}),
       },
     };
   }

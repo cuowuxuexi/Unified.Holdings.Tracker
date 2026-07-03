@@ -141,7 +141,7 @@ describe('marketHistory', () => {
     expect(result.warnings).toEqual([]);
   });
 
-  it('returns null quote points and quote_history_incomplete when quote baseline is missing', () => {
+  it('falls back to first available trading day as quote baseline; assets without rows stay missing', () => {
     const result = buildMarketHistory({
       assetCodes: ['hk00700', 'usAAPL'],
       startDate: '2026-01-02',
@@ -161,34 +161,41 @@ describe('marketHistory', () => {
       found: ['hk00700'],
       missing: ['usAAPL'],
     });
-    expect(result.quote_points).toEqual([
-      {
+    // startDate（可能是非交易日）无行时，回退到窗口内第一个可用交易日
+    expect(result.quote_points[0]).toEqual(
+      expect.objectContaining({
         asset_code: 'hk00700',
-        baseline_date: null,
-        baseline_price: null,
-        points: null,
-      },
-      {
-        asset_code: 'usAAPL',
-        baseline_date: null,
-        baseline_price: null,
-        points: null,
-      },
+        baseline_date: '2026-04-24',
+        baseline_price: 360,
+      })
+    );
+    expect(result.quote_points[0].points).toEqual([
+      expect.objectContaining({
+        date: '2026-04-24',
+        change_from_baseline_percent: 0,
+      }),
     ]);
+    // 完全无数据的资产仍视为缺失
+    expect(result.quote_points[1]).toEqual({
+      asset_code: 'usAAPL',
+      baseline_date: null,
+      baseline_price: null,
+      points: null,
+    });
     expect(result.warnings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
           code: 'quote_history_incomplete',
           details: expect.objectContaining({
             missing_assets: ['usAAPL'],
-            baseline_missing_assets: ['hk00700', 'usAAPL'],
+            baseline_missing_assets: ['usAAPL'],
           }),
         }),
       ])
     );
   });
 
-  it('returns empty benchmark points and benchmark_history_missing when index baseline is missing', () => {
+  it('falls back to first available trading day as index baseline; indices without rows stay missing', () => {
     const result = buildMarketHistory({
       assetCodes: ['hk00700'],
       startDate: '2026-01-02',
@@ -209,13 +216,21 @@ describe('marketHistory', () => {
       found: ['sh000001'],
       missing: ['sz399001', 'hkHSI', 'usDJI', 'usIXIC', 'usINX'],
     });
-    expect(result.benchmark_index_points[0]).toEqual({
-      index_code: 'sh000001',
-      name: '上证指数',
-      baseline_date: null,
-      baseline_price: null,
-      points: [],
-    });
+    // startDate 无行时回退到窗口内第一个可用交易日
+    expect(result.benchmark_index_points[0]).toEqual(
+      expect.objectContaining({
+        index_code: 'sh000001',
+        name: '上证指数',
+        baseline_date: '2026-04-24',
+        baseline_price: 3100,
+        points: [
+          expect.objectContaining({
+            date: '2026-04-24',
+            change_from_baseline_percent: 0,
+          }),
+        ],
+      })
+    );
     expect(result.warnings).toEqual(
       expect.arrayContaining([
         expect.objectContaining({
@@ -223,7 +238,6 @@ describe('marketHistory', () => {
           details: expect.objectContaining({
             missing_indices: ['sz399001', 'hkHSI', 'usDJI', 'usIXIC', 'usINX'],
             baseline_missing_indices: [
-              'sh000001',
               'sz399001',
               'hkHSI',
               'usDJI',
