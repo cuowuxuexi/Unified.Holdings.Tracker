@@ -435,31 +435,30 @@ systemd 示例文件：
 
 ## 六.六、Docker 部署与访问控制（当前生产方式，必读）
 
-生产服务器实际使用 docker-compose 部署（`tracker-backend` + `tracker-nginx`），而非上文的 PM2 方案。**公网部署必须启用 Basic Auth**，否则持仓数据对任何访问者可见。
+生产服务器实际使用 docker-compose 部署（`tracker-backend` + `tracker-nginx`），而非上文的 PM2 方案。
 
-### 启用 Basic Auth
+### Basic Auth（默认关闭，可选启用）
 
-nginx 配置（`deploy/nginx-docker.conf`）已默认开启 `auth_basic`，密码文件通过 docker-compose 挂载 `deploy/.htpasswd`（已加入 .gitignore，不进仓库）。部署前在服务器的仓库目录生成密码文件：
+出于个人使用便利，Basic Auth 默认**未启用**——公网访问无需密码。若要给公网访问加密码墙（个人财务数据，建议在不便用 IP 白名单时启用），按以下步骤：
 
 ```bash
 cd /root/tracker/Unified.Holdings.Tracker-server
 
-# 方式一：apache2-utils
-apt install -y apache2-utils
-htpasswd -c deploy/.htpasswd 你的用户名   # 会提示输入密码
+# 1. 生成密码文件（二选一）
+apt install -y apache2-utils && htpasswd -c deploy/.htpasswd 你的用户名   # 交互输入密码
+# 或：printf '你的用户名:%s\n' "$(openssl passwd -apr1)" > deploy/.htpasswd
 
-# 方式二：openssl（无需额外安装）
-printf '你的用户名:%s\n' "$(openssl passwd -apr1)" > deploy/.htpasswd
-
-# 重建并启动
+# 2. 放开 nginx 配置：取消 deploy/nginx-docker.conf 中 auth_basic 两行的注释
+# 3. 放开挂载：取消 docker-compose.yml 中 nginx.volumes 的注释
+# 4. 重建并启动
 docker compose up -d --build
 ```
 
-验证：浏览器访问应弹出用户名密码框；`curl -I http://127.0.0.1:8080/api/health` 应返回 `401`，带凭证 `curl -u 用户名:密码 ...` 返回 `200`。
+验证：`curl -I http://127.0.0.1:8080/api/health` 应返回 `401`，带凭证 `curl -u 用户名:密码 ...` 返回 `200`。
 
-> 注意：若 `deploy/.htpasswd` 不存在，Docker 会自动创建同名**目录**导致 nginx 报错——务必先生成文件再 `up`。
+> 注意：务必先生成 `deploy/.htpasswd` 文件再放开挂载，否则 Docker 会创建同名**目录**导致 nginx 报错。
 
-### 其他安全基线（代码内置，无需配置）
+### 其他安全基线（代码内置，无需配置，默认生效）
 
 - 后端已启用 helmet 安全头与 API 限流（600 次/分钟/IP）
 - 生产环境 5xx 错误不回传内部细节
