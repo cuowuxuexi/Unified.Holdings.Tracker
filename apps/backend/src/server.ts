@@ -6,6 +6,8 @@ import express, {
   Response,
 } from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import { rateLimit } from 'express-rate-limit';
 import { appEnv } from './config/env';
 import { prisma } from './lib/prisma';
 import marketDataRouter from './routes/marketData';
@@ -20,6 +22,10 @@ import {
   startSnapshotScheduler,
   stopSnapshotScheduler,
 } from './services/snapshotService';
+import {
+  startDbBackupScheduler,
+  stopDbBackupScheduler,
+} from './services/dbBackupService';
 import { openApiDocument } from './openapi';
 
 const port = appEnv.port;
@@ -64,7 +70,11 @@ const errorHandler = (
   _next: NextFunction
 ) => {
   const status = err.statusCode || err.status || 500;
-  const message = err.message || 'Internal Server Error';
+  // 生产环境 5xx 不回传内部错误详情，细节只进服务端日志
+  const message =
+    status >= 500 && isProduction
+      ? 'Internal Server Error'
+      : err.message || 'Internal Server Error';
 
   if (status >= 500) {
     console.error('[Error Handler]', err);
@@ -92,11 +102,41 @@ export const createApp = (): Express => {
 
   const app = express();
 
+  // 部署在 nginx 反代之后，信任第一层代理以获取真实客户端 IP（限流按 IP 计数依赖此配置）
+  app.set('trust proxy', 1);
+
+  app.use(helmet());
+
+  // CORS 策略：
+  // - 同源部署（nginx 反代 /api）不依赖 CORS，拒绝也不影响正常使用
+  // - Electron 打包版以 file:// 加载页面，Origin 为 "null"，需放行
+  // - 其余跨域来源仅允许白名单（FRONTEND_URL 与 CORS_ORIGINS 环境变量，逗号分隔）
+  const corsAllowlist = new Set(
+    [
+      appEnv.frontendUrl,
+      ...(process.env.CORS_ORIGINS?.split(',').map((o) => o.trim()) ?? []),
+    ].filter(Boolean)
+  );
   app.use(
     cors({
-      origin: isProduction ? true : appEnv.frontendUrl,
+      origin: (origin, callback) => {
+        callback(
+          null,
+          !origin || origin === 'null' || corsAllowlist.has(origin)
+        );
+      },
       methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'],
-      credentials: true,
+    })
+  );
+
+  // API 限流：个人应用正常使用远低于该阈值，仅用于挡住扫描器和爬虫
+  app.use(
+    apiBasePath,
+    rateLimit({
+      windowMs: 60 * 1000,
+      limit: 600,
+      standardHeaders: true,
+      legacyHeaders: false,
     })
   );
   // 解决 "EOF while parsing a value at line 1 column 0" 错误
@@ -553,6 +593,13 @@ const startServer = async () => {
     } catch (error) {
       console.error('Failed to start snapshot scheduler:', error);
     }
+
+    // 启动每日整库备份定时任务
+    try {
+      startDbBackupScheduler();
+    } catch (error) {
+      console.error('Failed to start db backup scheduler:', error);
+    }
   }
 
   // Zombie Killer: 当作为 Electron 子进程运行时，父进程退出后自动退出
@@ -579,6 +626,7 @@ const startServer = async () => {
   const shutdown = (signal: string) => {
     console.log(`Received ${signal}. Shutting down gracefully...`);
     stopSnapshotScheduler();
+    stopDbBackupScheduler();
     server.close(() => {
       console.log('HTTP server closed');
       process.exit(0);

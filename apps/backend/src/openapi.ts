@@ -519,7 +519,7 @@ export const openApiDocument: UhtOpenApiDocument = {
       },
     },
     '/portfolio/{id}/cash-recalc': {
-      get: {
+      post: {
         tags: ['Portfolio'],
         summary: '现金重算校验',
         description: '重新计算组合的现金余额并返回差异',

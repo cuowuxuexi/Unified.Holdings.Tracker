@@ -266,13 +266,13 @@ export type GetPortfolioByIdStatsResponse = PortfolioStats;
 
 export type GetPortfolioByIdStatsError = unknown;
 
-export type GetPortfolioByIdCashRecalcData = {
+export type PostPortfolioByIdCashRecalcData = {
   path: {
     id: string;
   };
 };
 
-export type GetPortfolioByIdCashRecalcResponse = {
+export type PostPortfolioByIdCashRecalcResponse = {
   portfolioId?: string;
   name?: string;
   currentCash?: number;
@@ -283,7 +283,7 @@ export type GetPortfolioByIdCashRecalcResponse = {
   }>;
 };
 
-export type GetPortfolioByIdCashRecalcError = unknown;
+export type PostPortfolioByIdCashRecalcError = unknown;
 
 export type GetMarketQuoteData = {
   query: {

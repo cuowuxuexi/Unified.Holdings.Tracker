@@ -38,6 +38,9 @@ Thumbs.db
 !.env.example
 !.env.sample
 
+# Basic Auth 密码文件（部署时在服务器上生成）
+deploy/.htpasswd
+
 # Electron Forge / Electron Builder 缓存或特定输出
 .electron/
 # Windows Installer files (if generated in root)

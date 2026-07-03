@@ -4,11 +4,25 @@ import { PrismaClient } from '@prisma/client';
 
 const databaseUrl = resolveDatabaseUrl(process.env.DATABASE_URL);
 
+/** SQLite 数据库文件的绝对路径（供备份等场景使用） */
+export const databaseFilePath = databaseUrl.replace(/^file:/, '').split('?')[0];
+
 export const prisma = new PrismaClient({
   datasources: {
-    db: { url: databaseUrl },
+    // connection_limit=1：单连接串行化写入，配合下方 busy_timeout 避免 SQLITE_BUSY
+    db: { url: `${databaseUrl}?connection_limit=1` },
   },
 });
+
+// SQLite 生产加固：WAL 模式（持久化到 db 文件）+ 写锁等待，避免并发写直接报错
+void (async () => {
+  try {
+    await prisma.$queryRawUnsafe('PRAGMA journal_mode=WAL;');
+    await prisma.$queryRawUnsafe('PRAGMA busy_timeout=5000;');
+  } catch (error) {
+    console.error('[prisma-client] 初始化 SQLite PRAGMA 失败:', error);
+  }
+})();
 
 export type PrismaClientInstance = PrismaClient;
 

@@ -1,3 +1,7 @@
+// 收益计算基于本地时区日界（startOfDay），测试期望值按东八区推导；
+// 固定 TZ 保证测试在任意机器/CI 时区下结果一致
+process.env.TZ = 'Asia/Shanghai';
+
 const { pathsToModuleNameMapper } = require('ts-jest');
 const { compilerOptions } = require('../../tsconfig.base.json');
 

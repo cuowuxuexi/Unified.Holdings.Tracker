@@ -33,6 +33,9 @@ services:
     restart: unless-stopped
     ports:
       - '8080:80'
+    volumes:
+      # Basic Auth 密码文件（不进 git，生成方式见 deploy/DEPLOY.md）
+      - ./deploy/.htpasswd:/etc/nginx/.htpasswd:ro
     depends_on:
       backend:
         condition: service_healthy

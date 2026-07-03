@@ -1,7 +1,7 @@
 # UHT 云服务器部署说明书
 
 > **Unified Holdings Tracker** — 投资组合追踪系统  
-> 最后更新：2026-02-24
+> 最后更新：2026-07-03
 
 ---
 
@@ -145,7 +145,7 @@ DATABASE_URL="file:./prisma/data/portfolio.db"
 API_BASE_PATH=/api
 ```
 
-> **说明**：如果使用 Nginx 代理（推荐方案），`FRONTEND_URL` 的值不太重要，因为 CORS 在生产环境已设为 `true`。
+> **说明**：如果使用 Nginx 同源代理（推荐方案），浏览器请求不跨域，`FRONTEND_URL` 的值不影响使用。生产环境 CORS 已收紧为白名单（`FRONTEND_URL` + `CORS_ORIGINS` 环境变量，逗号分隔），不再反射任意来源。
 
 ### 2.4 构建项目
 
@@ -344,16 +344,24 @@ sudo tail -f /var/log/nginx/error.log
 
 ### 6.3 数据库备份
 
-SQLite 是单文件数据库，备份极其简单：
+**自动备份（内置）**：后端启动后每 24 小时通过 SQLite `VACUUM INTO` 做一次整库在线备份，产物保存在数据目录下的 `db-backups/`（Docker 部署时位于 tracker-data volume 内），自动保留最近 7 份。
 
 ```bash
-# 手动备份
-cp /opt/uht/apps/backend/prisma/data/portfolio.db ~/backup/portfolio_$(date +%Y%m%d).db
+# Docker 部署下查看自动备份
+ls /var/lib/docker/volumes/tracker-data/_data/db-backups/
 
-# 定时备份（每天凌晨 3 点）
-crontab -e
-# 添加以下行：
-# 0 3 * * * cp /opt/uht/apps/backend/prisma/data/portfolio.db /home/$USER/backup/portfolio_$(date +\%Y\%m\%d).db
+# 从备份恢复（先停后端，再覆盖主库文件）
+docker compose stop backend
+cp /var/lib/docker/volumes/tracker-data/_data/db-backups/portfolio-<时间戳>.db \
+   /var/lib/docker/volumes/tracker-data/_data/portfolio.db
+docker compose start backend
+```
+
+**异地备份（建议）**：volume 内备份不防磁盘/服务器故障，建议定期把 `db-backups/` 拷贝到服务器之外：
+
+```bash
+# 手动备份到本地（在自己电脑上执行）
+scp 服务器:/var/lib/docker/volumes/tracker-data/_data/db-backups/*.db ./backup/
 ```
 
 ### 6.4 数据库迁移
@@ -422,6 +430,45 @@ systemd 示例文件：
 
 > 注意：M8.4.1 只交付 wrapper 和示例文件，不执行 `systemctl enable` /
 > `systemctl start`，也不修改生产 crontab。
+
+---
+
+## 六.六、Docker 部署与访问控制（当前生产方式，必读）
+
+生产服务器实际使用 docker-compose 部署（`tracker-backend` + `tracker-nginx`），而非上文的 PM2 方案。**公网部署必须启用 Basic Auth**，否则持仓数据对任何访问者可见。
+
+### 启用 Basic Auth
+
+nginx 配置（`deploy/nginx-docker.conf`）已默认开启 `auth_basic`，密码文件通过 docker-compose 挂载 `deploy/.htpasswd`（已加入 .gitignore，不进仓库）。部署前在服务器的仓库目录生成密码文件：
+
+```bash
+cd /root/tracker/Unified.Holdings.Tracker-server
+
+# 方式一：apache2-utils
+apt install -y apache2-utils
+htpasswd -c deploy/.htpasswd 你的用户名   # 会提示输入密码
+
+# 方式二：openssl（无需额外安装）
+printf '你的用户名:%s\n' "$(openssl passwd -apr1)" > deploy/.htpasswd
+
+# 重建并启动
+docker compose up -d --build
+```
+
+验证：浏览器访问应弹出用户名密码框；`curl -I http://127.0.0.1:8080/api/health` 应返回 `401`，带凭证 `curl -u 用户名:密码 ...` 返回 `200`。
+
+> 注意：若 `deploy/.htpasswd` 不存在，Docker 会自动创建同名**目录**导致 nginx 报错——务必先生成文件再 `up`。
+
+### 其他安全基线（代码内置，无需配置）
+
+- 后端已启用 helmet 安全头与 API 限流（600 次/分钟/IP）
+- 生产环境 5xx 错误不回传内部细节
+- SQLite 已启用 WAL 模式与 busy_timeout
+- 每日自动整库备份（见 6.3）
+
+### HTTPS（可选，需要域名）
+
+有域名时参考附录 D 用 certbot 签发证书；纯 IP 访问暂无低成本方案，Basic Auth 密码建议设置为强密码并定期更换。
 
 ---
 

@@ -432,8 +432,9 @@ async function sendPeriodReport(
 
 // 注意：特定路径的路由必须在参数路由 (/:id) 之前定义
 
-// GET /api/portfolio/correct-history - 触发历史交易金额修正和现金重算
-router.get(
+// POST /api/portfolio/correct-history - 触发历史交易金额修正和现金重算
+// 有全局写副作用，必须用 POST（GET 会被爬虫/预取自动触发）
+router.post(
   '/correct-history',
   asyncHandler(async (req: Request, res: Response) => {
     console.log('[Route /correct-history] Received request.');
@@ -603,7 +604,6 @@ router.get(
       );
       res.status(500).json({
         message: 'Failed to generate period report',
-        error: String(error),
       });
     }
   })
@@ -759,10 +759,6 @@ router.post(
   '/:id/transactions',
   asyncHandler(async (req: Request, res: Response) => {
     console.log(
-      '[Backend Route] Received transaction request body:',
-      JSON.stringify(req.body, null, 2)
-    );
-    console.log(
       `[POST /:id/transactions] Received request for portfolioId: ${req.params.id}`
     );
 
@@ -852,11 +848,6 @@ router.post(
         `[POST /:id/transactions] Auto-inferred currency: ${transactionData.currency} for ${assetCode}`
       );
     }
-
-    console.log(
-      `[POST /:id/transactions] Passing data to Use Case:`,
-      JSON.stringify(transactionData, null, 2)
-    );
 
     try {
       // 调用 Use Case
@@ -1128,8 +1119,9 @@ router.get(
   })
 );
 
-// GET /api/portfolio/:id/cash-recalc - 现金重算校验
-router.get(
+// POST /api/portfolio/:id/cash-recalc - 现金重算校验
+// 会执行现金重算写操作，必须用 POST
+router.post(
   '/:id/cash-recalc',
   asyncHandler(async (req: Request, res: Response) => {
     const portfolioId = req.params.id;
@@ -1270,7 +1262,6 @@ router.get(
       );
       res.status(500).json({
         message: 'Failed to generate period report',
-        error: String(error),
       });
     }
   })

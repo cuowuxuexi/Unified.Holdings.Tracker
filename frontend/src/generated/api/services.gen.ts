@@ -33,9 +33,9 @@ import type {
   GetPortfolioByIdStatsData,
   GetPortfolioByIdStatsError,
   GetPortfolioByIdStatsResponse,
-  GetPortfolioByIdCashRecalcData,
-  GetPortfolioByIdCashRecalcError,
-  GetPortfolioByIdCashRecalcResponse,
+  PostPortfolioByIdCashRecalcData,
+  PostPortfolioByIdCashRecalcError,
+  PostPortfolioByIdCashRecalcResponse,
   GetMarketQuoteData,
   GetMarketQuoteError,
   GetMarketQuoteResponse,
@@ -222,14 +222,14 @@ export const getPortfolioByIdStats = <ThrowOnError extends boolean = false>(
  * 现金重算校验
  * 重新计算组合的现金余额并返回差异
  */
-export const getPortfolioByIdCashRecalc = <
+export const postPortfolioByIdCashRecalc = <
   ThrowOnError extends boolean = false,
 >(
-  options: Options<GetPortfolioByIdCashRecalcData, ThrowOnError>
+  options: Options<PostPortfolioByIdCashRecalcData, ThrowOnError>
 ) => {
-  return (options?.client ?? client).get<
-    GetPortfolioByIdCashRecalcResponse,
-    GetPortfolioByIdCashRecalcError,
+  return (options?.client ?? client).post<
+    PostPortfolioByIdCashRecalcResponse,
+    PostPortfolioByIdCashRecalcError,
     ThrowOnError
   >({
     ...options,
