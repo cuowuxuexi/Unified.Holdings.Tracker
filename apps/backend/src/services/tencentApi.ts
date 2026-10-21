@@ -438,8 +438,13 @@ export async function fetchQuotes(codes: string[]): Promise<Quote[]> {
   }
 }
 
-// K线基础URL，路径会动态调整
-const TENCENT_KLINE_BASE_URL = 'https://web.ifzq.gtimg.cn/appstock/app';
+// K线基础URL，路径会动态调整。
+// web.ifzq.gtimg.cn 对部分云服务器出口返回腾讯 WAF 拦截页（HTTP 501），
+// proxy.finance.qq.com 提供同一接口与同一响应结构；重试时按顺序轮换主机。
+export const TENCENT_KLINE_BASE_URLS = [
+  'https://proxy.finance.qq.com/ifzqgtimg/appstock/app',
+  'https://web.ifzq.gtimg.cn/appstock/app',
+];
 
 /**
  * 从腾讯 API 获取历史 K 线数据
@@ -521,7 +526,6 @@ export async function fetchKline(
     console.error(`[fetchKline] Unknown market type for kline: ${market}`);
     return [];
   }
-  const fullApiUrl = `${TENCENT_KLINE_BASE_URL}${apiUrlPath}`;
 
   // 3. 映射周期参数
   let apiPeriod: string;
@@ -549,15 +553,17 @@ export async function fetchKline(
   };
   // REMOVED: console.log(`[fetchKline PARAMS] processedCode: ${processedCode}, effectiveFq: ${effectiveFq}, apiPeriod: ${apiPeriod}, url: ${fullApiUrl}, params: ${JSON.stringify(params)}`);
 
-  console.log(
-    `[fetchKline] Fetching URL: ${fullApiUrl} with params: ${params.param}`
-  );
-
   // 增加重试逻辑
   const maxRetries = 3; // 最大重试次数
   let retryCount = 0;
 
   while (retryCount <= maxRetries) {
+    const fullApiUrl = `${
+      TENCENT_KLINE_BASE_URLS[retryCount % TENCENT_KLINE_BASE_URLS.length]
+    }${apiUrlPath}`;
+    console.log(
+      `[fetchKline] Fetching URL: ${fullApiUrl} with params: ${params.param}`
+    );
     try {
       const response = await axios.get(fullApiUrl, {
         // 使用动态构建的完整 URL

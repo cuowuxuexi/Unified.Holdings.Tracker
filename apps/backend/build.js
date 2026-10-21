@@ -31,10 +31,17 @@ Promise.all([
     ],
     outfile: path.join(__dirname, 'dist/backfill-portfolio-snapshots.js'),
   }),
+  esbuild.build({
+    ...commonBuildOptions,
+    entryPoints: [
+      path.join(__dirname, 'src/scripts/repairZeroPriceSnapshots.ts'),
+    ],
+    outfile: path.join(__dirname, 'dist/repair-zero-price-snapshots.js'),
+  }),
 ])
   .then(() => {
     console.log(
-      '✅ Backend bundles built successfully: dist/server-bundle.js, dist/backfill-source-data.js, dist/backfill-portfolio-snapshots.js'
+      '✅ Backend bundles built successfully: dist/server-bundle.js, dist/backfill-source-data.js, dist/backfill-portfolio-snapshots.js, dist/repair-zero-price-snapshots.js'
     );
   })
   .catch((e) => {

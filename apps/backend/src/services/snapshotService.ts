@@ -1137,6 +1137,19 @@ async function takeSnapshotForPortfolio(
       includePeriods: [],
     });
 
+    // 行情拉取失败时 stats 以成本充当市值、现价记 0，写进快照就是一天假的净资产和累计盈亏
+    // （2026-09-01..03 即如此）。宁可当天不写，由 08:00 校验任务补采。
+    const unpricedCodes = stats.positions
+      .filter(
+        (pos) => Number(pos.quantity) > 0 && !(Number(pos.currentPrice) > 0)
+      )
+      .map((pos) => pos.asset.code);
+    if (unpricedCodes.length > 0) {
+      throw new Error(
+        `持仓行情缺失，拒绝写入快照: ${unpricedCodes.join(', ')}`
+      );
+    }
+
     const snapshotDate = dateOverride || getSnapshotDate();
     const exchangeRateSnapshots = buildExchangeRateSnapshotInputs(snapshotDate);
     const leverageCumulativeCost = calculateSnapshotLeverageCumulativeCost(

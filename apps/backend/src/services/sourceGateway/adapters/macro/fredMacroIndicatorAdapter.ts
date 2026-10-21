@@ -57,7 +57,9 @@ export class FredMacroIndicatorAdapter
     }
 
     const records: MacroIndicatorSnapshot[] = [];
-    const catalog = getFrozenMacroIndicatorCatalog(request.indicatorIds);
+    const catalog = getFrozenMacroIndicatorCatalog(request.indicatorIds).filter(
+      (definition) => definition.source === 'FRED'
+    );
     // 单个序列失败（如 NAPM 已从 FRED 下架）不拖垮整体：记录错误并继续其余指标，
     // 仅当全部序列失败时才整体 fail-closed
     const seriesErrors: Array<{

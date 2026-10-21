@@ -149,4 +149,39 @@ describe('buildMacroHistory', () => {
       expect.objectContaining({ date: '2026-12-15', value: 110 })
     );
   });
+
+  it('uses per-frequency thresholds so the latest monthly release is not flagged stale', () => {
+    const result = buildMacroHistory({
+      year: 2026,
+      requestedDate: '2026-10-20',
+      rows: [
+        row({ date: '2026-10-16', indicatorId: 'DXY', value: 121.4 }),
+        row({ date: '2026-09-01', indicatorId: 'US_CPI', value: 336.3 }),
+        row({ date: '2026-09-01', indicatorId: 'US_PMI', value: 54.5 }),
+        row({ date: '2026-09-01', indicatorId: 'US_POLICY_RATE', value: 3.75 }),
+        row({ date: '2026-07-01', indicatorId: 'US_POLICY_RATE', value: 4 }),
+      ],
+    });
+
+    expect(result.warnings).toEqual([]);
+  });
+
+  it('still flags a daily series that stopped updating for two weeks', () => {
+    const result = buildMacroHistory({
+      year: 2026,
+      requestedDate: '2026-10-20',
+      indicatorIds: ['DXY'],
+      rows: [row({ date: '2026-10-02', indicatorId: 'DXY', value: 121 })],
+    });
+
+    expect(result.warnings).toEqual([
+      expect.objectContaining({
+        code: 'macro_indicator_stale',
+        details: expect.objectContaining({
+          stale_days: 18,
+          max_stale_days: 14,
+        }),
+      }),
+    ]);
+  });
 });

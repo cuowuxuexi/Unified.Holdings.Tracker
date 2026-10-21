@@ -2,11 +2,16 @@ import { M2DataRepository } from '@uht/domain';
 import { SourceGatewayRepository } from '@uht/domain/repositories';
 import { SourceGateway } from '../../../sourceGateway';
 import {
+  createEastmoneyMacroIndicatorAdapter,
   createFredMacroIndicatorAdapter,
   getMacroCatalogResponse,
   normalizeFredObservations,
   runMacroProductionFetch,
 } from '..';
+import {
+  eastmoneyEmptyFixture,
+  eastmoneyIsmPmiFixture,
+} from '../__fixtures__/eastmoney';
 import {
   fredFailureFixture,
   fredMissingValueFixture,
@@ -122,11 +127,12 @@ describe('macro catalog freeze semantics', () => {
     expect(getMacroCatalogResponse(['US_POLICY_RATE', 'DXY'])).toEqual([
       expect.objectContaining({
         indicatorId: 'DXY',
+        source: 'FRED',
         sourceSeriesId: 'DTWEXBGS',
         frequency: 'DAILY',
         observationDateSemantics: 'OBSERVATION_DATE',
         releaseCadence: 'WEEKLY',
-        defaultMaxStaleDays: 10,
+        defaultMaxStaleDays: 14,
         factDateField: 'date',
         factDateSemantics: 'FRED_OBSERVATION_DATE',
         releaseDateField: null,
@@ -135,21 +141,133 @@ describe('macro catalog freeze semantics', () => {
       }),
       expect.objectContaining({
         indicatorId: 'US_POLICY_RATE',
+        source: 'FRED',
         sourceSeriesId: 'FEDFUNDS',
         frequency: 'MONTHLY',
         observationDateSemantics: 'PERIOD_START_DATE',
         releaseCadence: 'MONTHLY',
-        defaultMaxStaleDays: 45,
+        defaultMaxStaleDays: 80,
+      }),
+    ]);
+  });
+
+  it('keeps the latest monthly release fresh until the next release is due', () => {
+    // 9 月 CPI 记为 09-01，10-15 发布；到 11-12 下一期发布前都不该判 stale
+    const normalized = normalizeFredObservations(
+      {
+        observations: [
+          {
+            date: '2026-09-01',
+            value: '336.3',
+            realtime_start: '2026-10-15',
+          },
+        ],
+      },
+      {
+        indicatorId: 'US_CPI',
+        sourceId: 'fred-macro',
+        asOfDate: '2026-11-12',
+        maxStaleDays: getMacroCatalogResponse(['US_CPI'])[0]
+          .defaultMaxStaleDays,
+      }
+    );
+
+    expect(normalized.records[0]).toEqual(
+      expect.objectContaining({ status: 'SUCCESS' })
+    );
+  });
+
+  it('sources US_PMI from Eastmoney because FRED delisted NAPM', () => {
+    expect(getMacroCatalogResponse(['US_PMI'])).toEqual([
+      expect.objectContaining({
+        indicatorId: 'US_PMI',
+        source: 'EASTMONEY',
+        sourceSeriesId: 'EMG00002790',
+        observationDateSemantics: 'PERIOD_START_DATE',
       }),
     ]);
   });
 });
 
-describe('FredMacroIndicatorAdapter', () => {
-  it('fetches the frozen multi-indicator catalog in canonical order without hardcoded credentials', async () => {
+describe('EastmoneyMacroIndicatorAdapter', () => {
+  const context = {
+    sourceId: 'eastmoney-macro',
+    operation: 'macro-indicator',
+    attempt: 1,
+    timeoutMs: 1000,
+    signal: new AbortController().signal,
+  };
+
+  it('keeps only released periods inside the window and maps them to facts', async () => {
     const fetcher: jest.MockedFunction<MacroHttpFetcher> = jest
       .fn()
-      .mockResolvedValueOnce(jsonResponse(fredSuccessFixture))
+      .mockResolvedValue(jsonResponse(eastmoneyIsmPmiFixture));
+    const adapter = createEastmoneyMacroIndicatorAdapter({ fetcher });
+
+    const result = await adapter.fetch(
+      {
+        indicatorIds: ['US_PMI', 'US_CPI'],
+        dateFrom: '2026-07-23',
+        dateTo: '2026-10-21',
+        asOfDate: '2026-10-21',
+      },
+      context
+    );
+
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    const url = new URL(fetcher.mock.calls[0][0]);
+    expect(url.searchParams.get('reportName')).toBe('RPT_ECONOMICVALUE_USA');
+    expect(url.searchParams.get('filter')).toBe('(INDICATOR_ID="EMG00002790")');
+    expect(result.ok).toBe(true);
+    expect(result.data).toEqual([
+      {
+        // 旧一期按 asOfDate 计龄已超阈值，沿用 FRED 归一化的逐条 STALE 语义
+        date: '2026-08-01',
+        indicatorId: 'US_PMI',
+        value: 54.6,
+        unit: 'index',
+        sourceId: 'eastmoney-macro',
+        sourceTime: new Date('2026-09-01T00:00:00.000Z'),
+        status: 'STALE',
+        errorSummary: 'Latest US_PMI observation is stale as of 2026-10-21',
+      },
+      {
+        date: '2026-09-01',
+        indicatorId: 'US_PMI',
+        value: 54.5,
+        unit: 'index',
+        sourceId: 'eastmoney-macro',
+        sourceTime: new Date('2026-10-01T00:00:00.000Z'),
+        status: 'SUCCESS',
+      },
+    ]);
+  });
+
+  it('fails the source when Eastmoney returns no rows', async () => {
+    const fetcher: jest.MockedFunction<MacroHttpFetcher> = jest
+      .fn()
+      .mockResolvedValue(jsonResponse(eastmoneyEmptyFixture));
+    const adapter = createEastmoneyMacroIndicatorAdapter({ fetcher });
+
+    const result = await adapter.fetch(
+      { indicatorIds: ['US_PMI'], asOfDate: '2026-10-21' },
+      context
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toEqual(
+      expect.objectContaining({
+        code: 'SOURCE_EMPTY_DATA',
+        sourceId: 'eastmoney-macro',
+      })
+    );
+  });
+});
+
+describe('FredMacroIndicatorAdapter', () => {
+  it('fetches the FRED-sourced catalog entries in canonical order without hardcoded credentials', async () => {
+    const fetcher: jest.MockedFunction<MacroHttpFetcher> = jest
+      .fn()
       .mockResolvedValueOnce(jsonResponse(fredSuccessFixture))
       .mockResolvedValueOnce(jsonResponse(fredSuccessFixture))
       .mockResolvedValueOnce(jsonResponse(fredSuccessFixture));
@@ -175,22 +293,21 @@ describe('FredMacroIndicatorAdapter', () => {
     );
 
     expect(result.ok).toBe(true);
-    expect(result.data).toHaveLength(4);
+    expect(result.data).toHaveLength(3);
     expect(result.metadata).toEqual(
       expect.objectContaining({
         source: 'fred',
-        indicatorCount: 4,
-        indicatorIds: ['DXY', 'US_CPI', 'US_PMI', 'US_POLICY_RATE'],
+        indicatorCount: 3,
+        indicatorIds: ['DXY', 'US_CPI', 'US_POLICY_RATE'],
         factDateSemantics: 'FRED_OBSERVATION_DATE',
         sourceTimeSemantics: 'FRED_REALTIME_END_THEN_START',
       })
     );
-    expect(fetcher).toHaveBeenCalledTimes(4);
+    expect(fetcher).toHaveBeenCalledTimes(3);
     const urls = fetcher.mock.calls.map(([url]) => new URL(url));
     expect(urls.map((url) => url.searchParams.get('series_id'))).toEqual([
       'DTWEXBGS',
       'CPIAUCSL',
-      'NAPM',
       'FEDFUNDS',
     ]);
     expect(
@@ -371,6 +488,99 @@ describe('runMacroProductionFetch', () => {
         status: 'failed',
         errorCode: 'SOURCE_HTTP_ERROR',
       })
+    );
+  });
+});
+
+describe('runMacroProductionFetch - FRED 与东方财富分源', () => {
+  const request = {
+    indicatorIds: ['US_CPI', 'US_PMI'] as Array<'US_CPI' | 'US_PMI'>,
+    dateFrom: '2026-07-23',
+    dateTo: '2026-10-21',
+    asOfDate: '2026-10-21',
+  };
+
+  it('merges records from both sources, each keeping its own sourceId', async () => {
+    const gatewayRepository = createGatewayRepository();
+    const fetcher: jest.MockedFunction<MacroHttpFetcher> = jest
+      .fn()
+      .mockResolvedValue(jsonResponse(fredSuccessFixture));
+    const eastmoneyFetcher: jest.MockedFunction<MacroHttpFetcher> = jest
+      .fn()
+      .mockResolvedValue(jsonResponse(eastmoneyIsmPmiFixture));
+
+    const result = await runMacroProductionFetch(request, {
+      gatewayRepository,
+      apiKey: 'test-key',
+      fetcher,
+      eastmoneyFetcher,
+      retryPolicy: { maxAttempts: 1 },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected success');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(
+      new URL(fetcher.mock.calls[0][0]).searchParams.get('series_id')
+    ).toBe('CPIAUCSL');
+    expect(
+      result.records.map((record) => [record.indicatorId, record.sourceId])
+    ).toEqual([
+      ['US_CPI', 'fred-macro'],
+      ['US_PMI', 'eastmoney-macro'],
+      ['US_PMI', 'eastmoney-macro'],
+    ]);
+    expect(result.metadata).toEqual(
+      expect.objectContaining({
+        sourceIds: ['fred-macro', 'eastmoney-macro'],
+      })
+    );
+  });
+
+  it('keeps FRED results when Eastmoney fails', async () => {
+    const result = await runMacroProductionFetch(request, {
+      gatewayRepository: createGatewayRepository(),
+      apiKey: 'test-key',
+      fetcher: jest.fn().mockResolvedValue(jsonResponse(fredSuccessFixture)),
+      eastmoneyFetcher: jest
+        .fn()
+        .mockResolvedValue(jsonResponse({ error: 'down' }, 503)),
+      retryPolicy: { maxAttempts: 1 },
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected success');
+    expect(result.sourceId).toBe('fred-macro');
+    expect(result.records.map((record) => record.indicatorId)).toEqual([
+      'US_CPI',
+    ]);
+    expect(result.metadata).toEqual(
+      expect.objectContaining({
+        sourceErrors: [
+          expect.objectContaining({ sourceId: 'eastmoney-macro' }),
+        ],
+      })
+    );
+  });
+
+  it('still fetches Eastmoney indicators when FRED_API_KEY is missing', async () => {
+    const fetcher: jest.MockedFunction<MacroHttpFetcher> = jest.fn();
+    const result = await runMacroProductionFetch(request, {
+      gatewayRepository: createGatewayRepository(),
+      apiKey: '',
+      fetcher,
+      eastmoneyFetcher: jest
+        .fn()
+        .mockResolvedValue(jsonResponse(eastmoneyIsmPmiFixture)),
+      retryPolicy: { maxAttempts: 1 },
+    });
+
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error('expected success');
+    expect(result.sourceId).toBe('eastmoney-macro');
+    expect(result.metadata).toEqual(
+      expect.objectContaining({ skippedIndicatorIds: ['US_CPI'] })
     );
   });
 });

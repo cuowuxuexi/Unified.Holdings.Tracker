@@ -54,9 +54,9 @@ jest.mock('../currencyService', () => ({
 
 describe('snapshotService - snapshot date timezone', () => {
   it('uses the Beijing calendar day before subtracting one day', () => {
-    expect(
-      getSnapshotDateForNow(new Date('2026-04-23T22:30:00.013Z'))
-    ).toBe('2026-04-23');
+    expect(getSnapshotDateForNow(new Date('2026-04-23T22:30:00.013Z'))).toBe(
+      '2026-04-23'
+    );
   });
 });
 
@@ -150,5 +150,55 @@ describe('snapshotService - P0 snapshotDate kline backfill', () => {
     expect(updatePortfolioCall).toBeDefined();
     expect(updatePortfolioCall?.[1]).toBe(120); // totalMarketValue
     expect(updatePortfolioCall?.[2]).toBe(1120); // netAssets = 120 + 1000 - 0
+  });
+});
+
+describe('snapshotService - 行情缺失不写快照', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+
+    (container.getPortfolioUseCase.execute as jest.Mock).mockResolvedValue({
+      id: 'p1',
+      name: '组合1',
+      cash: 0,
+      initialCash: 0,
+      leverage: {
+        totalAmount: 0,
+        usedAmount: 0,
+        availableAmount: 0,
+        costRate: 0,
+      },
+      transactions: [],
+    });
+  });
+
+  it('任一持仓现价为 0 时抛错且不写任何快照行', async () => {
+    (portfolioStatsService.getFullStats as jest.Mock).mockResolvedValue({
+      totalMarketValue: 692348,
+      netAssets: 692348,
+      totalPnl: -100,
+      dailyPnl: 0,
+      cash: 0,
+      positions: [
+        {
+          asset: { code: 'hk00700', name: '腾讯控股' },
+          quantity: 1400,
+          currentPrice: 0,
+          marketValue: 692348,
+        },
+        {
+          asset: { code: 'sh600276', name: '恒瑞医药' },
+          quantity: 7000,
+          currentPrice: 47.68,
+          marketValue: 333760,
+        },
+      ],
+    });
+
+    await expect(takeSnapshotForPortfolio('p1', '2026-09-01')).rejects.toThrow(
+      'hk00700'
+    );
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.$executeRawUnsafe).not.toHaveBeenCalled();
   });
 });

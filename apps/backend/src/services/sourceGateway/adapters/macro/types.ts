@@ -7,9 +7,11 @@ export type MacroObservationDateSemantics =
   | 'OBSERVATION_DATE'
   | 'PERIOD_START_DATE';
 export type MacroReleaseCadence = 'WEEKLY' | 'MONTHLY';
+export type MacroIndicatorSource = 'FRED' | 'EASTMONEY';
 
 export interface MacroIndicatorDefinition {
   indicatorId: MacroIndicatorId;
+  source: MacroIndicatorSource;
   sourceSeriesId: string;
   unit: string;
   label: string;
@@ -74,4 +76,17 @@ export interface FredObservationResponse {
   observations?: FredObservation[];
   error_code?: number | string;
   error_message?: string;
+}
+
+export interface EastmoneyEconomicValueRow {
+  INDICATOR_ID?: string;
+  REPORT_DATE?: string;
+  PUBLISH_DATE?: string;
+  VALUE?: number | null;
+}
+
+export interface EastmoneyEconomicValueResponse {
+  success?: boolean;
+  message?: string;
+  result?: { data?: EastmoneyEconomicValueRow[] } | null;
 }

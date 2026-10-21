@@ -10,6 +10,10 @@ export {
   isFredMacroConfigured,
 } from './catalog';
 export {
+  EastmoneyMacroIndicatorAdapter,
+  createEastmoneyMacroIndicatorAdapter,
+} from './eastmoneyMacroIndicatorAdapter';
+export {
   FredMacroIndicatorAdapter,
   createFredMacroIndicatorAdapter,
 } from './fredMacroIndicatorAdapter';
@@ -22,6 +26,7 @@ export type {
   MacroIndicatorDefinition,
   MacroIndicatorFrequency,
   MacroIndicatorId,
+  MacroIndicatorSource,
   MacroObservationDateSemantics,
   MacroIndicatorRequest,
   MacroReleaseCadence,

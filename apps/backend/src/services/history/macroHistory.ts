@@ -1,3 +1,5 @@
+import { MACRO_INDICATORS } from '../sourceGateway/adapters/macro/catalog';
+
 const MACRO_HISTORY_INDICATORS = [
   'DXY',
   'US_CPI',
@@ -77,7 +79,6 @@ export interface MacroHistoryResult {
   warnings: MacroHistoryWarning[];
 }
 
-const DEFAULT_MAX_STALE_DAYS = 70;
 const STATUS_PRIORITY: Record<MacroHistorySnapshotStatus, number> = {
   SUCCESS: 4,
   STALE: 3,
@@ -89,7 +90,6 @@ export function buildMacroHistory(
   input: BuildMacroHistoryInput
 ): MacroHistoryResult {
   const indicatorIds = input.indicatorIds ?? [...MACRO_HISTORY_INDICATORS];
-  const maxStaleDays = input.maxStaleDays ?? DEFAULT_MAX_STALE_DAYS;
   const startDate = `${input.year}-01-01`;
   const endDate = minDate(input.requestedDate, `${input.year}-12-31`);
   const supportedIndicators = new Set<string>(indicatorIds);
@@ -168,6 +168,9 @@ export function buildMacroHistory(
       });
     }
 
+    // 阈值随序列频率走（月度按期初日期计龄要覆盖发布滞后），与采集时判定 STALE 的口径一致
+    const maxStaleDays =
+      input.maxStaleDays ?? MACRO_INDICATORS[indicatorId].defaultMaxStaleDays;
     const staleDays = daysBetween(latest.date, endDate);
     if (latest.status === 'STALE' || staleDays > maxStaleDays) {
       warnings.push({

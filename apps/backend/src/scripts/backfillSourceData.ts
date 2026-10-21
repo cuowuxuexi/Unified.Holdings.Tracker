@@ -1672,7 +1672,8 @@ async function hydrateMacroPlansWithSourceFetch(
         target.status = 'fetched';
         target.attributes = {
           ...target.attributes,
-          sourceId: response.sourceId,
+          // 宏观指标可来自不同源（FRED / 东方财富），按记录自身的源落库
+          sourceId: record.sourceId,
           sourceDate: record.date,
           sourceTime: toIsoString(record.sourceTime),
           status: record.status,
