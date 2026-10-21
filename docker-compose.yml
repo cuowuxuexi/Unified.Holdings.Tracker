@@ -33,10 +33,9 @@ services:
     restart: unless-stopped
     ports:
       - '8080:80'
-    # 如需启用 Basic Auth：生成 deploy/.htpasswd 后放开下面的挂载，
-    # 并在 deploy/nginx-docker.conf 取消 auth_basic 注释（详见 deploy/DEPLOY.md）
-    # volumes:
-    #   - ./deploy/.htpasswd:/etc/nginx/.htpasswd:ro
+    # 公网访问的 Basic Auth 密码文件（本机/Tailscale 免密）；先生成文件再起容器，见 deploy/DEPLOY.md
+    volumes:
+      - ./deploy/.htpasswd:/etc/nginx/.htpasswd:ro
     depends_on:
       backend:
         condition: service_healthy

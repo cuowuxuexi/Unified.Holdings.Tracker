@@ -437,26 +437,21 @@ systemd 示例文件：
 
 生产服务器实际使用 docker-compose 部署（`tracker-backend` + `tracker-nginx`），而非上文的 PM2 方案。
 
-### Basic Auth（默认关闭，可选启用）
+### 访问控制：本机 / Tailscale 免密，公网要密码
 
-出于个人使用便利，Basic Auth 默认**未启用**——公网访问无需密码。若要给公网访问加密码墙（个人财务数据，建议在不便用 IP 白名单时启用），按以下步骤：
+`deploy/nginx-docker.conf` 按来源 IP 分流：`127.0.0.0/8`、Docker 网桥 `172.16.0.0/12`、Tailscale `100.64.0.0/10` 直接放行；其余（公网）一律 Basic Auth，并按 IP 限速 10 次/秒（突发 60）挡猜密码。日常在已登录 Tailscale 的电脑上用 `http://<服务器 Tailscale IP>:8080` 访问，无需密码。
+
+部署前先生成密码文件（**必须先有文件再起容器**，否则 Docker 会创建同名目录导致 nginx 报错）：
 
 ```bash
-cd /root/tracker/Unified.Holdings.Tracker-server
-
-# 1. 生成密码文件（二选一）
-apt install -y apache2-utils && htpasswd -c deploy/.htpasswd 你的用户名   # 交互输入密码
-# 或：printf '你的用户名:%s\n' "$(openssl passwd -apr1)" > deploy/.htpasswd
-
-# 2. 放开 nginx 配置：取消 deploy/nginx-docker.conf 中 auth_basic 两行的注释
-# 3. 放开挂载：取消 docker-compose.yml 中 nginx.volumes 的注释
-# 4. 重建并启动
+printf '你的用户名:%s
+' "$(openssl passwd -apr1)" > deploy/.htpasswd   # 交互输入密码
 docker compose up -d --build
 ```
 
-验证：`curl -I http://127.0.0.1:8080/api/health` 应返回 `401`，带凭证 `curl -u 用户名:密码 ...` 返回 `200`。
+验证：本机 `curl -o /dev/null -w '%{http_code}' http://127.0.0.1:8080/api/health` 为 `200`；从公网不带凭证为 `401`，带 `-u 用户名:密码` 为 `200`。
 
-> 注意：务必先生成 `deploy/.htpasswd` 文件再放开挂载，否则 Docker 会创建同名**目录**导致 nginx 报错。
+> 公网走的是 HTTP，密码在不可信网络上可被窃听；能用 Tailscale 时优先用 Tailscale 地址。
 
 ### 其他安全基线（代码内置，无需配置，默认生效）
 
