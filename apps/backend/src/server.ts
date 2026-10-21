@@ -26,6 +26,10 @@ import {
   startDbBackupScheduler,
   stopDbBackupScheduler,
 } from './services/dbBackupService';
+import {
+  startDividendScheduler,
+  stopDividendScheduler,
+} from './services/dividends';
 import { openApiDocument } from './openapi';
 
 const port = appEnv.port;
@@ -385,6 +389,29 @@ async function initializeDatabase() {
           "updatedAt" DATETIME NOT NULL
         )
       `,
+      DividendSettlement: `
+        CREATE TABLE IF NOT EXISTS "DividendSettlement" (
+          "id" INTEGER NOT NULL PRIMARY KEY AUTOINCREMENT,
+          "portfolioId" TEXT NOT NULL,
+          "eventKey" TEXT NOT NULL,
+          "assetCode" TEXT NOT NULL,
+          "exDate" TEXT NOT NULL,
+          "payDate" TEXT,
+          "status" TEXT NOT NULL,
+          "transactionId" TEXT,
+          "quantity" DECIMAL,
+          "cashPerShare" DECIMAL,
+          "currency" TEXT,
+          "grossAmount" DECIMAL,
+          "taxAmount" DECIMAL,
+          "netAmount" DECIMAL,
+          "amountCny" DECIMAL,
+          "sourceId" TEXT,
+          "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          FOREIGN KEY ("portfolioId") REFERENCES "Portfolio"("id") ON DELETE CASCADE
+        )
+      `,
     };
 
     const indexStatements = [
@@ -410,6 +437,8 @@ async function initializeDatabase() {
       `CREATE INDEX IF NOT EXISTS "MacroIndicatorSnapshot_indicatorId_date_idx" ON "MacroIndicatorSnapshot"("indicatorId", "date")`,
       `CREATE INDEX IF NOT EXISTS "MacroIndicatorSnapshot_sourceId_date_idx" ON "MacroIndicatorSnapshot"("sourceId", "date")`,
       `CREATE INDEX IF NOT EXISTS "MacroIndicatorSnapshot_status_date_idx" ON "MacroIndicatorSnapshot"("status", "date")`,
+      `CREATE UNIQUE INDEX IF NOT EXISTS "DividendSettlement_portfolioId_eventKey_key" ON "DividendSettlement"("portfolioId", "eventKey")`,
+      `CREATE INDEX IF NOT EXISTS "DividendSettlement_transactionId_idx" ON "DividendSettlement"("transactionId")`,
     ];
 
     const existingTables = new Set(
@@ -600,6 +629,13 @@ const startServer = async () => {
     } catch (error) {
       console.error('Failed to start db backup scheduler:', error);
     }
+
+    // 启动每日自动分红入账任务
+    try {
+      startDividendScheduler();
+    } catch (error) {
+      console.error('Failed to start dividend scheduler:', error);
+    }
   }
 
   // Zombie Killer: 当作为 Electron 子进程运行时，父进程退出后自动退出
@@ -627,6 +663,7 @@ const startServer = async () => {
     console.log(`Received ${signal}. Shutting down gracefully...`);
     stopSnapshotScheduler();
     stopDbBackupScheduler();
+    stopDividendScheduler();
     server.close(() => {
       console.log('HTTP server closed');
       process.exit(0);

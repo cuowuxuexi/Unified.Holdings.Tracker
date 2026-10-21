@@ -568,7 +568,13 @@ export async function addTransactionToPortfolio(
       );
 
       let exchangeRate = 1.0;
-      if (normalizedData.assetCode) {
+      if (
+        normalizedData.exchangeRate !== undefined &&
+        normalizedData.exchangeRate > 0
+      ) {
+        // 自动分红按派息日汇率入账，调用方显式给出汇率时以其为准
+        exchangeRate = normalizedData.exchangeRate;
+      } else if (normalizedData.assetCode) {
         const isForeign =
           normalizedData.assetCode.toLowerCase().startsWith('hk') ||
           normalizedData.assetCode.toLowerCase().startsWith('us');

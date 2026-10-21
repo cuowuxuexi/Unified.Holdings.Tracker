@@ -317,6 +317,58 @@ export const openApiDocument: UhtOpenApiDocument = {
         },
       },
     },
+    '/portfolio/{id}/dividends': {
+      get: {
+        tags: ['Transaction'],
+        summary: '分红台账预览（不写库）',
+        description:
+          '按除权日前持仓与东方财富分红数据计算应得现金分红；state 为 SETTLED / MATCHED_MANUAL / DISMISSED / TO_SETTLE / PENDING / BACKFILL_AVAILABLE。',
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        responses: {
+          '200': { description: '分红台账' },
+          '404': { description: '组合不存在' },
+        },
+      },
+    },
+    '/portfolio/{id}/dividends/sync': {
+      post: {
+        tags: ['Transaction'],
+        summary: '入账可入账分红',
+        description:
+          '默认只入账最近 30 天派息的分红；includeHistory=true 时连同更早的历史分红一起补录。每个分红事件只入账一次，删除的自动分红不会再建。',
+        parameters: [
+          {
+            name: 'id',
+            in: 'path',
+            required: true,
+            schema: { type: 'string', format: 'uuid' },
+          },
+        ],
+        requestBody: {
+          required: false,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: { includeHistory: { type: 'boolean' } },
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: '同步结果（分红台账）' },
+          '404': { description: '组合不存在' },
+          '409': { description: '该组合的分红同步正在进行' },
+        },
+      },
+    },
     '/portfolio/{id}/stats': {
       get: {
         tags: ['Portfolio'],

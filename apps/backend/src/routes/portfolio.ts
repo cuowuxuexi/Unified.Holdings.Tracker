@@ -22,6 +22,11 @@ import {
   parseHistoryContextDate,
   parseHistoryContextYear,
 } from '../services/portfolioHistoryContextService';
+import {
+  AUTO_SETTLE_WINDOW_DAYS,
+  dismissDividendSettlementByTransaction,
+  syncPortfolioDividends,
+} from '../services/dividends';
 
 const router = Router();
 
@@ -901,6 +906,14 @@ router.delete(
         portfolioId,
         transactionId: txId,
       });
+      // 删掉的若是自动/已匹配分红，记为放弃，避免下次同步又自动建回来
+      await dismissDividendSettlementByTransaction(portfolioId, txId).catch(
+        (error) =>
+          console.error(
+            `[DELETE transaction] 分红台账标记失败 ${portfolioId}/${txId}:`,
+            error
+          )
+      );
       portfolioStatsService.clearCache(portfolioId);
       res.status(204).send();
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -912,6 +925,62 @@ router.delete(
       return res
         .status(404)
         .json({ message: 'Portfolio or Transaction not found' });
+    }
+  })
+);
+
+function dividendAutoWindowStart(): string {
+  const now = new Date(Date.now() + 8 * 60 * 60 * 1000);
+  now.setUTCDate(now.getUTCDate() - AUTO_SETTLE_WINDOW_DAYS);
+  return now.toISOString().slice(0, 10);
+}
+
+// GET /api/portfolio/:id/dividends - 分红台账预览（不写库）
+router.get(
+  '/:id/dividends',
+  asyncHandler(async (req: Request, res: Response) => {
+    const portfolioId = req.params.id;
+    try {
+      const report = await syncPortfolioDividends(portfolioId, {
+        dryRun: true,
+        payDateFrom: dividendAutoWindowStart(),
+      });
+      res.json(report);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.startsWith('Portfolio not found')
+      ) {
+        return res.status(404).json({ message: 'Portfolio not found' });
+      }
+      throw error;
+    }
+  })
+);
+
+// POST /api/portfolio/:id/dividends/sync - 入账可入账分红
+// body.includeHistory=true 时连同自动窗口（最近 30 天）之前的历史分红一起补录
+router.post(
+  '/:id/dividends/sync',
+  asyncHandler(async (req: Request, res: Response) => {
+    const portfolioId = req.params.id;
+    const includeHistory = req.body?.includeHistory === true;
+    try {
+      const report = await syncPortfolioDividends(portfolioId, {
+        payDateFrom: includeHistory ? undefined : dividendAutoWindowStart(),
+      });
+      res.json(report);
+    } catch (error) {
+      if (
+        error instanceof Error &&
+        error.message.startsWith('Portfolio not found')
+      ) {
+        return res.status(404).json({ message: 'Portfolio not found' });
+      }
+      if (error instanceof Error && error.message.includes('正在进行')) {
+        return res.status(409).json({ message: error.message });
+      }
+      throw error;
     }
   })
 );

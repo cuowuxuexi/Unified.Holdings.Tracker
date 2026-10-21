@@ -29,6 +29,7 @@ model Portfolio {
   transactions            Transaction[]
   snapshots               PortfolioSnapshot[]
   positionSnapshots       PositionSnapshot[]
+  dividendSettlements     DividendSettlement[]
 }
 
 model Asset {
@@ -264,6 +265,34 @@ model MacroIndicatorSnapshot {
   @@index([indicatorId, date])
   @@index([sourceId, date])
   @@index([status, date])
+}
+
+// 自动分红结算台账：一条分红事件在一个组合里只处理一次。
+// 服务端以原生 SQL 读写（与 server.ts initializeDatabase 的建表保持一致）。
+model DividendSettlement {
+  id            Int       @id @default(autoincrement())
+  portfolioId   String
+  eventKey      String // assetCode:exDate:每股金额:币种
+  assetCode     String
+  exDate        String // YYYY-MM-DD 除权（息）日
+  payDate       String? // YYYY-MM-DD 派息日
+  status        String // SETTLED | MATCHED_MANUAL | DISMISSED
+  transactionId String? // 自动创建或匹配到的 DIVIDEND 交易
+  quantity      Decimal?
+  cashPerShare  Decimal? // 税前每股（本币）
+  currency      String?
+  grossAmount   Decimal? // 税前（本币）
+  taxAmount     Decimal? // 预扣税（本币）
+  netAmount     Decimal? // 到账（本币）
+  amountCny     Decimal?
+  sourceId      String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @default(now()) @updatedAt
+
+  portfolio Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
+
+  @@unique([portfolioId, eventKey])
+  @@index([transactionId])
 }
 
 model AttentionItem {
