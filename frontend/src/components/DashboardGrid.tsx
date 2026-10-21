@@ -17,6 +17,7 @@ import { PnlCardsRow } from './cards/CoreIndicatorsCard';
 import CoreIndicatorsSection from './cards/CoreIndicatorsCard';
 import AttentionSection from './cards/AttentionSection';
 import PortfolioHistoryPanel from './PortfolioHistoryPanel';
+import DividendPanel from './DividendPanel';
 
 interface DashboardGridProps {
   portfolioId: string;
@@ -136,6 +137,12 @@ const DashboardGrid: React.FC<DashboardGridProps> = ({
         }
       >
         <PortfolioHistoryPanel portfolioId={portfolioId} />
+      </ErrorBoundary>
+
+      <ErrorBoundary
+        fallback={<Alert type="error" showIcon message="分红面板渲染失败" />}
+      >
+        <DividendPanel portfolioId={portfolioId} />
       </ErrorBoundary>
 
       {/* 资产明细 */}

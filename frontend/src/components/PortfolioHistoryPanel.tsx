@@ -1,5 +1,4 @@
 import { useMemo, useState } from 'react';
-import ReactECharts from 'echarts-for-react';
 import {
   Alert,
   Card,
@@ -15,13 +14,16 @@ import {
   Tag,
   Typography,
 } from 'antd';
-import '../lib/echarts';
 import { usePortfolioHistoryContext } from '../hooks/usePortfolioHistoryContext';
 import type {
   ApiContractWarning,
   PortfolioHistoryContextData,
-  PortfolioHistorySeriesPoint,
 } from '../store/types';
+import { PortfolioHistoryChart } from './PortfolioHistoryChart';
+import {
+  classifyHistoryWarnings,
+  formatMacroIndicatorName,
+} from './historyWarnings';
 import {
   formatCurrency,
   formatNumber,
@@ -55,8 +57,9 @@ export function PortfolioHistoryPanel({
     usePortfolioHistoryContext(portfolioId, selectedYear);
 
   const history = data?.data ?? null;
-  const warnings = useMemo(
-    () => collectWarnings(data?.warnings ?? [], history),
+  const { gaps, notes } = useMemo(
+    () =>
+      classifyHistoryWarnings(collectWarnings(data?.warnings ?? [], history)),
     [data?.warnings, history]
   );
   const yearOptions = useMemo(
@@ -69,10 +72,6 @@ export function PortfolioHistoryPanel({
         }
       ),
     [currentYear]
-  );
-  const chartOption = useMemo(
-    () => buildPortfolioSeriesOption(history?.portfolio.series ?? []),
-    [history?.portfolio.series]
   );
 
   return (
@@ -112,41 +111,35 @@ export function PortfolioHistoryPanel({
         <Empty description="该年度暂无历史数据" />
       ) : (
         <>
-          <HistoryWindowSummary
-            history={history}
-            warningCount={warnings.length}
-          />
+          <HistoryWindowSummary history={history} gapCount={gaps.length} />
 
-          {warnings.length > 0 && (
+          {gaps.length > 0 && (
             <Alert
               style={{ marginBottom: 16 }}
               type="warning"
               showIcon
-              message="历史数据存在缺口"
+              message={`历史数据缺口（${gaps.length}）`}
               description={
                 <Space direction="vertical" size={4}>
-                  {warnings.slice(0, 5).map((warning, index) => (
-                    <Text key={`${warning.code}-${index}`}>
-                      {warning.code}: {warning.message}
-                    </Text>
+                  {gaps.map((gap) => (
+                    <Text key={gap.key}>{gap.text}</Text>
                   ))}
-                  {warnings.length > 5 && (
-                    <Text type="secondary">
-                      还有 {warnings.length - 5} 条缺口记录。
-                    </Text>
-                  )}
                 </Space>
               }
             />
           )}
+          {notes.length > 0 && (
+            <Space direction="vertical" size={2} style={{ marginBottom: 12 }}>
+              {notes.map((note) => (
+                <Text key={note.key} type="secondary" style={{ fontSize: 12 }}>
+                  说明：{note.text}
+                </Text>
+              ))}
+            </Space>
+          )}
 
           {history.portfolio.series.length > 0 ? (
-            <ReactECharts
-              option={chartOption}
-              style={{ height: 320, width: '100%' }}
-              notMerge
-              lazyUpdate
-            />
+            <PortfolioHistoryChart series={history.portfolio.series} />
           ) : (
             <Empty
               style={{ margin: '32px 0' }}
@@ -210,10 +203,10 @@ export function PortfolioHistoryPanel({
 
 function HistoryWindowSummary({
   history,
-  warningCount,
+  gapCount,
 }: {
   history: PortfolioHistoryContextData;
-  warningCount: number;
+  gapCount: number;
 }) {
   const window = history.portfolio_year_window;
   const latestPoint =
@@ -231,7 +224,7 @@ function HistoryWindowSummary({
         <Statistic title="快照天数" value={window.snapshot_days} />
       </Col>
       <Col xs={12} md={6}>
-        <Statistic title="缺口数" value={warningCount} />
+        <Statistic title="缺口数" value={gapCount} />
       </Col>
       {latestPoint && (
         <>
@@ -611,55 +604,6 @@ function SourceHealthSummary({
   );
 }
 
-function buildPortfolioSeriesOption(series: PortfolioHistorySeriesPoint[]) {
-  return {
-    tooltip: { trigger: 'axis' },
-    legend: {
-      top: 0,
-      data: ['净资产', '总市值', '现金', '累计盈亏'],
-    },
-    grid: { left: 64, right: 24, top: 44, bottom: 54 },
-    xAxis: {
-      type: 'category',
-      data: series.map((point) => point.date),
-      boundaryGap: false,
-    },
-    yAxis: {
-      type: 'value',
-      axisLabel: {
-        formatter: (value: number) => `${Math.round(value / 10000)}万`,
-      },
-    },
-    dataZoom: [{ type: 'inside' }, { type: 'slider', height: 18, bottom: 16 }],
-    series: [
-      {
-        name: '净资产',
-        type: 'line',
-        smooth: true,
-        data: series.map((point) => point.net_assets),
-      },
-      {
-        name: '总市值',
-        type: 'line',
-        smooth: true,
-        data: series.map((point) => point.total_market_value),
-      },
-      {
-        name: '现金',
-        type: 'line',
-        smooth: true,
-        data: series.map((point) => point.cash),
-      },
-      {
-        name: '累计盈亏',
-        type: 'line',
-        smooth: true,
-        data: series.map((point) => point.total_pnl),
-      },
-    ],
-  };
-}
-
 function collectWarnings(
   envelopeWarnings: ApiContractWarning[],
   history: PortfolioHistoryContextData | null
@@ -695,16 +639,6 @@ function renderYieldRate(value: number | null | undefined) {
   return value === null || value === undefined
     ? 'N/A'
     : `${formatNumber(value)}%`;
-}
-
-function formatMacroIndicatorName(indicator: string) {
-  const names: Record<string, string> = {
-    DXY: '美元指数',
-    US_CPI: '美国 CPI',
-    US_PMI: '美国 PMI',
-    US_POLICY_RATE: '美国政策利率',
-  };
-  return names[indicator] ?? indicator;
 }
 
 function formatNullableNumber(value: number | null | undefined, decimals = 2) {

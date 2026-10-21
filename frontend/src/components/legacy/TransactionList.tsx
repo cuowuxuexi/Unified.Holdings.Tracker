@@ -126,10 +126,16 @@ const TransactionList: React.FC<TransactionListProps> = ({
       title: '类型',
       dataIndex: 'type',
       key: 'type',
-      render: (type: TransactionType) => (
-        <Tag color={getTransactionTypeColor(type)}>
-          {TRANSACTION_TYPE_LABELS[type] || type || '-'}
-        </Tag>
+      render: (type: TransactionType, record: Transaction) => (
+        <>
+          <Tag color={getTransactionTypeColor(type)}>
+            {TRANSACTION_TYPE_LABELS[type] || type || '-'}
+          </Tag>
+          {type === TransactionType.DIVIDEND &&
+          record.notes?.startsWith('自动分红') ? (
+            <Tag bordered={false}>自动</Tag>
+          ) : null}
+        </>
       ),
       filters: Object.entries(TRANSACTION_TYPE_LABELS).map(([k, v]) => ({
         text: v,

@@ -7,6 +7,7 @@ import {
   PortfolioInput,
   PortfolioStats,
   PortfolioHistoryContextEnvelope,
+  DividendReport,
 } from '../store/types'; // 添加 PortfolioStats 导入
 import { frontendEnv } from '../env';
 
@@ -361,6 +362,24 @@ const apiClient = {
       );
       throw error;
     }
+  },
+  fetchPortfolioDividends: async (
+    portfolioId: string
+  ): Promise<DividendReport> => {
+    const response = await axios.get<DividendReport>(
+      `${API_BASE_URL}/api/portfolio/${portfolioId}/dividends`
+    );
+    return response.data;
+  },
+  syncPortfolioDividends: async (
+    portfolioId: string,
+    includeHistory: boolean
+  ): Promise<DividendReport> => {
+    const response = await axios.post<DividendReport>(
+      `${API_BASE_URL}/api/portfolio/${portfolioId}/dividends/sync`,
+      { includeHistory }
+    );
+    return response.data;
   },
   deletePortfolio: async (portfolioId: string): Promise<void> => {
     try {

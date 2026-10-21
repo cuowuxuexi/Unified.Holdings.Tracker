@@ -638,3 +638,58 @@ export interface AppState {
     attentionInfo: string
   ) => Promise<void>;
 }
+
+// ==================== 分红台账（/portfolio/:id/dividends） ====================
+
+export type DividendItemState =
+  | 'SETTLED'
+  | 'MATCHED_MANUAL'
+  | 'DISMISSED'
+  | 'TO_SETTLE'
+  | 'PENDING'
+  | 'BACKFILL_AVAILABLE';
+
+export type DividendEntitlementStatus =
+  | 'PAYABLE'
+  | 'AWAITING_PAYMENT'
+  | 'PAY_DATE_UNKNOWN'
+  | 'UPCOMING';
+
+export interface DividendReportItem {
+  eventKey: string;
+  event: {
+    assetCode: string;
+    market: 'CN' | 'HK' | 'US';
+    exDate: string;
+    recordDate: string | null;
+    payDate: string | null;
+    cashPerShare: number;
+    currency: 'CNY' | 'HKD' | 'USD';
+    description: string;
+    bonusSharesPerShare: number | null;
+    sourceId: string;
+  };
+  assetName: string | null;
+  quantity: number;
+  grossAmount: number;
+  taxRate: number;
+  taxAmount: number;
+  netAmount: number;
+  status: DividendEntitlementStatus;
+  state: DividendItemState;
+  transactionId: string | null;
+  exchangeRate: number | null;
+  amountCny: number | null;
+}
+
+export interface DividendReport {
+  portfolioId: string;
+  generatedAt: string;
+  today: string;
+  dryRun: boolean;
+  taxRates: { CN: number; HK: number; US: number };
+  items: DividendReportItem[];
+  created: number;
+  matched: number;
+  warnings: Array<{ code: string; message: string; assetCode?: string }>;
+}

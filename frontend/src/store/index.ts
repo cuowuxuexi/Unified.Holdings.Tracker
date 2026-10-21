@@ -514,6 +514,10 @@ const useAppStore = create<AppState>((set, get) => ({
       queryClient.invalidateQueries({
         queryKey: ['portfolio-stats', portfolioId],
       });
+      // 删除的可能是分红交易，分红台账状态随之变化
+      queryClient.invalidateQueries({
+        queryKey: ['portfolio-dividends', portfolioId],
+      });
     } catch (error) {
       console.error('Error deleting transaction in store:', error);
       throw error;
