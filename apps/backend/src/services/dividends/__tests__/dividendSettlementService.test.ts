@@ -205,6 +205,43 @@ describe('syncPortfolioDividends', () => {
     expect(report.created).toBe(2);
   });
 
+  it('only reports unparsable plans from periods when the asset was held', async () => {
+    const report = await syncPortfolioDividends(
+      'p1',
+      { dryRun: true, today: '2026-10-21' },
+      (url) => {
+        const filter = new URL(url).searchParams.get('filter') ?? '';
+        const data = filter.includes('00700')
+          ? [
+              ...hkRows['00700'],
+              {
+                IS_BFP: '0',
+                EX_DIVIDEND_DATE: '2023/01/05',
+                DIVIDEND_DATE: '2023/03/24',
+                PLAN_EXPLAIN: '特殊说明:每10股分派1股美团B类普通股股份',
+              },
+              {
+                IS_BFP: '0',
+                EX_DIVIDEND_DATE: '2026/03/02',
+                DIVIDEND_DATE: '2026/03/20',
+                PLAN_EXPLAIN: '特殊说明:实物分派',
+              },
+            ]
+          : [];
+        return Promise.resolve(
+          JSON.stringify({ success: true, result: { data } })
+        );
+      }
+    );
+
+    expect(report.warnings).toEqual([
+      expect.objectContaining({
+        code: 'dividend_plan_unparsed',
+        exDate: '2026-03-02',
+      }),
+    ]);
+  });
+
   it('leaves dividends paid before the auto window for an explicit backfill', async () => {
     const report = await syncPortfolioDividends(
       'p1',

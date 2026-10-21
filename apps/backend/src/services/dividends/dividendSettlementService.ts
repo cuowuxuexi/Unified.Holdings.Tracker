@@ -6,6 +6,7 @@ import { getExchangeRate } from '../currencyService';
 import { portfolioStatsService } from '../portfolioStatsService';
 import {
   computeDividendEntitlements,
+  quantityHeldBefore,
   resolveDividendTaxRates,
   toBeijingDate,
 } from './dividendEntitlement';
@@ -250,7 +251,15 @@ export async function syncPortfolioDividends(
       try {
         const loaded = await loadEvents(assetCode, httpGet);
         events.push(...loaded.events);
-        warnings.push(...loaded.warnings);
+        // 源里几年前的特殊派送（实物分派等）无法解析时，只有当时持仓才需要提醒
+        warnings.push(
+          ...loaded.warnings.filter(
+            (warning) =>
+              warning.code !== 'dividend_plan_unparsed' ||
+              !warning.exDate ||
+              quantityHeldBefore(transactions, assetCode, warning.exDate) > 0
+          )
+        );
       } catch (error) {
         warnings.push({
           code: 'dividend_source_failed',
@@ -472,7 +481,10 @@ export function isDividendAutoSettleEnabled(
 async function settleRecentDividendsForAll(): Promise<void> {
   const today = toBeijingDate(new Date());
   const payDateFrom = shiftDate(today, -AUTO_SETTLE_WINDOW_DAYS);
-  const portfolios = await container.listPortfoliosUseCase.execute();
+  // 只处理启用每日快照的活跃组合；已归档的往年组合不再自动入账
+  const portfolios = await prisma.$queryRawUnsafe<Array<{ id: string }>>(
+    `SELECT "id" FROM "Portfolio" WHERE "snapshotEnabled" = 1`
+  );
   for (const portfolio of portfolios) {
     try {
       const report = await syncPortfolioDividends(portfolio.id, {

@@ -95,6 +95,10 @@ describe('dividendSources - 港股', () => {
       { cashPerShare: 1.6, currency: 'HKD' },
     ],
     ['每股派美元0.25元', { cashPerShare: 0.25, currency: 'USD' }],
+    [
+      '每股派人民币0.2元(相等于港币0.2065元)',
+      { cashPerShare: 0.2065, currency: 'HKD' },
+    ],
   ])('parses plan text %s', (text, expected) => {
     const parsed = parseHkPlanExplain(text);
     expect(parsed?.currency).toBe(expected.currency);

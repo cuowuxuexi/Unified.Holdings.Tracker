@@ -72,6 +72,11 @@ export function normalizeSourceDate(value?: string | null): string | null {
   return match ? `${match[1]}-${match[2]}-${match[3]}` : null;
 }
 
+/** 「每 10 股派 X 元」折每股时去掉浮点尾差（4.269999 / 10 → 0.4269999） */
+function roundPerShare(value: number): number {
+  return Math.round(value * 1e8) / 1e8;
+}
+
 export function parseAShareDividendRows(
   assetCode: string,
   rows: AShareBonusRow[]
@@ -92,7 +97,7 @@ export function parseAShareDividendRows(
       recordDate: normalizeSourceDate(row.EQUITY_RECORD_DATE),
       // 沪深两市现金红利发放日与除息日为同一天
       payDate: exDate,
-      cashPerShare: cashPer10 > 0 ? cashPer10 / 10 : 0,
+      cashPerShare: cashPer10 > 0 ? roundPerShare(cashPer10 / 10) : 0,
       currency: 'CNY',
       description: row.IMPL_PLAN_PROFILE ?? `10派${cashPer10}元`,
       bonusSharesPerShare: bonusPer10 > 0 ? bonusPer10 / 10 : null,
@@ -118,7 +123,7 @@ export function parseFundDividendHtml(
       exDate: match[2],
       recordDate: match[1],
       payDate: match[5],
-      cashPerShare: cashPer10 / 10,
+      cashPerShare: roundPerShare(cashPer10 / 10),
       currency: 'CNY',
       description: match[3],
       bonusSharesPerShare: null,
@@ -136,7 +141,9 @@ export function parseFundDividendHtml(
 export function parseHkPlanExplain(
   text: string
 ): { cashPerShare: number; currency: DividendCurrency } | null {
-  const hkdEquivalents = [...text.matchAll(/相当于港[币元]\s*([\d.]+)\s*元/g)];
+  const hkdEquivalents = [
+    ...text.matchAll(/相[当等]于港[币元]\s*([\d.]+)\s*元/g),
+  ];
   if (hkdEquivalents.length > 0) {
     const total = hkdEquivalents.reduce((sum, m) => sum + Number(m[1]), 0);
     return total > 0 ? { cashPerShare: total, currency: 'HKD' } : null;
@@ -171,6 +178,7 @@ export function parseHkDividendRows(
       warnings.push({
         code: 'dividend_plan_unparsed',
         assetCode,
+        exDate,
         message: `${assetCode} 除净日 ${exDate} 的派息方案无法自动解析：${text || '（空）'}`,
       });
       continue;
@@ -211,6 +219,7 @@ export function parseUsDividendRows(
       warnings.push({
         code: 'dividend_plan_unparsed',
         assetCode,
+        exDate,
         message: `${assetCode} 除息日 ${exDate} 的派息方案无法自动解析：${text || '（空）'}`,
       });
       continue;

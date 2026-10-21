@@ -59,4 +59,6 @@ export interface DividendWarning {
     | 'dividend_fx_fallback';
   message: string;
   assetCode?: string;
+  /** 相关分红事件的除权日；用于只保留持仓期间的告警 */
+  exDate?: string;
 }
