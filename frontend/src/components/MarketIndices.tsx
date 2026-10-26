@@ -21,10 +21,14 @@ import useAppStore from '../store';
 import {
   DndContext,
   closestCenter,
+  closestCorners,
+  pointerWithin,
   KeyboardSensor,
   PointerSensor,
+  useDroppable,
   useSensor,
   useSensors,
+  CollisionDetection,
   DragEndEvent,
 } from '@dnd-kit/core';
 import {
@@ -39,6 +43,29 @@ import { CSS } from '@dnd-kit/utilities';
 import type { SelectedIndexItem, IndexCategory } from '../store/types';
 import { formatPercent } from '../shared/utils/formatters';
 import useMessageApi from '../hooks/useMessageApi';
+import {
+  appendIndexToCategory,
+  cardSortableId,
+  groupItemsByRow,
+  moveCard,
+  NEW_ROW_DROPPABLE,
+  packCategoryRows,
+  parseCardId,
+  parseShelfId,
+  removeIndexFromCategory,
+  shelfDroppableId,
+} from '../store/watchlistLayout';
+
+const shelfCollisionDetection: CollisionDetection = (args) => {
+  const pointerHits = pointerWithin(args);
+  if (pointerHits.length > 0) {
+    const cards = pointerHits.filter((hit) =>
+      String(hit.id).startsWith('card:')
+    );
+    return cards.length > 0 ? cards : pointerHits;
+  }
+  return closestCorners(args);
+};
 
 const { Title, Text } = Typography;
 
@@ -181,6 +208,91 @@ const SortableCategoryTab: React.FC<{
   );
 };
 
+const SortableIndexCard: React.FC<{
+  item: SelectedIndexItem;
+  children: React.ReactNode;
+}> = ({ item, children }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({
+    id: cardSortableId(item.code),
+  });
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        flex: '0 0 auto',
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.7 : 1,
+        zIndex: isDragging ? 5 : 1,
+      }}
+      {...attributes}
+      {...listeners}
+    >
+      {children}
+    </div>
+  );
+};
+
+const ShelfRow: React.FC<{
+  rowIndex: number;
+  children: React.ReactNode;
+}> = ({ rowIndex, children }) => {
+  const { setNodeRef, isOver } = useDroppable({
+    id: shelfDroppableId(rowIndex),
+  });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        display: 'flex',
+        flexWrap: 'nowrap',
+        gap: 16,
+        justifyContent: 'flex-start',
+        width: '100%',
+        minHeight: 110,
+        padding: '4px 0',
+        borderRadius: 4,
+        outline: isOver ? '1px dashed #1890ff' : '1px solid transparent',
+        background: isOver ? 'rgba(24,144,255,0.04)' : 'transparent',
+      }}
+    >
+      {children}
+    </div>
+  );
+};
+
+const NewRowDropZone: React.FC<{ dragging: boolean }> = ({ dragging }) => {
+  const { setNodeRef, isOver } = useDroppable({ id: NEW_ROW_DROPPABLE });
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        marginTop: 8,
+        minHeight: dragging ? 72 : 36,
+        border: `1px dashed ${isOver ? '#1890ff' : '#e5e5e5'}`,
+        borderRadius: 4,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: isOver ? '#1890ff' : '#bbb',
+        fontSize: 12,
+        background: isOver ? 'rgba(24,144,255,0.04)' : 'transparent',
+        transition: 'min-height 0.15s ease',
+      }}
+    >
+      拖到这里新开一行
+    </div>
+  );
+};
+
 const MarketIndices: React.FC = () => {
   // Store state
   const marketIndicesData = useAppStore((state) => state.marketIndicesData);
@@ -217,6 +329,7 @@ const MarketIndices: React.FC = () => {
   const [draftIndices, setDraftIndices] = useState<SelectedIndexItem[]>([]);
   const [isDraftDirty, setIsDraftDirty] = useState(false);
   const [isEditingDraftCategory, setIsEditingDraftCategory] = useState(false);
+  const [isDraggingGrid, setIsDraggingGrid] = useState(false);
 
   // 获取可见的分类，并按 order 排序
   const visibleCategories = indexCategories
@@ -428,15 +541,12 @@ const MarketIndices: React.FC = () => {
       setCustomCodeError('该指数已在当前栏目列表中');
       return;
     }
-    const updated = [
-      ...workingIndices,
-      {
-        code: trimmedCode,
-        name: '',
-        visible: true,
-        categoryId: activeCategoryId,
-      },
-    ];
+    const updated = appendIndexToCategory(workingIndices, {
+      code: trimmedCode,
+      name: '',
+      visible: true,
+      categoryId: activeCategoryId,
+    });
     if (isSettingsModalVisible) {
       setDraftIndices(updated);
       setIsDraftDirty(true);
@@ -451,9 +561,11 @@ const MarketIndices: React.FC = () => {
     const workingIndices = isSettingsModalVisible
       ? draftIndices
       : selectedIndices;
-    const updated = workingIndices.filter(
-      (item) =>
-        !(item.code === indexCode && item.categoryId === activeCategoryId)
+    if (!activeCategoryId) return;
+    const updated = removeIndexFromCategory(
+      workingIndices,
+      indexCode,
+      activeCategoryId
     );
     if (isSettingsModalVisible) {
       setDraftIndices(updated);
@@ -512,10 +624,8 @@ const MarketIndices: React.FC = () => {
     );
 
     if (oldIndex !== -1 && newIndex !== -1) {
-      const reorderedCurrent = arrayMove(
-        currentCategoryIndices,
-        oldIndex,
-        newIndex
+      const reorderedCurrent = packCategoryRows(
+        arrayMove(currentCategoryIndices, oldIndex, newIndex)
       );
       const next = [...otherIndices, ...reorderedCurrent];
       if (isSettingsModalVisible) {
@@ -548,15 +658,66 @@ const MarketIndices: React.FC = () => {
     }
   };
 
+  const handleGridDragEnd = (event: DragEndEvent) => {
+    setIsDraggingGrid(false);
+    const { active, over } = event;
+    if (!over || !activeCategoryId) return;
+
+    const activeCode = parseCardId(String(active.id));
+    if (!activeCode) return;
+
+    const categoryItems = selectedIndices.filter(
+      (item) => item.categoryId === activeCategoryId
+    );
+    const otherItems = selectedIndices.filter(
+      (item) => item.categoryId !== activeCategoryId
+    );
+
+    const overId = String(over.id);
+    const overCard = parseCardId(overId);
+    const overShelf = parseShelfId(overId);
+
+    let nextCategory: SelectedIndexItem[] | null = null;
+    if (overCard) {
+      const target = categoryItems.find((item) => item.code === overCard);
+      if (!target || target.code === activeCode) return;
+      nextCategory = moveCard(categoryItems, activeCode, {
+        type: 'row',
+        row: target.row ?? 0,
+        col: target.col,
+      });
+    } else if (overShelf === 'new') {
+      nextCategory = moveCard(categoryItems, activeCode, { type: 'new-row' });
+    } else if (typeof overShelf === 'number') {
+      nextCategory = moveCard(categoryItems, activeCode, {
+        type: 'row',
+        row: overShelf,
+      });
+    }
+
+    if (!nextCategory) return;
+    setSelectedIndices([...otherItems, ...nextCategory]);
+  };
+
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, {
       coordinateGetter: sortableKeyboardCoordinates,
     })
   );
+  const cardSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
 
-  // 当前分类下的指数（用于主卡片区域）
-  const currentCategoryIndices = activeCategoryIndices;
+  const visibleGridItems = activeCategoryIndices.filter(
+    (item) =>
+      item.visible &&
+      marketIndicesData.some((index) => index.code === item.code)
+  );
+  const visibleGridRows = groupItemsByRow(visibleGridItems);
 
   return (
     <div style={{ marginBottom: '24px' }}>
@@ -629,145 +790,168 @@ const MarketIndices: React.FC = () => {
           showIcon
         />
       ) : (
-        <div
-          style={{
-            display: 'flex',
-            flexWrap: 'wrap',
-            gap: '16px',
-            justifyContent: 'flex-start',
-            margin: '0 auto',
-            maxWidth: '98%',
-          }}
+        <DndContext
+          sensors={cardSensors}
+          collisionDetection={shelfCollisionDetection}
+          onDragStart={() => setIsDraggingGrid(true)}
+          onDragCancel={() => setIsDraggingGrid(false)}
+          onDragEnd={handleGridDragEnd}
         >
-          {currentCategoryIndices
-            .filter((item) => item.visible)
-            .map((item) => {
-              const index = marketIndicesData.find(
-                (idx) => idx.code === item.code
-              );
-              if (!index) return null;
-              return (
-                <Card
-                  key={index.code}
-                  style={{
-                    background:
-                      'linear-gradient(135deg, #fafbfc 0%, #f5f6fa 100%)',
-                    borderRadius: '4px',
-                    boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
-                    height: '110px',
-                    minWidth: 155,
-                    maxWidth: 170,
-                    flex: '0 0 auto',
-                    position: 'relative',
-                    paddingLeft: '10px',
-                    overflow: 'hidden',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    justifyContent: 'center',
-                    transition: 'box-shadow 0.2s',
-                    cursor: 'default',
-                  }}
-                  styles={{
-                    body: { padding: '8px 10px 8px 0', height: '100%' },
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.boxShadow =
-                      '0 4px 12px rgba(0,0,0,0.10)';
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.boxShadow =
-                      '0 1px 4px rgba(0,0,0,0.04)';
-                  }}
-                >
-                  {/* 左侧色条 */}
-                  <div
-                    style={{
-                      position: 'absolute',
-                      left: 0,
-                      top: 0,
-                      bottom: 0,
-                      width: '3px',
-                      borderRadius: '2px',
-                      background:
-                        index.changePercent >= 0
-                          ? PERIOD_UP_COLOR
-                          : PERIOD_DOWN_COLOR,
-                    }}
-                  />
+          <div
+            style={{
+              margin: '0 auto',
+              maxWidth: '98%',
+            }}
+          >
+            {visibleGridRows.map((rowItems, rowIndex) => (
+              <SortableContext
+                key={rowIndex}
+                items={rowItems.map((item) => cardSortableId(item.code))}
+                strategy={horizontalListSortingStrategy}
+              >
+                <ShelfRow rowIndex={rowIndex}>
+                  {rowItems.map((item) => {
+                    const index = marketIndicesData.find(
+                      (idx) => idx.code === item.code
+                    );
+                    if (!index) return null;
+                    return (
+                      <SortableIndexCard key={index.code} item={item}>
+                        <Card
+                          style={{
+                            background:
+                              'linear-gradient(135deg, #fafbfc 0%, #f5f6fa 100%)',
+                            borderRadius: '4px',
+                            boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
+                            height: '110px',
+                            minWidth: 155,
+                            maxWidth: 170,
+                            flex: '0 0 auto',
+                            position: 'relative',
+                            paddingLeft: '10px',
+                            overflow: 'hidden',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'center',
+                            transition: 'box-shadow 0.2s',
+                            cursor: 'grab',
+                          }}
+                          styles={{
+                            body: { padding: '8px 10px 8px 0', height: '100%' },
+                          }}
+                          onMouseEnter={(e) => {
+                            e.currentTarget.style.boxShadow =
+                              '0 4px 12px rgba(0,0,0,0.10)';
+                          }}
+                          onMouseLeave={(e) => {
+                            e.currentTarget.style.boxShadow =
+                              '0 1px 4px rgba(0,0,0,0.04)';
+                          }}
+                        >
+                          {/* 左侧色条 */}
+                          <div
+                            style={{
+                              position: 'absolute',
+                              left: 0,
+                              top: 0,
+                              bottom: 0,
+                              width: '3px',
+                              borderRadius: '2px',
+                              background:
+                                index.changePercent >= 0
+                                  ? PERIOD_UP_COLOR
+                                  : PERIOD_DOWN_COLOR,
+                            }}
+                          />
 
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      height: '100%',
-                      justifyContent: 'space-around',
-                    }}
-                  >
-                    {/* 指数名称 */}
-                    <div
-                      style={{
-                        fontWeight: 700,
-                        fontSize: '14px',
-                        color: '#222',
-                        whiteSpace: 'nowrap',
-                        overflow: 'hidden',
-                        textOverflow: 'ellipsis',
-                        lineHeight: '1.2',
-                      }}
-                    >
-                      {index.name}
-                    </div>
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              height: '100%',
+                              justifyContent: 'space-around',
+                            }}
+                          >
+                            {/* 指数名称 */}
+                            <div
+                              style={{
+                                fontWeight: 700,
+                                fontSize: '14px',
+                                color: '#222',
+                                whiteSpace: 'nowrap',
+                                overflow: 'hidden',
+                                textOverflow: 'ellipsis',
+                                lineHeight: '1.2',
+                              }}
+                            >
+                              {index.name}
+                            </div>
 
-                    {/* 当前价格 */}
-                    <div
-                      style={{
-                        fontWeight: 700,
-                        fontSize: '20px',
-                        color: '#111',
-                        lineHeight: '1.2',
-                      }}
-                    >
-                      {index.currentPrice.toFixed(2)}
-                    </div>
+                            {/* 当前价格 */}
+                            <div
+                              style={{
+                                fontWeight: 700,
+                                fontSize: '20px',
+                                color: '#111',
+                                lineHeight: '1.2',
+                              }}
+                            >
+                              {index.currentPrice.toFixed(2)}
+                            </div>
 
-                    {/* 涨跌幅和涨跌额 */}
-                    <div>
-                      <Text
-                        style={{
-                          color:
-                            index.changePercent >= 0
-                              ? PERIOD_UP_COLOR
-                              : PERIOD_DOWN_COLOR,
-                          fontWeight: 600,
-                          fontSize: '13px',
-                          lineHeight: '1.2',
-                        }}
-                      >
-                        {index.changeAmount >= 0 ? '+' : ''}
-                        {index.changeAmount.toFixed(2)} (
-                        {formatPercent(index.changePercent)})
-                      </Text>
-                    </div>
+                            {/* 涨跌幅和涨跌额 */}
+                            <div>
+                              <Text
+                                style={{
+                                  color:
+                                    index.changePercent >= 0
+                                      ? PERIOD_UP_COLOR
+                                      : PERIOD_DOWN_COLOR,
+                                  fontWeight: 600,
+                                  fontSize: '13px',
+                                  lineHeight: '1.2',
+                                }}
+                              >
+                                {index.changeAmount >= 0 ? '+' : ''}
+                                {index.changeAmount.toFixed(2)} (
+                                {formatPercent(index.changePercent)})
+                              </Text>
+                            </div>
 
-                    {/* 周期涨跌幅 */}
-                    <div
-                      style={{
-                        display: 'flex',
-                        justifyContent: 'flex-start',
-                        gap: '6px',
-                        fontSize: '11px',
-                        lineHeight: '1.2',
-                      }}
-                    >
-                      {renderPeriodChangeTag('W', index.weeklyChangePercent)}
-                      {renderPeriodChangeTag('M', index.monthlyChangePercent)}
-                      {renderPeriodChangeTag('Y', index.yearlyChangePercent)}
-                    </div>
-                  </div>
-                </Card>
-              );
-            })}
-        </div>
+                            {/* 周期涨跌幅 */}
+                            <div
+                              style={{
+                                display: 'flex',
+                                justifyContent: 'flex-start',
+                                gap: '6px',
+                                fontSize: '11px',
+                                lineHeight: '1.2',
+                              }}
+                            >
+                              {renderPeriodChangeTag(
+                                'W',
+                                index.weeklyChangePercent
+                              )}
+                              {renderPeriodChangeTag(
+                                'M',
+                                index.monthlyChangePercent
+                              )}
+                              {renderPeriodChangeTag(
+                                'Y',
+                                index.yearlyChangePercent
+                              )}
+                            </div>
+                          </div>
+                        </Card>
+                      </SortableIndexCard>
+                    );
+                  })}
+                </ShelfRow>
+              </SortableContext>
+            ))}
+            <NewRowDropZone dragging={isDraggingGrid} />
+          </div>
+        </DndContext>
       )}
 
       {/* 设置模态框 - 管理当前分类下的指数 */}

@@ -306,6 +306,13 @@ model AttentionItem {
   Portfolio   Portfolio @relation(fields: [portfolioId], references: [id], onDelete: Cascade)
 }
 
+// 应用级偏好：大盘/个股栏目等跨浏览器共享配置
+model AppPreference {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
 enum Market {
   CN
   HK

@@ -7,241 +7,32 @@ import {
   SelectedIndexItem,
   MarketConfig,
   IndexCategory,
+  WatchlistPayload,
 } from './types';
 import apiClient from '../services/api'; // Import the API client
 import { queryClient } from '../app/providers/queryClient';
-// import dayjs from 'dayjs'; // No longer needed here for calculations
+import {
+  decideWatchlistHydrate,
+  getSavedIndexCategories,
+  getSavedIndicesOrder,
+  getSavedMarketConfigs,
+  readLocalWatchlist,
+  writeLocalWatchlist,
+} from './watchlistSync';
+import { normalizeSelectedIndexRows } from './watchlistLayout';
 
-// 本地存储键名
-// const SELECTED_INDICES_STORAGE_KEY = 'stock-tracker-selected-indices'; // Removed old key
-const MARKET_INDICES_ORDER_STORAGE_KEY = 'marketIndicesOrderV2'; // 新key，避免与老string[]混用
-const MARKET_CONFIGS_STORAGE_KEY = 'marketConfigsV1'; // 市场配置存储键
-const INDEX_CATEGORIES_STORAGE_KEY = 'indexCategoriesV1'; // 指数分类存储键
+let watchlistPersistTimer: ReturnType<typeof setTimeout> | null = null;
 
-// 默认分类栏目
-const DEFAULT_INDEX_CATEGORIES: IndexCategory[] = [
-  { id: 'market', label: '大盘', order: 0, visible: true },
-  { id: 'stock', label: '个股', order: 1, visible: true },
-];
-
-// 默认指数列表（迁移到新的 categoryId 结构）
-const DEFAULT_INDICES: SelectedIndexItem[] = [
-  { code: 'sh000001', name: '上证指数', visible: true, categoryId: 'market' },
-  { code: 'sz399001', name: '深证成指', visible: true, categoryId: 'market' },
-  { code: 'hkHSI', name: '恒生指数', visible: true, categoryId: 'market' },
-  { code: 'usDJI', name: '道琼斯', visible: true, categoryId: 'market' },
-  { code: 'usIXIC', name: '纳斯达克', visible: true, categoryId: 'market' },
-  { code: 'usINX', name: '标普500', visible: true, categoryId: 'market' },
-];
-
-// 默认市场配置
-const DEFAULT_MARKET_CONFIGS: MarketConfig[] = [
-  {
-    key: 'A股',
-    label: 'A股',
-    currency: 'CNY',
-    symbol: '¥',
-    codePrefix: ['sh', 'sz'],
-    visible: true,
-  },
-  {
-    key: '港股',
-    label: '港股',
-    currency: 'HKD',
-    symbol: 'HK$',
-    codePrefix: ['hk'],
-    visible: true,
-  },
-  {
-    key: '美股',
-    label: '美股',
-    currency: 'USD',
-    symbol: '$',
-    codePrefix: ['us'],
-    visible: true,
-  },
-];
-
-// 兼容老数据string[]自动转换为对象数组
-const migrateStringArrayToSelectedIndexItem = (
-  arr: string[]
-): SelectedIndexItem[] => {
-  return arr.map((code) => ({
-    code,
-    name: code,
-    visible: true,
-    categoryId: 'stock',
-  }));
-};
-
-type StoredSelectedIndexItem = SelectedIndexItem & {
-  type?: string;
-};
-
-const isStoredSelectedIndexItem = (
-  item: unknown
-): item is StoredSelectedIndexItem => {
-  return (
-    typeof item === 'object' &&
-    item !== null &&
-    'code' in item &&
-    typeof item.code === 'string'
-  );
-};
-
-// 迁移老的 type 字段到新的 categoryId 字段
-const migrateTypeToCategory = (
-  items: StoredSelectedIndexItem[]
-): SelectedIndexItem[] => {
-  return items.map((item) => {
-    if (item.type && !item.categoryId) {
-      // 有 type 但没有 categoryId，进行迁移
-      return { ...item, categoryId: item.type };
-    }
-    return item;
-  });
-};
-
-// 从localStorage获取保存的指数顺序
-const getSavedIndicesOrder = (): SelectedIndexItem[] => {
-  try {
-    const savedOrder = localStorage.getItem(MARKET_INDICES_ORDER_STORAGE_KEY);
-    if (savedOrder) {
-      const parsed = JSON.parse(savedOrder);
-      // 新对象数组格式
-      if (Array.isArray(parsed) && parsed.every(isStoredSelectedIndexItem)) {
-        if (parsed.length === 0) {
-          console.warn(
-            'Saved indices order is empty, returning default indices.'
-          );
-          return DEFAULT_INDICES;
-        }
-        // 迁移老的 type 字段到 categoryId
-        return migrateTypeToCategory(parsed);
-      }
-      // 老string[]格式
-      if (
-        Array.isArray(parsed) &&
-        parsed.every((item) => typeof item === 'string')
-      ) {
-        return migrateStringArrayToSelectedIndexItem(parsed);
-      }
-      console.warn(
-        'Invalid indices order format found in localStorage, returning default indices.'
-      );
-    }
-  } catch (error) {
-    console.error(
-      'Error loading saved indices order from localStorage:',
-      error
-    );
+const persistWatchlist = (payload: WatchlistPayload) => {
+  writeLocalWatchlist(payload);
+  if (watchlistPersistTimer) {
+    clearTimeout(watchlistPersistTimer);
   }
-  // Fallback to default indices if nothing valid is found
-  return DEFAULT_INDICES;
-};
-
-// 保存指数顺序到localStorage
-const saveIndicesOrder = (indices: SelectedIndexItem[]): void => {
-  try {
-    if (
-      Array.isArray(indices) &&
-      indices.every((item) => typeof item === 'object' && item.code)
-    ) {
-      localStorage.setItem(
-        MARKET_INDICES_ORDER_STORAGE_KEY,
-        JSON.stringify(indices)
-      );
-    } else {
-      console.error('Attempted to save invalid indices order:', indices);
-    }
-  } catch (error) {
-    console.error('Error saving indices order to localStorage:', error);
-  }
-};
-
-// 从localStorage获取保存的市场配置
-const getSavedMarketConfigs = (): MarketConfig[] => {
-  try {
-    const savedConfigs = localStorage.getItem(MARKET_CONFIGS_STORAGE_KEY);
-    if (savedConfigs) {
-      const parsed = JSON.parse(savedConfigs);
-      if (
-        Array.isArray(parsed) &&
-        parsed.every((item) => typeof item === 'object' && item.key)
-      ) {
-        return parsed;
-      }
-      console.warn(
-        'Invalid market configs format found in localStorage, returning default configs.'
-      );
-    }
-  } catch (error) {
-    console.error(
-      'Error loading saved market configs from localStorage:',
-      error
-    );
-  }
-  return DEFAULT_MARKET_CONFIGS;
-};
-
-// 保存市场配置到localStorage
-const saveMarketConfigs = (configs: MarketConfig[]): void => {
-  try {
-    if (
-      Array.isArray(configs) &&
-      configs.every((item) => typeof item === 'object' && item.key)
-    ) {
-      localStorage.setItem(MARKET_CONFIGS_STORAGE_KEY, JSON.stringify(configs));
-    } else {
-      console.error('Attempted to save invalid market configs:', configs);
-    }
-  } catch (error) {
-    console.error('Error saving market configs to localStorage:', error);
-  }
-};
-
-// 从localStorage获取保存的指数分类
-const getSavedIndexCategories = (): IndexCategory[] => {
-  try {
-    const savedCategories = localStorage.getItem(INDEX_CATEGORIES_STORAGE_KEY);
-    if (savedCategories) {
-      const parsed = JSON.parse(savedCategories);
-      if (
-        Array.isArray(parsed) &&
-        parsed.every((item) => typeof item === 'object' && item.id)
-      ) {
-        return parsed;
-      }
-      console.warn(
-        'Invalid index categories format found in localStorage, returning default categories.'
-      );
-    }
-  } catch (error) {
-    console.error(
-      'Error loading saved index categories from localStorage:',
-      error
-    );
-  }
-  return DEFAULT_INDEX_CATEGORIES;
-};
-
-// 保存指数分类到localStorage
-const saveIndexCategories = (categories: IndexCategory[]): void => {
-  try {
-    if (
-      Array.isArray(categories) &&
-      categories.every((item) => typeof item === 'object' && item.id)
-    ) {
-      localStorage.setItem(
-        INDEX_CATEGORIES_STORAGE_KEY,
-        JSON.stringify(categories)
-      );
-    } else {
-      console.error('Attempted to save invalid index categories:', categories);
-    }
-  } catch (error) {
-    console.error('Error saving index categories to localStorage:', error);
-  }
+  watchlistPersistTimer = setTimeout(() => {
+    apiClient.saveWatchlistPreference(payload).catch((error) => {
+      console.error('Failed to persist watchlist to server:', error);
+    });
+  }, 400);
 };
 
 // REMOVED: Helper function findClosestTradingDayClose is no longer needed as calculations are done in backend
@@ -311,8 +102,13 @@ const useAppStore = create<AppState>((set, get) => ({
       Array.isArray(indices) &&
       indices.every((item) => typeof item === 'object' && item.code)
     ) {
-      set({ selectedIndices: indices });
-      saveIndicesOrder(indices);
+      const next = normalizeSelectedIndexRows(indices);
+      set({ selectedIndices: next });
+      persistWatchlist({
+        selectedIndices: next,
+        indexCategories: get().indexCategories,
+        marketConfigs: get().marketConfigs,
+      });
     } else {
       console.error('setSelectedIndices received invalid data:', indices);
     }
@@ -324,7 +120,11 @@ const useAppStore = create<AppState>((set, get) => ({
       configs.every((item) => typeof item === 'object' && item.key)
     ) {
       set({ marketConfigs: configs });
-      saveMarketConfigs(configs);
+      persistWatchlist({
+        selectedIndices: get().selectedIndices,
+        indexCategories: get().indexCategories,
+        marketConfigs: configs,
+      });
     } else {
       console.error('setMarketConfigs received invalid data:', configs);
     }
@@ -337,7 +137,11 @@ const useAppStore = create<AppState>((set, get) => ({
       categories.every((item) => typeof item === 'object' && item.id)
     ) {
       set({ indexCategories: categories });
-      saveIndexCategories(categories);
+      persistWatchlist({
+        selectedIndices: get().selectedIndices,
+        indexCategories: categories,
+        marketConfigs: get().marketConfigs,
+      });
     } else {
       console.error('setIndexCategories received invalid data:', categories);
     }
@@ -357,7 +161,11 @@ const useAppStore = create<AppState>((set, get) => ({
     };
     const updatedCategories = [...currentCategories, newCategory];
     set({ indexCategories: updatedCategories });
-    saveIndexCategories(updatedCategories);
+    persistWatchlist({
+      selectedIndices: get().selectedIndices,
+      indexCategories: updatedCategories,
+      marketConfigs: get().marketConfigs,
+    });
   },
 
   updateIndexCategory: (id: string, updates: Partial<IndexCategory>) => {
@@ -366,7 +174,11 @@ const useAppStore = create<AppState>((set, get) => ({
       cat.id === id ? { ...cat, ...updates } : cat
     );
     set({ indexCategories: updatedCategories });
-    saveIndexCategories(updatedCategories);
+    persistWatchlist({
+      selectedIndices: get().selectedIndices,
+      indexCategories: updatedCategories,
+      marketConfigs: get().marketConfigs,
+    });
   },
 
   deleteIndexCategory: (id: string) => {
@@ -385,8 +197,11 @@ const useAppStore = create<AppState>((set, get) => ({
       indexCategories: updatedCategories,
       selectedIndices: updatedIndices,
     });
-    saveIndexCategories(updatedCategories);
-    saveIndicesOrder(updatedIndices);
+    persistWatchlist({
+      selectedIndices: updatedIndices,
+      indexCategories: updatedCategories,
+      marketConfigs: get().marketConfigs,
+    });
   },
 
   reorderIndexCategories: (categories: IndexCategory[]) => {
@@ -396,7 +211,31 @@ const useAppStore = create<AppState>((set, get) => ({
       order: index,
     }));
     set({ indexCategories: reorderedCategories });
-    saveIndexCategories(reorderedCategories);
+    persistWatchlist({
+      selectedIndices: get().selectedIndices,
+      indexCategories: reorderedCategories,
+      marketConfigs: get().marketConfigs,
+    });
+  },
+
+  hydrateWatchlist: async () => {
+    const local = readLocalWatchlist();
+    try {
+      const remote = await apiClient.getWatchlistPreference();
+      const decision = decideWatchlistHydrate(remote, local);
+      set({
+        selectedIndices: decision.payload.selectedIndices,
+        indexCategories: decision.payload.indexCategories,
+        marketConfigs: decision.payload.marketConfigs,
+      });
+      writeLocalWatchlist(decision.payload);
+      if (decision.shouldUpload) {
+        await apiClient.saveWatchlistPreference(decision.payload);
+      }
+      await get().fetchMarketIndices();
+    } catch (error) {
+      console.error('Failed to hydrate watchlist from server:', error);
+    }
   },
 
   fetchStockQuotes: async (codes: string[]) => {

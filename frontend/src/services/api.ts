@@ -8,6 +8,8 @@ import {
   PortfolioStats,
   PortfolioHistoryContextEnvelope,
   DividendReport,
+  WatchlistPayload,
+  WatchlistPreferenceResponse,
 } from '../store/types'; // 添加 PortfolioStats 导入
 import { frontendEnv } from '../env';
 
@@ -408,6 +410,39 @@ const apiClient = {
     } catch (error) {
       console.error(
         `Error updating notes for transaction ${transactionId} in portfolio ${portfolioId} from API client:`,
+        error
+      );
+      throw error;
+    }
+  },
+
+  getWatchlistPreference: async (): Promise<WatchlistPreferenceResponse> => {
+    try {
+      const response = await axios.get<WatchlistPreferenceResponse>(
+        `${API_BASE_URL}/api/preferences/watchlist`
+      );
+      return response.data;
+    } catch (error) {
+      console.error(
+        'Error fetching watchlist preference from API client:',
+        error
+      );
+      throw error;
+    }
+  },
+
+  saveWatchlistPreference: async (
+    payload: WatchlistPayload
+  ): Promise<WatchlistPreferenceResponse> => {
+    try {
+      const response = await axios.put<WatchlistPreferenceResponse>(
+        `${API_BASE_URL}/api/preferences/watchlist`,
+        payload
+      );
+      return response.data;
+    } catch (error) {
+      console.error(
+        'Error saving watchlist preference from API client:',
         error
       );
       throw error;

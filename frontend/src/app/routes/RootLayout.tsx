@@ -35,6 +35,7 @@ export function RootLayout() {
   const refreshPortfolioDetail = useAppStore(
     (state) => state.fetchPortfolioDetail
   );
+  const hydrateWatchlist = useAppStore((state) => state.hydrateWatchlist);
   const [createArchiveOpen, setCreateArchiveOpen] = useState(false);
   const [viewArchivesOpen, setViewArchivesOpen] = useState(false);
   const [snapshotEnabled, setSnapshotEnabled] = useState(true);
@@ -60,6 +61,10 @@ export function RootLayout() {
     const interval = setInterval(checkConnection, 30000);
     return () => clearInterval(interval);
   }, [messageApi]);
+
+  useEffect(() => {
+    void hydrateWatchlist();
+  }, [hydrateWatchlist]);
 
   // 获取快照开关状态
   useEffect(() => {

@@ -16,6 +16,7 @@ import batchRouter from './routes/batch';
 import archiveRouter from './routes/archive';
 import sourceDataRouter from './routes/sourceData';
 import agentToolsRouter from './routes/agentTools';
+import preferencesRouter from './routes/preferences';
 import { dataService } from './services/dataService';
 import { initExchangeRates } from './services/currencyService';
 import {
@@ -197,6 +198,7 @@ export const createApp = (): Express => {
   app.use(`${apiBasePath}`, agentToolsRouter);
   app.use(`${apiBasePath}/batch`, batchRouter);
   app.use(`${apiBasePath}`, archiveRouter);
+  app.use(`${apiBasePath}/preferences`, preferencesRouter);
 
   app.use(notFoundHandler);
   app.use(errorHandler);
@@ -410,6 +412,13 @@ async function initializeDatabase() {
           "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
           "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
           FOREIGN KEY ("portfolioId") REFERENCES "Portfolio"("id") ON DELETE CASCADE
+        )
+      `,
+      AppPreference: `
+        CREATE TABLE IF NOT EXISTS "AppPreference" (
+          "key" TEXT NOT NULL PRIMARY KEY,
+          "value" TEXT NOT NULL,
+          "updatedAt" DATETIME NOT NULL
         )
       `,
     };

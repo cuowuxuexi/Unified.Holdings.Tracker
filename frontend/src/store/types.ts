@@ -563,6 +563,8 @@ export interface SelectedIndexItem {
   name: string;
   visible: boolean;
   categoryId: string; // 所属栏目ID（替代原来的 type）
+  row?: number; // 所在行架，从 0 起
+  col?: number; // 行内位置，0-3
 }
 
 // 新增市场配置类型
@@ -574,6 +576,16 @@ export interface MarketConfig {
   codePrefix: string[]; // 代码前缀数组，用于匹配持仓
   visible: boolean; // 是否显示
 }
+
+export interface WatchlistPayload {
+  selectedIndices: SelectedIndexItem[];
+  indexCategories: IndexCategory[];
+  marketConfigs: MarketConfig[];
+}
+
+export type WatchlistPreferenceResponse =
+  | ({ exists: true; updatedAt: string } & WatchlistPayload)
+  | { exists: false };
 
 // --- Update AppState ---
 // Add portfolio related state fields
@@ -628,6 +640,7 @@ export interface AppState {
   ) => Promise<void>;
   deletePortfolio: (portfolioId: string) => Promise<void>;
   setSelectedIndices: (indices: SelectedIndexItem[]) => void; // Action to set selected indices
+  hydrateWatchlist: () => Promise<void>; // 从服务器同步大盘/个股栏目
   updateTransactionNotes: (
     portfolioId: string,
     transactionId: string,

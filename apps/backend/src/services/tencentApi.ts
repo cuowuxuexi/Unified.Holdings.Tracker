@@ -17,6 +17,7 @@ const TENCENT_QUOTE_URL = 'https://qt.gtimg.cn/q=';
 // K线数据缓存配置
 const KLINE_CACHE_PREFIX = 'kline:';
 const KLINE_CACHE_TTL = 15 * 60 * 1000; // 15分钟缓存
+const KLINE_WAF_CACHE_TTL = 2 * 60 * 1000; // 全主机 WAF 501 后短缓存，避免打爆事件循环
 
 // 行情数据缓存配置
 const QUOTE_CACHE_PREFIX = 'quote:';
@@ -446,6 +447,44 @@ export const TENCENT_KLINE_BASE_URLS = [
   'https://web.ifzq.gtimg.cn/appstock/app',
 ];
 
+// A 股复权 /fqkline/get 在部分云主机出口会被 WAF 501；
+// 同机 /kline/kline 不复权接口可用，用来算周/月/年涨幅。
+export const A_SHARE_FQKLINE_PATH = '/fqkline/get';
+export const A_SHARE_PLAIN_KLINE_PATH = '/kline/kline';
+const A_SHARE_FQKLINE_BLOCK_TTL = 15 * 60 * 1000;
+
+let aShareFqklineBlockedUntil = 0;
+
+export function resetAShareKlinePathState(): void {
+  aShareFqklineBlockedUntil = 0;
+}
+
+function isAShareFqklineBlocked(): boolean {
+  return Date.now() < aShareFqklineBlockedUntil;
+}
+
+function markAShareFqklineBlocked(): void {
+  aShareFqklineBlockedUntil = Date.now() + A_SHARE_FQKLINE_BLOCK_TTL;
+}
+
+function isAShareMarket(market: string): boolean {
+  return market === 'sh' || market === 'sz';
+}
+
+function buildKlineParams(
+  processedCode: string,
+  apiPeriod: string,
+  startDate: string | undefined,
+  endDate: string | undefined,
+  count: number,
+  effectiveFq: 'qfq' | 'hfq' | 'none'
+): { param: string } {
+  const fqParam = effectiveFq === 'none' ? '' : effectiveFq;
+  return {
+    param: `${processedCode},${apiPeriod},${startDate || ''},${endDate || ''},${count},${fqParam}`,
+  };
+}
+
 /**
  * 从腾讯 API 获取历史 K 线数据
  * @param code - 股票代码，例如 sh600519
@@ -505,8 +544,13 @@ export async function fetchKline(
   }
 
   // 2. 根据市场、周期和复权类型选择 URL 路径 (基于验证文档 2025-04-16)
-  if (market === 'sh' || market === 'sz') {
-    apiUrlPath = '/fqkline/get'; // A 股: 支持 qfq, hfq, none (空)
+  if (isAShareMarket(market)) {
+    if (isAShareFqklineBlocked()) {
+      apiUrlPath = A_SHARE_PLAIN_KLINE_PATH;
+      effectiveFq = 'none';
+    } else {
+      apiUrlPath = A_SHARE_FQKLINE_PATH;
+    }
   } else if (market === 'hk') {
     // 港股: 不复权用 /fqkline/get, 复权用 /hkfqkline/get
     if (fq === 'qfq' || fq === 'hfq') {
@@ -546,11 +590,14 @@ export async function fetchKline(
   }
 
   // 4. 构建 param 参数 (遵循用户提供格式)
-  const fqParam = effectiveFq === 'none' ? '' : effectiveFq; // 使用调整后的 effectiveFq
-  const params = {
-    // 格式: <代码>,<周期>,[<开始日期>],[<结束日期>],<数量>,[<复权>]
-    param: `${processedCode},${apiPeriod},${startDate || ''},${endDate || ''},${count},${fqParam}`,
-  };
+  let params = buildKlineParams(
+    processedCode,
+    apiPeriod,
+    startDate,
+    endDate,
+    count,
+    effectiveFq
+  );
   // REMOVED: console.log(`[fetchKline PARAMS] processedCode: ${processedCode}, effectiveFq: ${effectiveFq}, apiPeriod: ${apiPeriod}, url: ${fullApiUrl}, params: ${JSON.stringify(params)}`);
 
   // 增加重试逻辑
@@ -573,7 +620,7 @@ export async function fetchKline(
           'User-Agent':
             'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
         },
-        timeout: 15000, // 增加超时时间
+        timeout: 8000,
       });
 
       // 处理Buffer响应
@@ -844,19 +891,51 @@ export async function fetchKline(
         );
       }
 
-      // 增加重试计数
       retryCount++;
+
+      const wafBlocked =
+        axios.isAxiosError(error) && error.response?.status === 501;
+      if (wafBlocked) {
+        if (retryCount >= TENCENT_KLINE_BASE_URLS.length) {
+          if (isAShareMarket(market) && apiUrlPath === A_SHARE_FQKLINE_PATH) {
+            apiUrlPath = A_SHARE_PLAIN_KLINE_PATH;
+            effectiveFq = 'none';
+            params = buildKlineParams(
+              processedCode,
+              apiPeriod,
+              startDate,
+              endDate,
+              count,
+              effectiveFq
+            );
+            markAShareFqklineBlocked();
+            retryCount = 0;
+            console.warn(
+              `[fetchKline] A-share fqkline WAF-blocked; falling back to ${A_SHARE_PLAIN_KLINE_PATH} for ${code}`
+            );
+            continue;
+          }
+          console.error(
+            `[fetchKline] All kline hosts WAF-blocked (501) for ${code}; fail-fast`
+          );
+          cacheService.set(cacheKey, [], KLINE_WAF_CACHE_TTL);
+          return [];
+        }
+        console.log(
+          `[fetchKline] WAF 501 on host, switching immediately (${retryCount}/${TENCENT_KLINE_BASE_URLS.length})`
+        );
+        continue;
+      }
 
       if (retryCount <= maxRetries) {
         console.log(
           `[fetchKline] Retrying (${retryCount}/${maxRetries}) after pause...`
         );
-        await new Promise((resolve) => setTimeout(resolve, 2000 * retryCount)); // 递增延迟
+        await new Promise((resolve) => setTimeout(resolve, 2000 * retryCount));
         continue;
       }
 
-      // REMOVED: console.error(`[fetchKline EXIT] Failed to fetch data for ${code} after ${maxRetries} retries.`);
-      return []; // 达到最大重试次数后返回空数组
+      return [];
     }
   } // End of while loop
 
