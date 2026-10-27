@@ -8,6 +8,7 @@ import {
   normalizeSelectedIndexRows,
   packCategoryRows,
   removeIndexFromCategory,
+  reorderKeepingShelves,
 } from './watchlistLayout';
 
 const item = (
@@ -112,6 +113,73 @@ describe('watchlistLayout', () => {
     );
     const next = moveCard(start, 'd', { type: 'row', row: 0, col: 1 });
     expect(next?.map((entry) => entry.code)).toEqual(['a', 'd', 'b', 'c']);
+  });
+
+  test('card target inserts before or after by pointer half', () => {
+    const start = packCategoryRows(
+      ['a', 'b', 'c', 'd', 'e', 'f'].map((code) => item(code))
+    );
+    const rows = (next: SelectedIndexItem[] | null) =>
+      groupItemsByRow(next!).map((row) => row.map((entry) => entry.code));
+
+    expect(
+      rows(moveCard(start, 'f', { type: 'card', code: 'e', after: false }))
+    ).toEqual([
+      ['a', 'b', 'c', 'd'],
+      ['f', 'e'],
+    ]);
+    expect(
+      rows(moveCard(start, 'a', { type: 'card', code: 'c', after: true }))
+    ).toEqual([
+      ['b', 'c', 'a', 'd'],
+      ['e', 'f'],
+    ]);
+    expect(
+      rows(moveCard(start, 'a', { type: 'card', code: 'e', after: true }))
+    ).toEqual([
+      ['b', 'c', 'd'],
+      ['e', 'a', 'f'],
+    ]);
+    expect(
+      moveCard(start, 'e', { type: 'card', code: 'b', after: true })
+    ).toBeNull();
+  });
+
+  test('preview move keeps the emptied source row number', () => {
+    const start = [
+      item('a', { row: 0, col: 0 }),
+      item('b', { row: 1, col: 0 }),
+      item('c', { row: 2, col: 0 }),
+    ];
+    const next = moveCard(
+      start,
+      'b',
+      { type: 'card', code: 'c', after: true },
+      { compact: false }
+    );
+    expect(next?.map((entry) => [entry.code, entry.row, entry.col])).toEqual([
+      ['a', 0, 0],
+      ['c', 2, 0],
+      ['b', 2, 1],
+    ]);
+  });
+
+  test('settings reorder keeps each shelf size', () => {
+    const start = [
+      item('a', { row: 0, col: 0 }),
+      item('b', { row: 0, col: 1 }),
+      item('c', { row: 0, col: 2 }),
+      item('d', { row: 1, col: 0 }),
+      item('e', { row: 1, col: 1 }),
+    ];
+    const next = reorderKeepingShelves(start, 'e', 'a');
+    expect(next.map((entry) => [entry.code, entry.row, entry.col])).toEqual([
+      ['e', 0, 0],
+      ['a', 0, 1],
+      ['b', 0, 2],
+      ['c', 1, 0],
+      ['d', 1, 1],
+    ]);
   });
 
   test('append uses leftover space on the last shelf', () => {

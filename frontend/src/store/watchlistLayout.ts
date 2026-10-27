@@ -101,45 +101,80 @@ export const groupItemsByRow = (
 
 export type MoveCardTarget =
   | { type: 'row'; row: number; col?: number }
+  | { type: 'card'; code: string; after: boolean }
   | { type: 'new-row' };
 
+// compact=false 用于拖动中的预览：保留被拖空的行号，避免行塌缩导致指针下的行跳动
 export const moveCard = (
   items: SelectedIndexItem[],
   code: string,
-  target: MoveCardTarget
+  target: MoveCardTarget,
+  { compact = true }: { compact?: boolean } = {}
 ): SelectedIndexItem[] | null => {
   const item = items.find((entry) => entry.code === code);
   if (!item) return null;
 
   const rest = items.filter((entry) => entry.code !== code);
+  const finish = (next: SelectedIndexItem[]) =>
+    compact ? compactCategoryRows(next) : next;
 
   if (target.type === 'new-row') {
     const maxRow = rest.reduce(
       (max, entry) => Math.max(max, entry.row ?? 0),
       -1
     );
-    return compactCategoryRows([...rest, { ...item, row: maxRow + 1, col: 0 }]);
+    return finish([...rest, { ...item, row: maxRow + 1, col: 0 }]);
   }
 
-  const destItems = rest
-    .filter((entry) => entry.row === target.row)
-    .sort(sortByShelf);
+  let row: number;
+  let destItems: SelectedIndexItem[];
+  let insertAt: number;
+  if (target.type === 'card') {
+    const overItem = rest.find((entry) => entry.code === target.code);
+    if (!overItem) return null;
+    row = overItem.row ?? 0;
+    destItems = rest.filter((entry) => entry.row === row).sort(sortByShelf);
+    insertAt = destItems.indexOf(overItem) + (target.after ? 1 : 0);
+  } else {
+    row = target.row;
+    destItems = rest.filter((entry) => entry.row === row).sort(sortByShelf);
+    insertAt =
+      target.col === undefined
+        ? destItems.length
+        : Math.min(Math.max(target.col, 0), destItems.length);
+  }
 
   if (destItems.length >= CARDS_PER_ROW) return null;
 
-  const insertAt =
-    target.col === undefined
-      ? destItems.length
-      : Math.min(Math.max(target.col, 0), destItems.length);
-
   const merged = [
     ...destItems.slice(0, insertAt),
-    { ...item, row: target.row, col: insertAt },
+    { ...item, row, col: insertAt },
     ...destItems.slice(insertAt),
-  ].map((entry, col) => ({ ...entry, row: target.row, col }));
+  ].map((entry, col) => ({ ...entry, row, col }));
 
-  const outside = rest.filter((entry) => entry.row !== target.row);
-  return compactCategoryRows([...outside, ...merged]);
+  const outside = rest.filter((entry) => entry.row !== row);
+  return finish([...outside, ...merged]);
+};
+
+// 设置弹窗里按扁平顺序拖动标签：保持每行张数不变，只按新顺序重新填入各行
+export const reorderKeepingShelves = (
+  items: SelectedIndexItem[],
+  fromCode: string,
+  toCode: string
+): SelectedIndexItem[] => {
+  const ordered = compactCategoryRows(items);
+  const from = ordered.findIndex((entry) => entry.code === fromCode);
+  const to = ordered.findIndex((entry) => entry.code === toCode);
+  if (from === -1 || to === -1) return ordered;
+
+  const codes = ordered.map((entry) => entry.code);
+  codes.splice(to, 0, ...codes.splice(from, 1));
+  const byCode = new Map(ordered.map((entry) => [entry.code, entry]));
+  return ordered.map((slot, index) => ({
+    ...byCode.get(codes[index])!,
+    row: slot.row,
+    col: slot.col,
+  }));
 };
 
 export const appendIndexToCategory = (

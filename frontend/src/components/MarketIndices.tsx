@@ -23,49 +23,69 @@ import {
   closestCenter,
   closestCorners,
   pointerWithin,
+  DragOverlay,
   KeyboardSensor,
+  MeasuringStrategy,
   PointerSensor,
   useDroppable,
   useSensor,
   useSensors,
   CollisionDetection,
   DragEndEvent,
+  DragMoveEvent,
+  DragOverEvent,
+  DragStartEvent,
 } from '@dnd-kit/core';
 import {
   arrayMove,
   SortableContext,
+  SortingStrategy,
   sortableKeyboardCoordinates,
   horizontalListSortingStrategy,
   verticalListSortingStrategy,
   useSortable,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import type { SelectedIndexItem, IndexCategory } from '../store/types';
+import type { SelectedIndexItem, IndexCategory, Quote } from '../store/types';
 import { formatPercent } from '../shared/utils/formatters';
 import useMessageApi from '../hooks/useMessageApi';
 import {
   appendIndexToCategory,
   cardSortableId,
-  groupItemsByRow,
+  compactCategoryRows,
   moveCard,
+  MoveCardTarget,
   NEW_ROW_DROPPABLE,
-  packCategoryRows,
   parseCardId,
   parseShelfId,
   removeIndexFromCategory,
+  reorderKeepingShelves,
   shelfDroppableId,
 } from '../store/watchlistLayout';
 
+// 排除被拖的卡自身（它留在原位当占位），否则指针落在占位上时 over === active，预览会卡住
 const shelfCollisionDetection: CollisionDetection = (args) => {
-  const pointerHits = pointerWithin(args);
+  const filtered = {
+    ...args,
+    droppableContainers: args.droppableContainers.filter(
+      (container) => container.id !== args.active.id
+    ),
+  };
+  const pointerHits = pointerWithin(filtered);
   if (pointerHits.length > 0) {
     const cards = pointerHits.filter((hit) =>
       String(hit.id).startsWith('card:')
     );
     return cards.length > 0 ? cards : pointerHits;
   }
-  return closestCorners(args);
+  return closestCorners(filtered);
 };
+
+// 卡片位置完全由预览状态驱动，不让 sortable 再叠加位移动画
+const noShiftStrategy: SortingStrategy = () => null;
+
+const layoutSignature = (items: SelectedIndexItem[]): string =>
+  items.map((item) => `${item.code}:${item.row}:${item.col}`).join('|');
 
 const { Title, Text } = Typography;
 
@@ -230,8 +250,8 @@ const SortableIndexCard: React.FC<{
         flex: '0 0 auto',
         transform: CSS.Transform.toString(transform),
         transition,
-        opacity: isDragging ? 0.7 : 1,
-        zIndex: isDragging ? 5 : 1,
+        // 拖动时原位留一个淡色占位，跟手的是 DragOverlay
+        opacity: isDragging ? 0.3 : 1,
       }}
       {...attributes}
       {...listeners}
@@ -241,17 +261,33 @@ const SortableIndexCard: React.FC<{
   );
 };
 
+type ShelfHighlight = 'target' | 'full' | null;
+
 const ShelfRow: React.FC<{
-  rowIndex: number;
+  row: number;
+  highlight: ShelfHighlight;
   children: React.ReactNode;
-}> = ({ rowIndex, children }) => {
-  const { setNodeRef, isOver } = useDroppable({
-    id: shelfDroppableId(rowIndex),
+}> = ({ row, highlight, children }) => {
+  const { setNodeRef } = useDroppable({
+    id: shelfDroppableId(row),
   });
+  const outline =
+    highlight === 'target'
+      ? '1px dashed #1890ff'
+      : highlight === 'full'
+        ? '1px dashed #ff4d4f'
+        : '1px solid transparent';
+  const background =
+    highlight === 'target'
+      ? 'rgba(24,144,255,0.04)'
+      : highlight === 'full'
+        ? 'rgba(255,77,79,0.05)'
+        : 'transparent';
   return (
     <div
       ref={setNodeRef}
       style={{
+        position: 'relative',
         display: 'flex',
         flexWrap: 'nowrap',
         gap: 16,
@@ -260,23 +296,36 @@ const ShelfRow: React.FC<{
         minHeight: 110,
         padding: '4px 0',
         borderRadius: 4,
-        outline: isOver ? '1px dashed #1890ff' : '1px solid transparent',
-        background: isOver ? 'rgba(24,144,255,0.04)' : 'transparent',
+        outline,
+        background,
       }}
     >
       {children}
+      {highlight === 'full' && (
+        <span
+          style={{
+            alignSelf: 'center',
+            marginLeft: 8,
+            color: '#ff4d4f',
+            fontSize: 12,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          此行已满
+        </span>
+      )}
     </div>
   );
 };
 
-const NewRowDropZone: React.FC<{ dragging: boolean }> = ({ dragging }) => {
+const NewRowDropZone: React.FC = () => {
   const { setNodeRef, isOver } = useDroppable({ id: NEW_ROW_DROPPABLE });
   return (
     <div
       ref={setNodeRef}
       style={{
         marginTop: 8,
-        minHeight: dragging ? 72 : 36,
+        minHeight: 72,
         border: `1px dashed ${isOver ? '#1890ff' : '#e5e5e5'}`,
         borderRadius: 4,
         display: 'flex',
@@ -285,7 +334,6 @@ const NewRowDropZone: React.FC<{ dragging: boolean }> = ({ dragging }) => {
         color: isOver ? '#1890ff' : '#bbb',
         fontSize: 12,
         background: isOver ? 'rgba(24,144,255,0.04)' : 'transparent',
-        transition: 'min-height 0.15s ease',
       }}
     >
       拖到这里新开一行
@@ -329,7 +377,13 @@ const MarketIndices: React.FC = () => {
   const [draftIndices, setDraftIndices] = useState<SelectedIndexItem[]>([]);
   const [isDraftDirty, setIsDraftDirty] = useState(false);
   const [isEditingDraftCategory, setIsEditingDraftCategory] = useState(false);
-  const [isDraggingGrid, setIsDraggingGrid] = useState(false);
+  // 卡片区拖动中的预览：只含当前栏目的卡；null 表示没在拖
+  const [gridPreview, setGridPreview] = useState<SelectedIndexItem[] | null>(
+    null
+  );
+  const [draggingCode, setDraggingCode] = useState<string | null>(null);
+  const [draggingFromRow, setDraggingFromRow] = useState<number | null>(null);
+  const [fullRow, setFullRow] = useState<number | null>(null);
 
   // 获取可见的分类，并按 order 排序
   const visibleCategories = indexCategories
@@ -624,8 +678,10 @@ const MarketIndices: React.FC = () => {
     );
 
     if (oldIndex !== -1 && newIndex !== -1) {
-      const reorderedCurrent = packCategoryRows(
-        arrayMove(currentCategoryIndices, oldIndex, newIndex)
+      const reorderedCurrent = reorderKeepingShelves(
+        currentCategoryIndices,
+        activeCode,
+        overCode
       );
       const next = [...otherIndices, ...reorderedCurrent];
       if (isSettingsModalVisible) {
@@ -658,45 +714,95 @@ const MarketIndices: React.FC = () => {
     }
   };
 
-  const handleGridDragEnd = (event: DragEndEvent) => {
-    setIsDraggingGrid(false);
+  const resetGridDrag = () => {
+    setGridPreview(null);
+    setDraggingCode(null);
+    setDraggingFromRow(null);
+    setFullRow(null);
+  };
+
+  const handleGridDragStart = (event: DragStartEvent) => {
+    const code = parseCardId(String(event.active.id));
+    if (!code) return;
+    const categoryItems = compactCategoryRows(activeCategoryIndices);
+    setGridPreview(categoryItems);
+    setDraggingCode(code);
+    setDraggingFromRow(
+      categoryItems.find((item) => item.code === code)?.row ?? null
+    );
+  };
+
+  // 按当前预览重算落点：左半张插前、右半张插后、行空白处接到行尾。
+  // onDragMove 拿到的 over 可能落后一帧，所以 over 变化和松手时也各算一次
+  const resolveGridPreview = (
+    event: DragMoveEvent | DragOverEvent | DragEndEvent
+  ): SelectedIndexItem[] | null => {
     const { active, over } = event;
-    if (!over || !activeCategoryId) return;
+    if (!gridPreview || !draggingCode || !over) return gridPreview;
 
-    const activeCode = parseCardId(String(active.id));
-    if (!activeCode) return;
-
-    const categoryItems = selectedIndices.filter(
-      (item) => item.categoryId === activeCategoryId
-    );
-    const otherItems = selectedIndices.filter(
-      (item) => item.categoryId !== activeCategoryId
-    );
+    const current = gridPreview.find((item) => item.code === draggingCode);
+    if (!current) return gridPreview;
 
     const overId = String(over.id);
     const overCard = parseCardId(overId);
     const overShelf = parseShelfId(overId);
 
-    let nextCategory: SelectedIndexItem[] | null = null;
+    let target: MoveCardTarget | null = null;
+    let targetRow: number | null = null;
     if (overCard) {
-      const target = categoryItems.find((item) => item.code === overCard);
-      if (!target || target.code === activeCode) return;
-      nextCategory = moveCard(categoryItems, activeCode, {
-        type: 'row',
-        row: target.row ?? 0,
-        col: target.col,
-      });
+      const overItem = gridPreview.find((item) => item.code === overCard);
+      const dragged = active.rect.current.translated;
+      if (!overItem || !dragged) return gridPreview;
+      const draggedCenter = dragged.left + dragged.width / 2;
+      const overCenter = over.rect.left + over.rect.width / 2;
+      target = {
+        type: 'card',
+        code: overCard,
+        after: draggedCenter > overCenter,
+      };
+      targetRow = overItem.row ?? 0;
     } else if (overShelf === 'new') {
-      nextCategory = moveCard(categoryItems, activeCode, { type: 'new-row' });
-    } else if (typeof overShelf === 'number') {
-      nextCategory = moveCard(categoryItems, activeCode, {
-        type: 'row',
-        row: overShelf,
-      });
+      target = { type: 'new-row' };
+    } else if (typeof overShelf === 'number' && overShelf !== current.row) {
+      // 指针在卡自己所在行的空隙里时不动，避免同排换位后又被甩到行尾
+      target = { type: 'row', row: overShelf };
+      targetRow = overShelf;
     }
+    if (!target) return gridPreview;
 
-    if (!nextCategory) return;
-    setSelectedIndices([...otherItems, ...nextCategory]);
+    const next = moveCard(gridPreview, draggingCode, target, {
+      compact: false,
+    });
+    setFullRow(next ? null : targetRow);
+    return next ?? gridPreview;
+  };
+
+  const handleGridDragMove = (event: DragMoveEvent | DragOverEvent) => {
+    const next = resolveGridPreview(event);
+    if (
+      next &&
+      gridPreview &&
+      layoutSignature(next) !== layoutSignature(gridPreview)
+    ) {
+      setGridPreview(next);
+    }
+  };
+
+  const handleGridDragEnd = (event: DragEndEvent) => {
+    const finalPreview = resolveGridPreview(event);
+    if (finalPreview && activeCategoryId) {
+      const otherItems = selectedIndices.filter(
+        (item) => item.categoryId !== activeCategoryId
+      );
+      const nextCategory = compactCategoryRows(finalPreview);
+      if (
+        layoutSignature(nextCategory) !==
+        layoutSignature(compactCategoryRows(activeCategoryIndices))
+      ) {
+        setSelectedIndices([...otherItems, ...nextCategory]);
+      }
+    }
+    resetGridDrag();
   };
 
   const sensors = useSensors(
@@ -712,12 +818,147 @@ const MarketIndices: React.FC = () => {
     })
   );
 
-  const visibleGridItems = activeCategoryIndices.filter(
+  // 行用真实 row 号做 droppable id；拖动中保留被拖空的原行，松手后再收拢
+  const gridItems = gridPreview ?? compactCategoryRows(activeCategoryIndices);
+  const visibleGridItems = gridItems.filter(
     (item) =>
       item.visible &&
       marketIndicesData.some((index) => index.code === item.code)
   );
-  const visibleGridRows = groupItemsByRow(visibleGridItems);
+  const visibleRowNumbers = [
+    ...new Set([
+      ...visibleGridItems.map((item) => item.row ?? 0),
+      ...(draggingFromRow === null ? [] : [draggingFromRow]),
+    ]),
+  ].sort((a, b) => a - b);
+  const visibleGridRows = visibleRowNumbers.map((row) => ({
+    row,
+    items: visibleGridItems
+      .filter((item) => (item.row ?? 0) === row)
+      .sort((a, b) => (a.col ?? 0) - (b.col ?? 0)),
+  }));
+  const draggingRow =
+    gridPreview?.find((item) => item.code === draggingCode)?.row ?? null;
+  const draggingQuote = draggingCode
+    ? marketIndicesData.find((index) => index.code === draggingCode)
+    : undefined;
+
+  const renderIndexCard = (index: Quote, overlay = false) => (
+    <Card
+      style={{
+        background: 'linear-gradient(135deg, #fafbfc 0%, #f5f6fa 100%)',
+        borderRadius: '4px',
+        boxShadow: overlay
+          ? '0 8px 24px rgba(0,0,0,0.18)'
+          : '0 1px 4px rgba(0,0,0,0.04)',
+        height: '110px',
+        minWidth: 155,
+        maxWidth: 170,
+        flex: '0 0 auto',
+        position: 'relative',
+        paddingLeft: '10px',
+        overflow: 'hidden',
+        display: 'flex',
+        flexDirection: 'column',
+        justifyContent: 'center',
+        transition: 'box-shadow 0.2s',
+        cursor: overlay ? 'grabbing' : 'grab',
+      }}
+      styles={{
+        body: { padding: '8px 10px 8px 0', height: '100%' },
+      }}
+      onMouseEnter={(e) => {
+        if (overlay) return;
+        e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.10)';
+      }}
+      onMouseLeave={(e) => {
+        if (overlay) return;
+        e.currentTarget.style.boxShadow = '0 1px 4px rgba(0,0,0,0.04)';
+      }}
+    >
+      {/* 左侧色条 */}
+      <div
+        style={{
+          position: 'absolute',
+          left: 0,
+          top: 0,
+          bottom: 0,
+          width: '3px',
+          borderRadius: '2px',
+          background:
+            index.changePercent >= 0 ? PERIOD_UP_COLOR : PERIOD_DOWN_COLOR,
+        }}
+      />
+
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100%',
+          justifyContent: 'space-around',
+        }}
+      >
+        {/* 指数名称 */}
+        <div
+          style={{
+            fontWeight: 700,
+            fontSize: '14px',
+            color: '#222',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            lineHeight: '1.2',
+          }}
+        >
+          {index.name}
+        </div>
+
+        {/* 当前价格 */}
+        <div
+          style={{
+            fontWeight: 700,
+            fontSize: '20px',
+            color: '#111',
+            lineHeight: '1.2',
+          }}
+        >
+          {index.currentPrice.toFixed(2)}
+        </div>
+
+        {/* 涨跌幅和涨跌额 */}
+        <div>
+          <Text
+            style={{
+              color:
+                index.changePercent >= 0 ? PERIOD_UP_COLOR : PERIOD_DOWN_COLOR,
+              fontWeight: 600,
+              fontSize: '13px',
+              lineHeight: '1.2',
+            }}
+          >
+            {index.changeAmount >= 0 ? '+' : ''}
+            {index.changeAmount.toFixed(2)} (
+            {formatPercent(index.changePercent)})
+          </Text>
+        </div>
+
+        {/* 周期涨跌幅 */}
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'flex-start',
+            gap: '6px',
+            fontSize: '11px',
+            lineHeight: '1.2',
+          }}
+        >
+          {renderPeriodChangeTag('W', index.weeklyChangePercent)}
+          {renderPeriodChangeTag('M', index.monthlyChangePercent)}
+          {renderPeriodChangeTag('Y', index.yearlyChangePercent)}
+        </div>
+      </div>
+    </Card>
+  );
 
   return (
     <div style={{ marginBottom: '24px' }}>
@@ -793,8 +1034,11 @@ const MarketIndices: React.FC = () => {
         <DndContext
           sensors={cardSensors}
           collisionDetection={shelfCollisionDetection}
-          onDragStart={() => setIsDraggingGrid(true)}
-          onDragCancel={() => setIsDraggingGrid(false)}
+          measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
+          onDragStart={handleGridDragStart}
+          onDragMove={handleGridDragMove}
+          onDragOver={handleGridDragMove}
+          onDragCancel={resetGridDrag}
           onDragEnd={handleGridDragEnd}
         >
           <div
@@ -803,13 +1047,22 @@ const MarketIndices: React.FC = () => {
               maxWidth: '98%',
             }}
           >
-            {visibleGridRows.map((rowItems, rowIndex) => (
+            {visibleGridRows.map(({ row, items: rowItems }) => (
               <SortableContext
-                key={rowIndex}
+                key={row}
                 items={rowItems.map((item) => cardSortableId(item.code))}
-                strategy={horizontalListSortingStrategy}
+                strategy={noShiftStrategy}
               >
-                <ShelfRow rowIndex={rowIndex}>
+                <ShelfRow
+                  row={row}
+                  highlight={
+                    fullRow === row
+                      ? 'full'
+                      : draggingCode && draggingRow === row
+                        ? 'target'
+                        : null
+                  }
+                >
                   {rowItems.map((item) => {
                     const index = marketIndicesData.find(
                       (idx) => idx.code === item.code
@@ -817,140 +1070,18 @@ const MarketIndices: React.FC = () => {
                     if (!index) return null;
                     return (
                       <SortableIndexCard key={index.code} item={item}>
-                        <Card
-                          style={{
-                            background:
-                              'linear-gradient(135deg, #fafbfc 0%, #f5f6fa 100%)',
-                            borderRadius: '4px',
-                            boxShadow: '0 1px 4px rgba(0,0,0,0.04)',
-                            height: '110px',
-                            minWidth: 155,
-                            maxWidth: 170,
-                            flex: '0 0 auto',
-                            position: 'relative',
-                            paddingLeft: '10px',
-                            overflow: 'hidden',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            justifyContent: 'center',
-                            transition: 'box-shadow 0.2s',
-                            cursor: 'grab',
-                          }}
-                          styles={{
-                            body: { padding: '8px 10px 8px 0', height: '100%' },
-                          }}
-                          onMouseEnter={(e) => {
-                            e.currentTarget.style.boxShadow =
-                              '0 4px 12px rgba(0,0,0,0.10)';
-                          }}
-                          onMouseLeave={(e) => {
-                            e.currentTarget.style.boxShadow =
-                              '0 1px 4px rgba(0,0,0,0.04)';
-                          }}
-                        >
-                          {/* 左侧色条 */}
-                          <div
-                            style={{
-                              position: 'absolute',
-                              left: 0,
-                              top: 0,
-                              bottom: 0,
-                              width: '3px',
-                              borderRadius: '2px',
-                              background:
-                                index.changePercent >= 0
-                                  ? PERIOD_UP_COLOR
-                                  : PERIOD_DOWN_COLOR,
-                            }}
-                          />
-
-                          <div
-                            style={{
-                              display: 'flex',
-                              flexDirection: 'column',
-                              height: '100%',
-                              justifyContent: 'space-around',
-                            }}
-                          >
-                            {/* 指数名称 */}
-                            <div
-                              style={{
-                                fontWeight: 700,
-                                fontSize: '14px',
-                                color: '#222',
-                                whiteSpace: 'nowrap',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                lineHeight: '1.2',
-                              }}
-                            >
-                              {index.name}
-                            </div>
-
-                            {/* 当前价格 */}
-                            <div
-                              style={{
-                                fontWeight: 700,
-                                fontSize: '20px',
-                                color: '#111',
-                                lineHeight: '1.2',
-                              }}
-                            >
-                              {index.currentPrice.toFixed(2)}
-                            </div>
-
-                            {/* 涨跌幅和涨跌额 */}
-                            <div>
-                              <Text
-                                style={{
-                                  color:
-                                    index.changePercent >= 0
-                                      ? PERIOD_UP_COLOR
-                                      : PERIOD_DOWN_COLOR,
-                                  fontWeight: 600,
-                                  fontSize: '13px',
-                                  lineHeight: '1.2',
-                                }}
-                              >
-                                {index.changeAmount >= 0 ? '+' : ''}
-                                {index.changeAmount.toFixed(2)} (
-                                {formatPercent(index.changePercent)})
-                              </Text>
-                            </div>
-
-                            {/* 周期涨跌幅 */}
-                            <div
-                              style={{
-                                display: 'flex',
-                                justifyContent: 'flex-start',
-                                gap: '6px',
-                                fontSize: '11px',
-                                lineHeight: '1.2',
-                              }}
-                            >
-                              {renderPeriodChangeTag(
-                                'W',
-                                index.weeklyChangePercent
-                              )}
-                              {renderPeriodChangeTag(
-                                'M',
-                                index.monthlyChangePercent
-                              )}
-                              {renderPeriodChangeTag(
-                                'Y',
-                                index.yearlyChangePercent
-                              )}
-                            </div>
-                          </div>
-                        </Card>
+                        {renderIndexCard(index)}
                       </SortableIndexCard>
                     );
                   })}
                 </ShelfRow>
               </SortableContext>
             ))}
-            <NewRowDropZone dragging={isDraggingGrid} />
+            {draggingCode && <NewRowDropZone />}
           </div>
+          <DragOverlay>
+            {draggingQuote ? renderIndexCard(draggingQuote, true) : null}
+          </DragOverlay>
         </DndContext>
       )}
 
