@@ -100,11 +100,14 @@ describe('watchlistLayout', () => {
     ).toEqual([['上证', '深证', '创业', '恒生'], ['茅台']]);
   });
 
-  test('rejects a drop onto a full destination row', () => {
+  test('a row has no card limit', () => {
     const start = packCategoryRows(
       ['a', 'b', 'c', 'd', 'e'].map((code) => item(code))
     );
-    expect(moveCard(start, 'e', { type: 'row', row: 0 })).toBeNull();
+    const next = moveCard(start, 'e', { type: 'row', row: 0 });
+    expect(
+      groupItemsByRow(next!).map((row) => row.map((entry) => entry.code))
+    ).toEqual([['a', 'b', 'c', 'd', 'e']]);
   });
 
   test('same-row reorder keeps the rest of the shelf', () => {
@@ -141,8 +144,8 @@ describe('watchlistLayout', () => {
       ['e', 'a', 'f'],
     ]);
     expect(
-      moveCard(start, 'e', { type: 'card', code: 'b', after: true })
-    ).toBeNull();
+      rows(moveCard(start, 'e', { type: 'card', code: 'b', after: true }))
+    ).toEqual([['a', 'b', 'e', 'c', 'd'], ['f']]);
   });
 
   test('preview move keeps the emptied source row number', () => {
@@ -182,12 +185,16 @@ describe('watchlistLayout', () => {
     ]);
   });
 
-  test('append uses leftover space on the last shelf', () => {
+  test('append goes to the end of the last shelf', () => {
     const start = packCategoryRows(
-      ['a', 'b', 'c', 'd', 'e'].map((code) => item(code))
+      ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'].map((code) => item(code))
     );
-    const next = appendIndexToCategory(start, item('f'));
-    expect(next.at(-1)).toMatchObject({ code: 'f', row: 1, col: 1 });
+    const next = appendIndexToCategory(start, item('i'));
+    expect(next.at(-1)).toMatchObject({ code: 'i', row: 1, col: 4 });
+    expect(appendIndexToCategory([], item('a'))[0]).toMatchObject({
+      row: 0,
+      col: 0,
+    });
   });
 
   test('remove collapses an emptied shelf', () => {
@@ -203,20 +210,36 @@ describe('watchlistLayout', () => {
     ]);
   });
 
-  test('compact splits an oversized shelf instead of keeping 5 cards', () => {
-    const next = compactCategoryRows([
+  test('compact and normalize keep a shelf of more than 4 cards', () => {
+    const wide = [
       item('a', { row: 0, col: 0 }),
       item('b', { row: 0, col: 1 }),
       item('c', { row: 0, col: 2 }),
       item('d', { row: 0, col: 3 }),
       item('e', { row: 0, col: 4 }),
-    ]);
-    expect(next.map((entry) => [entry.code, entry.row, entry.col])).toEqual([
+      item('f', { row: 2, col: 0 }),
+    ];
+    const expected = [
       ['a', 0, 0],
       ['b', 0, 1],
       ['c', 0, 2],
       ['d', 0, 3],
-      ['e', 1, 0],
-    ]);
+      ['e', 0, 4],
+      ['f', 1, 0],
+    ];
+    expect(
+      compactCategoryRows(wide).map((entry) => [
+        entry.code,
+        entry.row,
+        entry.col,
+      ])
+    ).toEqual(expected);
+    expect(
+      normalizeSelectedIndexRows(wide).map((entry) => [
+        entry.code,
+        entry.row,
+        entry.col,
+      ])
+    ).toEqual(expected);
   });
 });

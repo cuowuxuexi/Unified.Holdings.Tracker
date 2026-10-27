@@ -69,7 +69,7 @@ const isIndexItem = (value: unknown): value is WatchlistIndexItem => {
     typeof value.visible === 'boolean' &&
     typeof value.categoryId === 'string' &&
     isOptionalShelfCoord(value.row) &&
-    isOptionalShelfCoord(value.col, 3)
+    isOptionalShelfCoord(value.col)
   );
 };
 

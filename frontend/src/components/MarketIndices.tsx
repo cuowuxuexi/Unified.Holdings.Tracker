@@ -261,59 +261,32 @@ const SortableIndexCard: React.FC<{
   );
 };
 
-type ShelfHighlight = 'target' | 'full' | null;
-
+// 每行张数不设上限；屏幕放不下时在行内折行显示，仍算同一行
 const ShelfRow: React.FC<{
   row: number;
-  highlight: ShelfHighlight;
+  highlighted: boolean;
   children: React.ReactNode;
-}> = ({ row, highlight, children }) => {
+}> = ({ row, highlighted, children }) => {
   const { setNodeRef } = useDroppable({
     id: shelfDroppableId(row),
   });
-  const outline =
-    highlight === 'target'
-      ? '1px dashed #1890ff'
-      : highlight === 'full'
-        ? '1px dashed #ff4d4f'
-        : '1px solid transparent';
-  const background =
-    highlight === 'target'
-      ? 'rgba(24,144,255,0.04)'
-      : highlight === 'full'
-        ? 'rgba(255,77,79,0.05)'
-        : 'transparent';
   return (
     <div
       ref={setNodeRef}
       style={{
-        position: 'relative',
         display: 'flex',
-        flexWrap: 'nowrap',
+        flexWrap: 'wrap',
         gap: 16,
         justifyContent: 'flex-start',
         width: '100%',
         minHeight: 110,
         padding: '4px 0',
         borderRadius: 4,
-        outline,
-        background,
+        outline: highlighted ? '1px dashed #1890ff' : '1px solid transparent',
+        background: highlighted ? 'rgba(24,144,255,0.04)' : 'transparent',
       }}
     >
       {children}
-      {highlight === 'full' && (
-        <span
-          style={{
-            alignSelf: 'center',
-            marginLeft: 8,
-            color: '#ff4d4f',
-            fontSize: 12,
-            whiteSpace: 'nowrap',
-          }}
-        >
-          此行已满
-        </span>
-      )}
     </div>
   );
 };
@@ -383,7 +356,6 @@ const MarketIndices: React.FC = () => {
   );
   const [draggingCode, setDraggingCode] = useState<string | null>(null);
   const [draggingFromRow, setDraggingFromRow] = useState<number | null>(null);
-  const [fullRow, setFullRow] = useState<number | null>(null);
 
   // 获取可见的分类，并按 order 排序
   const visibleCategories = indexCategories
@@ -718,7 +690,6 @@ const MarketIndices: React.FC = () => {
     setGridPreview(null);
     setDraggingCode(null);
     setDraggingFromRow(null);
-    setFullRow(null);
   };
 
   const handleGridDragStart = (event: DragStartEvent) => {
@@ -748,7 +719,6 @@ const MarketIndices: React.FC = () => {
     const overShelf = parseShelfId(overId);
 
     let target: MoveCardTarget | null = null;
-    let targetRow: number | null = null;
     if (overCard) {
       const overItem = gridPreview.find((item) => item.code === overCard);
       const dragged = active.rect.current.translated;
@@ -760,21 +730,18 @@ const MarketIndices: React.FC = () => {
         code: overCard,
         after: draggedCenter > overCenter,
       };
-      targetRow = overItem.row ?? 0;
     } else if (overShelf === 'new') {
       target = { type: 'new-row' };
     } else if (typeof overShelf === 'number' && overShelf !== current.row) {
       // 指针在卡自己所在行的空隙里时不动，避免同排换位后又被甩到行尾
       target = { type: 'row', row: overShelf };
-      targetRow = overShelf;
     }
     if (!target) return gridPreview;
 
-    const next = moveCard(gridPreview, draggingCode, target, {
-      compact: false,
-    });
-    setFullRow(next ? null : targetRow);
-    return next ?? gridPreview;
+    return (
+      moveCard(gridPreview, draggingCode, target, { compact: false }) ??
+      gridPreview
+    );
   };
 
   const handleGridDragMove = (event: DragMoveEvent | DragOverEvent) => {
@@ -1055,13 +1022,7 @@ const MarketIndices: React.FC = () => {
               >
                 <ShelfRow
                   row={row}
-                  highlight={
-                    fullRow === row
-                      ? 'full'
-                      : draggingCode && draggingRow === row
-                        ? 'target'
-                        : null
-                  }
+                  highlighted={Boolean(draggingCode) && draggingRow === row}
                 >
                   {rowItems.map((item) => {
                     const index = marketIndicesData.find(

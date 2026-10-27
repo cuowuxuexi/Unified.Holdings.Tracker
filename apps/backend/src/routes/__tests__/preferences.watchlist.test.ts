@@ -79,6 +79,24 @@ describe('watchlist preferences', () => {
     ).toMatchObject({ code: 'sz399006', row: 0, col: 1 });
   });
 
+  it('accepts a shelf with more than 4 cards', () => {
+    expect(
+      parseWatchlistPayload({
+        ...validPayload,
+        selectedIndices: [
+          {
+            code: 'sh000001',
+            name: '上证指数',
+            visible: true,
+            categoryId: 'market',
+            row: 0,
+            col: 5,
+          },
+        ],
+      })?.selectedIndices[0]
+    ).toMatchObject({ row: 0, col: 5 });
+  });
+
   it('rejects incomplete payloads', () => {
     expect(parseWatchlistPayload({})).toBeNull();
     expect(

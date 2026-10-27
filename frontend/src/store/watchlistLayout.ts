@@ -1,5 +1,6 @@
 import type { SelectedIndexItem } from './types';
 
+// 只用于没有行号的旧名单首次落位；每行张数不设上限，放不下时由行内折行显示
 export const CARDS_PER_ROW = 4;
 export const NEW_ROW_DROPPABLE = 'shelf:new';
 
@@ -21,8 +22,7 @@ const hasValidCoords = (item: SelectedIndexItem): boolean =>
   Number.isInteger(item.row) &&
   (item.row as number) >= 0 &&
   Number.isInteger(item.col) &&
-  (item.col as number) >= 0 &&
-  (item.col as number) < CARDS_PER_ROW;
+  (item.col as number) >= 0;
 
 const sortByShelf = (a: SelectedIndexItem, b: SelectedIndexItem): number =>
   (a.row ?? 0) - (b.row ?? 0) || (a.col ?? 0) - (b.col ?? 0);
@@ -51,13 +51,10 @@ export const compactCategoryRows = (
   let nextRow = 0;
   for (const oldRow of [...buckets.keys()].sort((a, b) => a - b)) {
     const list = buckets.get(oldRow) ?? [];
-    for (let i = 0; i < list.length; i += CARDS_PER_ROW) {
-      const chunk = list.slice(i, i + CARDS_PER_ROW);
-      chunk.forEach((item, col) => {
-        result.push({ ...item, row: nextRow, col });
-      });
-      nextRow += 1;
-    }
+    list.forEach((item, col) => {
+      result.push({ ...item, row: nextRow, col });
+    });
+    nextRow += 1;
   }
   return result;
 };
@@ -144,8 +141,6 @@ export const moveCard = (
         : Math.min(Math.max(target.col, 0), destItems.length);
   }
 
-  if (destItems.length >= CARDS_PER_ROW) return null;
-
   const merged = [
     ...destItems.slice(0, insertAt),
     { ...item, row, col: insertAt },
@@ -192,9 +187,8 @@ export const appendIndexToCategory = (
     (max, entry) => Math.max(max, entry.row ?? 0),
     -1
   );
-  const lastCount = packed.filter((entry) => entry.row === maxRow).length;
-  const row = lastCount > 0 && lastCount < CARDS_PER_ROW ? maxRow : maxRow + 1;
-  const col = row === maxRow ? lastCount : 0;
+  const row = Math.max(maxRow, 0);
+  const col = packed.filter((entry) => entry.row === row).length;
   return [...others, ...packed, { ...item, row, col }];
 };
 
