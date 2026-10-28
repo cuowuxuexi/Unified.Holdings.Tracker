@@ -135,6 +135,39 @@
       .clock {
         text-align: right;
       }
+
+      /* 语录：顶栏中间，固定高度，长句自动缩字号 */
+      #quote {
+        flex: 1;
+        min-width: 0;
+        height: 70px;
+        margin: 0 40px;
+        display: flex;
+        flex-direction: column;
+        justify-content: flex-end;
+        align-items: center;
+        text-align: center;
+        transition: opacity 0.8s;
+      }
+      #quote[hidden] {
+        display: none;
+      }
+      #quote.fade {
+        opacity: 0;
+      }
+      #quoteText {
+        max-width: 640px;
+        overflow: hidden;
+        color: var(--text);
+        line-height: 1.5;
+        letter-spacing: 0.5px;
+      }
+      #quoteMeta {
+        font-size: 11px;
+        color: var(--muted);
+        letter-spacing: 1px;
+        margin-top: 4px;
+      }
       .clock .t {
         font-size: 44px;
         font-weight: 300;
@@ -520,6 +553,10 @@
           </div>
           <div id="status">加载中…</div>
         </div>
+        <div id="quote" hidden>
+          <div id="quoteText"></div>
+          <div id="quoteMeta"></div>
+        </div>
         <div class="clock">
           <div class="t num" id="time">--:--</div>
           <div class="d" id="date"></div>
@@ -610,6 +647,7 @@
           marketOrder: [],
           background: 'mountain',
         },
+        sayings: null, // { source, items }，来自 /api/preferences/quotes
         selected: null, // 选中的代码：曲线区显示其当日分时
         intraday: null,
         drag: null,
@@ -1552,6 +1590,7 @@
       async function slow() {
         try {
           await loadWatch();
+          await loadQuotes();
           const h = await api(
             `/portfolio/${state.portfolioId}/history-context?year=${new Date().getFullYear()}`
           );
@@ -1637,8 +1676,83 @@
         setInterval(slow, SLOW_MS);
       }
 
+      // ---------- 语录轮播 ----------
+      // 按 5 分钟时间槽确定排列：每轮把全部语录打乱各播一次再进下一轮；
+      // 不存状态，重启或多屏都一致
+      const QUOTE_MS = 5 * 60 * 1000;
+      const quoteRound = (round, n) => {
+        const rnd = seededRandom(20261028 + round);
+        const perm = [...Array(n).keys()];
+        for (let i = n - 1; i > 0; i--) {
+          const j = Math.floor(rnd() * (i + 1));
+          [perm[i], perm[j]] = [perm[j], perm[i]];
+        }
+        return perm;
+      };
+      const quoteAt = (slot, n) => {
+        const round = Math.floor(slot / n);
+        const perm = quoteRound(round, n);
+        // 轮次交界不连播同一条
+        if (n > 1 && perm[0] === quoteRound(round - 1, n)[n - 1])
+          [perm[0], perm[1]] = [perm[1], perm[0]];
+        return { index: perm[slot % n], round, pos: slot % n };
+      };
+      let quoteSlot = null;
+
+      function renderQuote() {
+        const items = state.sayings?.items ?? [];
+        const box = $('quote');
+        box.hidden = items.length === 0;
+        if (!items.length) return;
+        const slot = Math.floor(Date.now() / QUOTE_MS);
+        if (slot === quoteSlot) return;
+        const first = quoteSlot === null;
+        quoteSlot = slot;
+        const { index, pos } = quoteAt(slot, items.length);
+        const q = items[index];
+        const show = () => {
+          const text = $('quoteText');
+          text.textContent = q.text;
+          $('quoteMeta').textContent = [
+            state.sayings.source,
+            q.section,
+            `${pos + 1}/${items.length}`,
+          ]
+            .filter(Boolean)
+            .join(' · ');
+          // 先按大字号排，放不下再逐级缩小
+          let size = 17;
+          text.style.fontSize = `${size}px`;
+          text.style.maxHeight = '52px';
+          while (text.scrollHeight > text.clientHeight + 1 && size > 11) {
+            text.style.fontSize = `${--size}px`;
+          }
+          box.classList.remove('fade');
+        };
+        if (first) show();
+        else {
+          box.classList.add('fade');
+          setTimeout(show, 800);
+        }
+      }
+
+      async function loadQuotes() {
+        try {
+          const q = await api('/preferences/quotes');
+          const next = q.exists ? { source: q.source, items: q.items } : null;
+          // 语录有改动才立即重排，否则等下一个时间槽
+          if (JSON.stringify(next) !== JSON.stringify(state.sayings))
+            quoteSlot = null;
+          state.sayings = next;
+        } catch (e) {
+          /* 语录失败不影响其它部分；保留上次内容 */
+        }
+        renderQuote();
+      }
+
       function tick() {
         const n = new Date();
+        if (quoteSlot !== null) renderQuote();
         $('time').textContent = n.toLocaleTimeString('zh-CN', {
           hour12: false,
           hour: '2-digit',

@@ -3,7 +3,10 @@ import { prisma } from '../lib/prisma';
 
 const WATCHLIST_KEY = 'watchlist';
 const DESKTOP_KEY = 'desktop';
+const QUOTES_KEY = 'quotes';
 const MAX_ORDER_LENGTH = 200;
+const MAX_QUOTES = 500;
+const MAX_QUOTE_LENGTH = 500;
 
 export type WatchlistIndexItem = {
   code: string;
@@ -46,6 +49,17 @@ export type DesktopPayload = {
 };
 
 const DEFAULT_DESKTOP_BACKGROUND = 'mountain';
+
+// 桌面看板轮播的语录；内容是用户数据，只存库，不进仓库
+export type QuoteItem = {
+  text: string;
+  section?: string;
+};
+
+export type QuotesPayload = {
+  source?: string; // 出处，如书名
+  items: QuoteItem[];
+};
 
 type AppPreferenceRow = {
   key: string;
@@ -172,6 +186,34 @@ export const parseDesktopPayload = (value: unknown): DesktopPayload | null => {
   };
 };
 
+const isShortText = (value: unknown, max: number): value is string =>
+  typeof value === 'string' && value.trim() !== '' && value.length <= max;
+
+const isQuoteItem = (value: unknown): value is QuoteItem =>
+  isRecord(value) &&
+  isShortText(value.text, MAX_QUOTE_LENGTH) &&
+  (value.section === undefined || isShortText(value.section, 64));
+
+export const parseQuotesPayload = (value: unknown): QuotesPayload | null => {
+  if (!isRecord(value)) return null;
+  const { source, items } = value;
+  if (
+    !Array.isArray(items) ||
+    items.length > MAX_QUOTES ||
+    !items.every(isQuoteItem) ||
+    (source !== undefined && !isShortText(source, 128))
+  ) {
+    return null;
+  }
+  return {
+    ...(source !== undefined && { source }),
+    items: items.map(({ text, section }) => ({
+      text,
+      ...(section !== undefined && { section }),
+    })),
+  };
+};
+
 const toIso = (value: Date | string): string =>
   value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 
@@ -281,6 +323,34 @@ router.put(
     }
 
     const stored = await writePreference(DESKTOP_KEY, payload);
+    res.json({ exists: true, ...stored.payload, updatedAt: stored.updatedAt });
+  })
+);
+
+router.get(
+  '/quotes',
+  asyncHandler(async (_req: Request, res: Response) => {
+    const stored = await readPreference(QUOTES_KEY, parseQuotesPayload);
+    if (!stored) {
+      res.json({ exists: false });
+      return;
+    }
+    res.json({ exists: true, ...stored.payload, updatedAt: stored.updatedAt });
+  })
+);
+
+router.put(
+  '/quotes',
+  asyncHandler(async (req: Request, res: Response) => {
+    const payload = parseQuotesPayload(req.body);
+    if (!payload) {
+      res.status(400).json({
+        message: `quotes payload is invalid: items must be an array of at most ${MAX_QUOTES} { text, section? }`,
+      });
+      return;
+    }
+
+    const stored = await writePreference(QUOTES_KEY, payload);
     res.json({ exists: true, ...stored.payload, updatedAt: stored.updatedAt });
   })
 );
