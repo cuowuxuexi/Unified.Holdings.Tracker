@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { Quote, KlinePoint } from '../store/types'; // Adjust path if needed
+import { Quote, KlinePoint, IntradayData } from '../store/types'; // Adjust path if needed
 import {
   Portfolio,
   PortfolioDetail,
@@ -209,6 +209,14 @@ const apiClient = {
       // MODIFIED: Re-throw error instead of returning empty array
       throw error;
     }
+  },
+
+  fetchIntraday: async (code: string): Promise<IntradayData> => {
+    const response = await axios.get<IntradayData>(
+      `${API_BASE_URL}/api/market/intraday`,
+      { params: { code } }
+    );
+    return response.data;
   },
   // Portfolio Management API Calls
   fetchPortfolios: async (): Promise<Portfolio[]> => {

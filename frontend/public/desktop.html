@@ -1,0 +1,1667 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>UHT 桌面看板</title>
+    <!--
+  桌面看板：给 Lively Wallpaper 当网页壁纸用（Lively 打开 http://<uht>/desktop.html）。
+  独立静态页，不进 React 构建；数据走同源 /api，偏好存 /api/preferences/desktop。
+-->
+    <style>
+      :root {
+        --panel: rgba(12, 16, 32, 0.55);
+        --panel-border: rgba(255, 255, 255, 0.09);
+        --text: #eef1f6;
+        --sub: #b4bccb;
+        --muted: #7c8597;
+        --up: #ff5b4f;
+        --down: #2fd08a;
+        --accent: #8b9bff;
+        --num:
+          'Segoe UI Variable Display', 'Segoe UI', 'Microsoft YaHei UI',
+          sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #0b1026;
+      }
+      body {
+        color: var(--text);
+        font-family:
+          'Segoe UI Variable Text', 'Segoe UI', 'Microsoft YaHei UI', sans-serif;
+        user-select: none;
+      }
+      #bg {
+        position: fixed;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      /* 固定 1440×900 画布，按屏幕等比缩放；左侧 250px 留给桌面图标，底部留给任务栏 */
+      #canvas {
+        position: absolute;
+        left: 50%;
+        top: 50%;
+        width: 1440px;
+        height: 900px;
+        padding: 40px 44px 104px 250px;
+        display: grid;
+        grid-template-rows: auto auto 1fr auto;
+        gap: 18px;
+      }
+      .num {
+        font-family: var(--num);
+        font-variant-numeric: tabular-nums;
+      }
+      .up {
+        color: var(--up);
+      }
+      .down {
+        color: var(--down);
+      }
+      .flat {
+        color: var(--muted);
+      }
+      .panel {
+        background: var(--panel);
+        backdrop-filter: blur(18px) saturate(130%);
+        border: 1px solid var(--panel-border);
+        border-radius: 16px;
+        box-shadow: 0 10px 40px rgba(0, 0, 0, 0.25);
+      }
+      .label {
+        font-size: 12px;
+        letter-spacing: 1.5px;
+        color: var(--muted);
+      }
+
+      /* 顶栏 */
+      header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-end;
+        text-shadow: 0 1px 8px rgba(0, 0, 0, 0.5);
+      }
+      .title {
+        font-size: 15px;
+        color: var(--sub);
+        letter-spacing: 3px;
+        display: flex;
+        align-items: center;
+        gap: 14px;
+      }
+      .title b {
+        color: var(--text);
+        font-weight: 600;
+      }
+      .eye {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+        font-size: 12px;
+        letter-spacing: 1px;
+        color: var(--sub);
+        padding: 4px 10px;
+        border-radius: 999px;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+      }
+      .eye:hover {
+        background: rgba(255, 255, 255, 0.14);
+      }
+      .eye svg {
+        width: 14px;
+        height: 14px;
+      }
+      #status {
+        font-size: 11px;
+        color: var(--muted);
+        margin-top: 6px;
+      }
+      #status.err {
+        color: var(--up);
+      }
+      .clock {
+        text-align: right;
+      }
+      .clock .t {
+        font-size: 44px;
+        font-weight: 300;
+        line-height: 1;
+        letter-spacing: 1px;
+      }
+      .clock .d {
+        font-size: 13px;
+        color: var(--sub);
+        margin-top: 6px;
+      }
+
+      /* 总览 + 曲线 */
+      .hero {
+        display: grid;
+        grid-template-columns: 480px 1fr;
+        gap: 18px;
+        height: 226px;
+      }
+      .summary {
+        padding: 22px 26px;
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+      }
+      .net {
+        font-size: 46px;
+        font-weight: 600;
+        line-height: 1.1;
+        margin-top: 6px;
+        letter-spacing: -0.5px;
+      }
+      .net small {
+        font-size: 22px;
+        color: var(--sub);
+        font-weight: 400;
+        margin-right: 4px;
+      }
+      .today {
+        font-size: 18px;
+        margin-top: 4px;
+      }
+      .today .label {
+        margin-right: 8px;
+      }
+      .chips {
+        display: flex;
+        gap: 8px;
+      }
+      .chip {
+        flex: 1;
+        padding: 8px 10px;
+        border-radius: 10px;
+        background: rgba(255, 255, 255, 0.05);
+      }
+      .chip .label {
+        font-size: 11px;
+        letter-spacing: 1px;
+      }
+      .chip .v {
+        font-size: 16px;
+        font-weight: 600;
+        margin-top: 2px;
+      }
+      .lev {
+        font-size: 12px;
+        color: var(--muted);
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 6px;
+      }
+      .bar {
+        height: 5px;
+        border-radius: 3px;
+        background: rgba(255, 255, 255, 0.08);
+        overflow: hidden;
+      }
+      .bar > i {
+        display: block;
+        height: 100%;
+        border-radius: 3px;
+        background: linear-gradient(90deg, var(--accent), #c08bff);
+      }
+
+      .chart {
+        padding: 16px 22px 12px;
+        position: relative;
+      }
+      .chart .head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        position: relative;
+        z-index: 1;
+      }
+      .tabs {
+        display: flex;
+        gap: 6px;
+      }
+      .tab {
+        font-size: 12px;
+        letter-spacing: 1px;
+        color: var(--muted);
+        cursor: pointer;
+        padding: 3px 10px;
+        border-radius: 999px;
+      }
+      .tab.on {
+        color: var(--text);
+        background: rgba(255, 255, 255, 0.1);
+      }
+      .tab .x {
+        margin-left: 6px;
+        opacity: 0.6;
+      }
+      .chart .val {
+        font-size: 24px;
+        font-weight: 600;
+        text-align: right;
+      }
+      .chart .val small {
+        font-size: 13px;
+        font-weight: 500;
+        margin-left: 8px;
+      }
+      .chart svg {
+        position: absolute;
+        left: 22px;
+        bottom: 30px;
+        width: calc(100% - 44px);
+        height: 146px;
+        overflow: visible;
+      }
+      .axis {
+        position: absolute;
+        left: 22px;
+        right: 22px;
+        bottom: 10px;
+        height: 14px;
+      }
+      .axis span {
+        position: absolute;
+        transform: translateX(-50%);
+        font-size: 11px;
+        color: var(--muted);
+        white-space: nowrap;
+      }
+      .axis span.l {
+        transform: none;
+      }
+      .axis span.r {
+        transform: translateX(-100%);
+      }
+      .ylab {
+        position: absolute;
+        right: 24px;
+        font-size: 10.5px;
+        color: var(--muted);
+      }
+      .empty {
+        position: absolute;
+        inset: 60px 0 0;
+        display: grid;
+        place-items: center;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      /* 持仓 */
+      .holdings {
+        padding: 16px 22px 12px;
+        display: flex;
+        flex-direction: column;
+      }
+      .holdings .head {
+        display: flex;
+        justify-content: space-between;
+        margin-bottom: 4px;
+      }
+      .rows {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        column-gap: 34px;
+        grid-auto-flow: column;
+        grid-template-rows: 16px repeat(5, 1fr);
+        flex: 1;
+      }
+      .row {
+        display: grid;
+        grid-template-columns: 1fr 74px 72px 92px 70px;
+        align-items: center;
+        gap: 8px;
+        border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        border-radius: 6px;
+        padding: 0 6px;
+        margin: 0 -6px;
+      }
+      .row:nth-child(6n),
+      .row.colhead {
+        border-bottom-color: transparent;
+      }
+      .row[data-code] {
+        cursor: pointer;
+      }
+      .row[data-code]:hover {
+        background: rgba(255, 255, 255, 0.04);
+      }
+      .row .nm {
+        font-size: 15px;
+        font-weight: 600;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      .row .wt {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        margin-top: 4px;
+        font-size: 11px;
+        color: var(--muted);
+      }
+      .row .wt .bar {
+        width: 70px;
+        height: 3px;
+      }
+      .row .c {
+        text-align: right;
+        font-size: 14px;
+      }
+      .colhead,
+      .colhead .c {
+        font-size: 10.5px;
+        color: var(--muted);
+        letter-spacing: 1px;
+      }
+
+      /* 大盘 */
+      .market {
+        display: grid;
+        grid-template-columns: repeat(6, 1fr);
+        gap: 10px;
+      }
+      .tile {
+        padding: 10px 12px 8px;
+        position: relative;
+        overflow: hidden;
+        height: 74px;
+        cursor: pointer;
+      }
+      .tile:hover {
+        border-color: rgba(255, 255, 255, 0.18);
+      }
+      .tile .nm {
+        font-size: 12.5px;
+        color: var(--sub);
+      }
+      .tile .p {
+        font-size: 18px;
+        font-weight: 600;
+        margin-top: 1px;
+      }
+      .tile .pc {
+        position: absolute;
+        right: 12px;
+        top: 10px;
+        font-size: 12.5px;
+        font-weight: 600;
+      }
+      .tile svg {
+        position: absolute;
+        right: 10px;
+        bottom: 8px;
+        width: 78px;
+        height: 26px;
+        opacity: 0.85;
+      }
+      .tile::before {
+        content: '';
+        position: absolute;
+        left: 0;
+        top: 14px;
+        bottom: 14px;
+        width: 2px;
+        border-radius: 2px;
+        background: var(--muted);
+      }
+      .tile.up::before {
+        background: var(--up);
+      }
+      .tile.down::before {
+        background: var(--down);
+      }
+
+      /* 选中与拖动 */
+      .sel {
+        box-shadow: inset 0 0 0 1px rgba(139, 155, 255, 0.7);
+        background: rgba(139, 155, 255, 0.1) !important;
+      }
+      .dragging {
+        opacity: 0.45;
+      }
+      body.drag,
+      body.drag * {
+        cursor: grabbing !important;
+      }
+
+      /* 背景选择面板 */
+      #picker {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: rgba(0, 0, 0, 0.35);
+        z-index: 10;
+      }
+      #picker[hidden] {
+        display: none;
+      }
+      .picker-box {
+        padding: 20px 24px 24px;
+        background: rgba(12, 16, 32, 0.82);
+      }
+      .picker-head {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 16px;
+        font-size: 15px;
+        letter-spacing: 2px;
+      }
+      .picker-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 240px);
+        gap: 16px;
+      }
+      .pick {
+        cursor: pointer;
+        border-radius: 10px;
+        padding: 6px;
+        border: 1px solid transparent;
+        text-align: center;
+        font-size: 13px;
+        color: var(--sub);
+      }
+      .pick:hover {
+        background: rgba(255, 255, 255, 0.06);
+      }
+      .pick.on {
+        border-color: var(--accent);
+        color: var(--text);
+      }
+      .pick canvas {
+        display: block;
+        width: 240px;
+        border-radius: 6px;
+        margin-bottom: 6px;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="bg"></canvas>
+    <div id="canvas">
+      <header>
+        <div>
+          <div class="title">
+            <span><b id="pname">投资组合</b>　·　实时持仓</span
+            ><span class="eye" id="eye"></span
+            ><span class="eye" id="bgBtn"
+              ><svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect x="3" y="3" width="18" height="18" rx="2" />
+                <circle cx="8.5" cy="8.5" r="1.5" />
+                <path d="M21 15l-5-5L5 21" /></svg
+              >换背景</span
+            >
+          </div>
+          <div id="status">加载中…</div>
+        </div>
+        <div class="clock">
+          <div class="t num" id="time">--:--</div>
+          <div class="d" id="date"></div>
+        </div>
+      </header>
+
+      <section class="hero">
+        <div class="panel summary">
+          <div>
+            <div class="label">净资产 · CNY</div>
+            <div class="net num" id="net">--</div>
+            <div class="today num" id="today"></div>
+          </div>
+          <div class="chips" id="chips"></div>
+          <div>
+            <div class="lev" id="levText"></div>
+            <div class="bar"><i id="levBar" style="width: 0"></i></div>
+          </div>
+        </div>
+        <div class="panel chart" id="chart">
+          <div class="head">
+            <div class="tabs" id="tabs"></div>
+            <div class="val num" id="chartVal"></div>
+          </div>
+          <svg id="curve" preserveAspectRatio="none"></svg>
+          <div id="ylabs"></div>
+          <div class="axis" id="axis"></div>
+          <div class="empty" id="empty" hidden></div>
+        </div>
+      </section>
+
+      <section class="panel holdings">
+        <div class="head">
+          <div class="label">持仓 · 拖动可排序，点击看分时</div>
+          <div class="label" id="posMeta"></div>
+        </div>
+        <div class="rows" id="rows"></div>
+      </section>
+
+      <section class="market" id="market"></section>
+
+      <div id="picker" hidden>
+        <div class="panel picker-box">
+          <div class="picker-head">
+            <span>选择背景</span><span class="eye" data-close>完成</span>
+          </div>
+          <div class="picker-grid" id="pickerGrid"></div>
+        </div>
+      </div>
+    </div>
+    <script>
+      const API = '/api';
+      const PORTFOLIO = '2026投资组合';
+      const FAST_MS = 30 * 1000; // 持仓、行情、分时
+      const SLOW_MS = 60 * 60 * 1000; // 收益曲线、迷你走势、栏目名单
+
+      const $ = (id) => document.getElementById(id);
+      const api = async (path, init) => {
+        const res = await fetch(API + path, init);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      };
+      const tone = (v) => (v > 0 ? 'up' : v < 0 ? 'down' : 'flat');
+      const sign = (v) => (v > 0 ? '+' : '');
+      const money = (v, d = 0) =>
+        v.toLocaleString('zh-CN', {
+          minimumFractionDigits: d,
+          maximumFractionDigits: d,
+        });
+      const pct = (v) =>
+        v == null || isNaN(v) ? '--' : `${sign(v)}${v.toFixed(2)}%`;
+      const wan = (v) =>
+        Math.abs(v) >= 1e4
+          ? `${sign(v)}${(v / 1e4).toFixed(2)}万`
+          : `${sign(v)}${money(v)}`;
+      const MASK = '••••';
+
+      const state = {
+        portfolioId: null,
+        stats: null,
+        quotes: {},
+        watch: [], // UHT「大盘」栏目里的代码，作为大盘默认顺序
+        klines: {},
+        series: [],
+        prefs: {
+          hideAmounts: false,
+          holdingsOrder: [],
+          marketOrder: [],
+          background: 'mountain',
+        },
+        selected: null, // 选中的代码：曲线区显示其当日分时
+        intraday: null,
+        drag: null,
+      };
+
+      // ---------- 背景主题（固定种子，每次画出同一幅） ----------
+      // 星点/颗粒数按画布面积缩放，缩略图和大屏的疏密一致
+      let bgDensity = 1;
+      const dense = (count) => Math.max(1, Math.round(count * bgDensity));
+      const seededRandom = (seed) => () => {
+        seed = (seed + 0x6d2b79f5) | 0;
+        let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+        t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+      const fillGradient = (g, x0, y0, x1, y1, stops, rect) => {
+        const grad = g.createLinearGradient(x0, y0, x1, y1);
+        stops.forEach(([o, c]) => grad.addColorStop(o, c));
+        g.fillStyle = grad;
+        g.fillRect(...rect);
+      };
+      const glow = (g, x, y, r, color, W, H) => {
+        const grad = g.createRadialGradient(x, y, 0, x, y, r);
+        grad.addColorStop(0, color);
+        grad.addColorStop(1, 'rgba(0,0,0,0)');
+        g.fillStyle = grad;
+        g.fillRect(0, 0, W, H);
+      };
+      function drawStars(g, W, H, rnd, count, maxY) {
+        for (let i = 0; i < dense(count); i++) {
+          const x = rnd() * W,
+            y = Math.pow(rnd(), 1.6) * H * maxY,
+            r = rnd() * 1.1 + 0.2;
+          g.fillStyle = `rgba(255,255,255,${(0.15 + rnd() * 0.6) * (1 - y / (H * (maxY + 0.05)))})`;
+          g.beginPath();
+          g.arc(x, y, r, 0, Math.PI * 2);
+          g.fill();
+        }
+      }
+      // 起伏的山/浪轮廓：几段正弦叠加
+      function ridge(g, W, H, rnd, base, amp, color, jitter = 1.5) {
+        const waves = Array.from({ length: 4 }, (_, k) => ({
+          f: (k + 1) * (1.2 + rnd() * 1.6),
+          p: rnd() * Math.PI * 2,
+          a: 1 / (k + 1.3),
+        }));
+        g.beginPath();
+        g.moveTo(0, H);
+        for (let x = 0; x <= W; x += 4) {
+          const t = x / W;
+          let y = 0;
+          for (const w of waves)
+            y += Math.sin(t * w.f * Math.PI * 2 + w.p) * w.a;
+          g.lineTo(x, H * (base - amp * 0.5 * y) + (rnd() - 0.5) * jitter);
+        }
+        g.lineTo(W, H);
+        g.closePath();
+        g.fillStyle = color;
+        g.fill();
+      }
+      function vignette(g, W, H, alpha = 0.45) {
+        const vig = g.createRadialGradient(
+          W * 0.55,
+          H * 0.45,
+          H * 0.3,
+          W * 0.55,
+          H * 0.45,
+          H * 1.1
+        );
+        vig.addColorStop(0, 'rgba(0,0,0,0)');
+        vig.addColorStop(1, `rgba(0,0,0,${alpha})`);
+        g.fillStyle = vig;
+        g.fillRect(0, 0, W, H);
+      }
+
+      function drawMountain(g, W, H, rnd) {
+        const sky = g.createLinearGradient(0, 0, 0, H);
+        sky.addColorStop(0, '#0a0f24');
+        sky.addColorStop(0.35, '#18234a');
+        sky.addColorStop(0.58, '#33386a');
+        sky.addColorStop(0.7, '#6b5277');
+        sky.addColorStop(0.78, '#a86f72');
+        sky.addColorStop(1, '#2a2340');
+        g.fillStyle = sky;
+        g.fillRect(0, 0, W, H);
+
+        for (let i = 0; i < dense(320); i++) {
+          const x = rnd() * W,
+            y = Math.pow(rnd(), 1.6) * H * 0.6,
+            r = rnd() * 1.1 + 0.2;
+          g.fillStyle = `rgba(255,255,255,${(0.15 + rnd() * 0.6) * (1 - y / (H * 0.65))})`;
+          g.beginPath();
+          g.arc(x, y, r, 0, Math.PI * 2);
+          g.fill();
+        }
+
+        const mx = W * 0.8,
+          my = H * 0.17,
+          mr = H * 0.028;
+        const halo = g.createRadialGradient(mx, my, mr, mx, my, mr * 9);
+        halo.addColorStop(0, 'rgba(255,236,210,0.28)');
+        halo.addColorStop(1, 'rgba(255,236,210,0)');
+        g.fillStyle = halo;
+        g.fillRect(0, 0, W, H);
+        g.fillStyle = '#fff3e0';
+        g.beginPath();
+        g.arc(mx, my, mr, 0, Math.PI * 2);
+        g.fill();
+
+        const layers = [
+          { base: 0.6, amp: 0.1, color: '#4a4a7c', mist: 0.1 },
+          { base: 0.67, amp: 0.09, color: '#353663', mist: 0.08 },
+          { base: 0.74, amp: 0.08, color: '#23264a', mist: 0.06 },
+          { base: 0.82, amp: 0.07, color: '#151832', mist: 0.04 },
+          { base: 0.9, amp: 0.06, color: '#0a0c1c', mist: 0 },
+        ];
+        for (const L of layers) {
+          const waves = Array.from({ length: 4 }, (_, k) => ({
+            f: (k + 1) * (1.2 + rnd() * 1.6),
+            p: rnd() * Math.PI * 2,
+            a: 1 / (k + 1.3),
+          }));
+          g.beginPath();
+          g.moveTo(0, H);
+          for (let x = 0; x <= W; x += 4) {
+            const t = x / W;
+            let y = 0;
+            for (const w of waves)
+              y += Math.sin(t * w.f * Math.PI * 2 + w.p) * w.a;
+            g.lineTo(x, H * (L.base - L.amp * 0.5 * y) + (rnd() - 0.5) * 1.5);
+          }
+          g.lineTo(W, H);
+          g.closePath();
+          g.fillStyle = L.color;
+          g.fill();
+          if (L.mist) {
+            const mist = g.createLinearGradient(
+              0,
+              H * (L.base - L.amp),
+              0,
+              H * (L.base + 0.06)
+            );
+            mist.addColorStop(0, 'rgba(255,220,220,0)');
+            mist.addColorStop(1, `rgba(200,190,230,${L.mist})`);
+            g.fillStyle = mist;
+            g.fillRect(0, H * (L.base - L.amp), W, H * (L.amp + 0.06));
+          }
+        }
+        const vig = g.createRadialGradient(
+          W * 0.55,
+          H * 0.45,
+          H * 0.3,
+          W * 0.55,
+          H * 0.45,
+          H * 1.1
+        );
+        vig.addColorStop(0, 'rgba(0,0,0,0)');
+        vig.addColorStop(1, 'rgba(0,0,0,0.45)');
+        g.fillStyle = vig;
+        g.fillRect(0, 0, W, H);
+      }
+
+      function drawAurora(g, W, H, rnd) {
+        fillGradient(
+          g,
+          0,
+          0,
+          0,
+          H,
+          [
+            [0, '#020812'],
+            [0.55, '#06202a'],
+            [1, '#0b2f33'],
+          ],
+          [0, 0, W, H]
+        );
+        drawStars(g, W, H, rnd, 260, 0.7);
+        // 极光：几条带状柔光，叠加模式提亮
+        g.globalCompositeOperation = 'lighter';
+        const bands = [
+          { y: 0.3, a: 0.12, c: [60, 255, 170], w: 0.1 },
+          { y: 0.22, a: 0.08, c: [80, 200, 255], w: 0.07 },
+          { y: 0.38, a: 0.07, c: [170, 90, 255], w: 0.08 },
+        ];
+        for (const b of bands) {
+          const ph = rnd() * 6,
+            f = 1.5 + rnd();
+          for (let x = 0; x <= W; x += 3) {
+            const t = x / W;
+            const cy =
+              H *
+              (b.y +
+                0.08 * Math.sin(t * f * Math.PI + ph) +
+                0.03 * Math.sin(t * 7 + ph));
+            const h = H * b.w * (0.6 + 0.4 * Math.sin(t * 9 + ph * 2));
+            const grad = g.createLinearGradient(0, cy - h, 0, cy + h * 0.4);
+            const [r, gg, bb] = b.c;
+            grad.addColorStop(0, `rgba(${r},${gg},${bb},0)`);
+            grad.addColorStop(0.7, `rgba(${r},${gg},${bb},${b.a})`);
+            grad.addColorStop(1, `rgba(${r},${gg},${bb},0)`);
+            g.fillStyle = grad;
+            g.fillRect(x, cy - h, 3, h * 1.4);
+          }
+        }
+        g.globalCompositeOperation = 'source-over';
+        ridge(g, W, H, rnd, 0.8, 0.06, '#04161b');
+        ridge(g, W, H, rnd, 0.9, 0.05, '#020b0e');
+        vignette(g, W, H, 0.4);
+      }
+
+      function drawOcean(g, W, H, rnd) {
+        fillGradient(
+          g,
+          0,
+          0,
+          0,
+          H,
+          [
+            [0, '#04101f'],
+            [0.5, '#0a2742'],
+            [1, '#03101c'],
+          ],
+          [0, 0, W, H]
+        );
+        glow(g, W * 0.7, -H * 0.1, H * 0.9, 'rgba(90,170,255,0.18)', W, H);
+        // 自上而下的光柱
+        g.globalCompositeOperation = 'lighter';
+        for (let i = 0; i < 7; i++) {
+          const x = W * (0.45 + rnd() * 0.5),
+            w = W * (0.02 + rnd() * 0.05);
+          const grad = g.createLinearGradient(0, 0, 0, H * 0.8);
+          grad.addColorStop(0, 'rgba(140,200,255,0.07)');
+          grad.addColorStop(1, 'rgba(140,200,255,0)');
+          g.fillStyle = grad;
+          g.beginPath();
+          g.moveTo(x, 0);
+          g.lineTo(x + w, 0);
+          g.lineTo(x + w * 3 - W * 0.1, H * 0.8);
+          g.lineTo(x - W * 0.1, H * 0.8);
+          g.fill();
+        }
+        g.globalCompositeOperation = 'source-over';
+        for (let i = 0; i < dense(90); i++) {
+          g.fillStyle = `rgba(180,220,255,${rnd() * 0.25})`;
+          g.beginPath();
+          g.arc(rnd() * W, rnd() * H, rnd() * 2 + 0.5, 0, Math.PI * 2);
+          g.fill();
+        }
+        ['#0b2b47', '#082238', '#06192b', '#04111e'].forEach((c, i) =>
+          ridge(g, W, H, rnd, 0.7 + i * 0.07, 0.05, c, 0)
+        );
+        vignette(g, W, H, 0.5);
+      }
+
+      function drawDusk(g, W, H, rnd) {
+        fillGradient(
+          g,
+          0,
+          0,
+          0,
+          H,
+          [
+            [0, '#2b2d55'],
+            [0.4, '#6a4c79'],
+            [0.62, '#c9788a'],
+            [0.75, '#f0a98a'],
+            [1, '#3b2c48'],
+          ],
+          [0, 0, W, H]
+        );
+        glow(g, W * 0.3, H * 0.66, H * 0.5, 'rgba(255,200,150,0.45)', W, H);
+        g.fillStyle = 'rgba(255,226,190,0.9)';
+        g.beginPath();
+        g.arc(W * 0.3, H * 0.66, H * 0.05, 0, Math.PI * 2);
+        g.fill();
+        [
+          ['#8a5a7a', 0.66],
+          ['#6b4466', 0.73],
+          ['#4a3050', 0.8],
+          ['#2e1f38', 0.88],
+        ].forEach(([c, b]) => ridge(g, W, H, rnd, b, 0.07, c));
+        // 压暗上部，保证白字可读
+        fillGradient(
+          g,
+          0,
+          0,
+          0,
+          H * 0.5,
+          [
+            [0, 'rgba(10,10,30,0.45)'],
+            [1, 'rgba(10,10,30,0)'],
+          ],
+          [0, 0, W, H * 0.5]
+        );
+        vignette(g, W, H, 0.35);
+      }
+
+      function drawMesh(g, W, H, rnd) {
+        g.fillStyle = '#0b0b1a';
+        g.fillRect(0, 0, W, H);
+        const blobs = [
+          [0.15, 0.2, 0.6, 'rgba(96,80,255,0.55)'],
+          [0.85, 0.15, 0.55, 'rgba(255,70,160,0.35)'],
+          [0.75, 0.85, 0.65, 'rgba(0,200,190,0.35)'],
+          [0.3, 0.9, 0.5, 'rgba(255,150,60,0.22)'],
+          [0.55, 0.45, 0.4, 'rgba(120,140,255,0.2)'],
+        ];
+        for (const [x, y, r, c] of blobs) glow(g, W * x, H * y, H * r, c, W, H);
+        // 细颗粒噪点，避免渐变色带
+        for (let i = 0; i < dense(9000); i++) {
+          g.fillStyle = `rgba(255,255,255,${rnd() * 0.035})`;
+          g.fillRect(rnd() * W, rnd() * H, 1, 1);
+        }
+        vignette(g, W, H, 0.5);
+      }
+
+      function drawGalaxy(g, W, H, rnd) {
+        g.fillStyle = '#05050d';
+        g.fillRect(0, 0, W, H);
+        // 斜贯画面的银河带：星云光晕 + 密集小星
+        g.save();
+        g.translate(W / 2, H / 2);
+        g.rotate(-0.45);
+        const L = Math.hypot(W, H);
+        for (let i = 0; i < 40; i++) {
+          const x = (rnd() - 0.5) * L,
+            y = (rnd() - 0.5) * H * 0.18;
+          const hue = [260, 210, 320, 30][Math.floor(rnd() * 4)];
+          const grad = g.createRadialGradient(
+            x,
+            y,
+            0,
+            x,
+            y,
+            H * (0.08 + rnd() * 0.12)
+          );
+          grad.addColorStop(0, `hsla(${hue},70%,60%,0.08)`);
+          grad.addColorStop(1, 'hsla(0,0%,0%,0)');
+          g.fillStyle = grad;
+          g.fillRect(-L, -H, L * 2, H * 2);
+        }
+        for (let i = 0; i < dense(2600); i++) {
+          const x = (rnd() - 0.5) * L,
+            y = (rnd() + rnd() + rnd() - 1.5) * H * 0.12;
+          g.fillStyle = `rgba(255,255,255,${rnd() * 0.7})`;
+          g.fillRect(x, y, rnd() < 0.9 ? 1 : 1.6, rnd() < 0.9 ? 1 : 1.6);
+        }
+        g.restore();
+        drawStars(g, W, H, rnd, 350, 1);
+        vignette(g, W, H, 0.5);
+      }
+
+      function drawCity(g, W, H, rnd) {
+        fillGradient(
+          g,
+          0,
+          0,
+          0,
+          H,
+          [
+            [0, '#070a1a'],
+            [0.6, '#1a1f45'],
+            [0.85, '#3b2a55'],
+            [1, '#120c22'],
+          ],
+          [0, 0, W, H]
+        );
+        drawStars(g, W, H, rnd, 120, 0.45);
+        glow(g, W * 0.5, H * 1.05, H * 0.7, 'rgba(255,140,90,0.25)', W, H);
+        // 两层楼群：远处淡、近处深并亮窗
+        for (const [layer, top, color, lit] of [
+          [0, 0.62, '#1b1d3a', 0.04],
+          [1, 0.72, '#0b0c1c', 0.12],
+        ]) {
+          let x = 0;
+          while (x < W) {
+            const w = W * (0.025 + rnd() * 0.05);
+            const h =
+              H * (1 - top) * (0.4 + rnd() * 0.6) + (layer ? 0 : H * 0.05);
+            g.fillStyle = color;
+            g.fillRect(x, H - h, w + 1, h);
+            for (let wy = H - h + 8; wy < H - 6; wy += 9)
+              for (let wx = x + 4; wx < x + w - 4; wx += 7)
+                if (rnd() < lit) {
+                  g.fillStyle = `rgba(255,${200 + rnd() * 40},${120 + rnd() * 60},${0.5 + rnd() * 0.4})`;
+                  g.fillRect(wx, wy, 3, 4);
+                }
+            x += w;
+          }
+        }
+        vignette(g, W, H, 0.4);
+      }
+
+      function drawPlain(g, W, H) {
+        g.fillStyle = '#070b12';
+        g.fillRect(0, 0, W, H);
+        glow(g, W * 0.18, H * 0.08, H * 0.7, 'rgba(92,108,255,0.16)', W, H);
+        glow(g, W * 0.92, H * 0.95, H * 0.65, 'rgba(0,190,170,0.10)', W, H);
+      }
+
+      const THEMES = [
+        { id: 'mountain', name: '夜色远山', draw: drawMountain },
+        { id: 'aurora', name: '极光', draw: drawAurora },
+        { id: 'galaxy', name: '星河', draw: drawGalaxy },
+        { id: 'dusk', name: '暮色', draw: drawDusk },
+        { id: 'ocean', name: '深海', draw: drawOcean },
+        { id: 'city', name: '城市夜景', draw: drawCity },
+        { id: 'mesh', name: '柔光渐变', draw: drawMesh },
+        { id: 'plain', name: '素色', draw: drawPlain },
+      ];
+      const themeOf = (id) => THEMES.find((t) => t.id === id) ?? THEMES[0];
+
+      function drawBackground(
+        cv = $('bg'),
+        id = state.prefs.background,
+        W = innerWidth,
+        H = innerHeight
+      ) {
+        const dpr = devicePixelRatio || 1;
+        cv.width = W * dpr;
+        cv.height = H * dpr;
+        const g = cv.getContext('2d');
+        g.scale(dpr, dpr);
+        bgDensity = (W * H) / (1440 * 900);
+        themeOf(id).draw(g, W, H, seededRandom(20261028));
+      }
+
+      // ---------- 背景选择面板 ----------
+      function openPicker() {
+        const grid = $('pickerGrid');
+        grid.innerHTML = THEMES.map(
+          (
+            t
+          ) => `<div class="pick ${t.id === state.prefs.background ? 'on' : ''}" data-theme="${t.id}">
+            <canvas></canvas><span>${t.name}</span></div>`
+        ).join('');
+        grid.querySelectorAll('.pick').forEach((el) => {
+          // 缩略图按屏幕比例画，与实际效果一致
+          drawBackground(
+            el.querySelector('canvas'),
+            el.dataset.theme,
+            240,
+            Math.round((240 * innerHeight) / innerWidth)
+          );
+        });
+        $('picker').hidden = false;
+      }
+      $('picker').addEventListener('click', (e) => {
+        const pick = e.target.closest('.pick');
+        if (pick) {
+          state.prefs.background = pick.dataset.theme;
+          drawBackground();
+          savePrefs();
+          openPicker();
+        } else if (
+          e.target.closest('[data-close]') ||
+          e.target === $('picker')
+        ) {
+          $('picker').hidden = true;
+        }
+      });
+
+      // ---------- 排序 ----------
+      // 偏好里有的代码按偏好顺序排前，其余保持默认顺序接在后面
+      const applyOrder = (codes, order) => [
+        ...order.filter((c) => codes.includes(c)),
+        ...codes.filter((c) => !order.includes(c)),
+      ];
+      const holdingCodes = () => {
+        const pos = [...(state.stats?.positions ?? [])].sort(
+          (a, b) => b.marketValueCNY - a.marketValueCNY
+        );
+        return applyOrder(
+          pos.map((p) => p.asset.code),
+          state.prefs.holdingsOrder
+        );
+      };
+      const marketCodes = () =>
+        applyOrder(state.watch, state.prefs.marketOrder);
+
+      let saveTimer = null;
+      async function flushPrefs() {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+        try {
+          await api('/preferences/desktop', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(state.prefs),
+            keepalive: true,
+          });
+        } catch (e) {
+          setStatus(`保存设置失败（${e.message}）`, true);
+        }
+      }
+      function savePrefs() {
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(flushPrefs, 300);
+      }
+      // 壁纸被重载/关闭时把还没发出的设置立即发出
+      addEventListener('pagehide', () => {
+        if (saveTimer) flushPrefs();
+      });
+
+      // ---------- 渲染 ----------
+      function setStatus(text, err = false) {
+        $('status').className = err ? 'err' : '';
+        $('status').textContent = text;
+      }
+
+      function renderEye() {
+        const hide = state.prefs.hideAmounts;
+        $('eye').innerHTML =
+          `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>${hide ? '<path d="M3 3l18 18"/>' : ''}</svg>${hide ? '显示金额' : '隐藏金额'}`;
+      }
+
+      function renderSummary() {
+        const s = state.stats;
+        if (!s) return;
+        const hide = state.prefs.hideAmounts;
+        $('pname').textContent = s.name;
+        $('net').innerHTML =
+          `<small>¥</small>${hide ? '••••••' : money(s.netAssets)}`;
+        const dayPct = (s.dailyPnl / (s.netAssets - s.dailyPnl)) * 100;
+        $('today').innerHTML =
+          `<span class="label">今日</span><span class="${tone(s.dailyPnl)}">${hide ? '' : `${sign(s.dailyPnl)}${money(s.dailyPnl)}　`}${pct(dayPct)}</span>`;
+        const chip = (label, v, text) =>
+          `<div class="chip"><div class="label">${label}</div><div class="v num ${tone(v)}">${text ?? pct(v)}</div></div>`;
+        const totalPct = (s.totalPnl / s.netDepositedCash) * 100;
+        $('chips').innerHTML =
+          chip('本周', s.weeklyStats?.periodReturnPercent) +
+          chip('本月', s.monthlyStats?.periodReturnPercent) +
+          chip('今年', s.yearlyStats?.periodReturnPercent) +
+          chip('累计盈亏', s.totalPnl, hide ? pct(totalPct) : wan(s.totalPnl));
+        const lev = s.leverage,
+          used = (lev.usedAmount / lev.totalAmount) * 100;
+        $('levText').innerHTML = hide
+          ? `<span>融资额度已用 ${used.toFixed(1)}%</span><span>杠杆 ${(s.totalMarketValue / s.netAssets).toFixed(2)}x</span>`
+          : `<span>融资 ${money(lev.usedAmount)} / ${money(lev.totalAmount)}</span><span>总市值 ${money(s.totalMarketValue)}　现金 ${money(s.cash)}</span>`;
+        $('levBar').style.width = `${Math.min(100, used)}%`;
+      }
+
+      function renderHoldings() {
+        const s = state.stats;
+        if (!s) return;
+        const hide = state.prefs.hideAmounts;
+        const byCode = Object.fromEntries(
+          s.positions.map((p) => [p.asset.code, p])
+        );
+        const codes = holdingCodes().slice(0, 10);
+        $('posMeta').textContent = `${s.positions.length} 只`;
+        const head = `<div class="row colhead"><div>名称 · 仓位</div><div class="c">现价</div><div class="c">今日</div><div class="c">今日盈亏</div><div class="c">浮盈</div></div>`;
+        $('rows').innerHTML = codes
+          .map((code, i) => {
+            const p = byCode[code];
+            const w = (p.marketValueCNY / s.totalMarketValue) * 100;
+            const cls = [
+              state.selected === code ? 'sel' : '',
+              state.drag?.code === code && state.drag.moved ? 'dragging' : '',
+            ].join(' ');
+            return `${i % 5 === 0 ? head : ''}<div class="row ${cls}" data-code="${code}" data-group="holdings">
+        <div><div class="nm">${p.asset.name.replace(/\s+/g, '')}</div>
+          <div class="wt"><div class="bar"><i style="width:${Math.min(100, w * 3)}%"></i></div><span class="num">${w.toFixed(1)}%</span></div></div>
+        <div class="c num">${p.currentPrice.toFixed(2)}</div>
+        <div class="c num ${tone(p.dailyChangePercent)}">${pct(p.dailyChangePercent)}</div>
+        <div class="c num ${tone(p.dailyChange)}">${hide ? MASK : `${sign(p.dailyChange)}${money(p.dailyChange)}`}</div>
+        <div class="c num ${tone(p.floatingPnlPercent)}">${pct(p.floatingPnlPercent)}</div>
+      </div>`;
+          })
+          .join('');
+      }
+
+      function spark(code) {
+        const k = state.klines[code];
+        if (!k || k.length < 2) return '';
+        const cs = k.map((d) => d.close),
+          lo = Math.min(...cs),
+          hi = Math.max(...cs);
+        const d = cs
+          .map(
+            (v, i) =>
+              `${i ? 'L' : 'M'}${((i / (cs.length - 1)) * 100).toFixed(1)},${(30 - ((v - lo) / (hi - lo || 1)) * 28 - 1).toFixed(1)}`
+          )
+          .join('');
+        const c = cs[cs.length - 1] >= cs[0] ? 'var(--up)' : 'var(--down)';
+        return `<svg viewBox="0 0 100 30" preserveAspectRatio="none"><path d="${d}" fill="none" stroke="${c}" stroke-width="1.6" vector-effect="non-scaling-stroke"/></svg>`;
+      }
+
+      function renderMarket() {
+        $('market').innerHTML = marketCodes()
+          .filter((c) => state.quotes[c])
+          .map((c) => {
+            const q = state.quotes[c];
+            const cls = [
+              state.selected === c ? 'sel' : '',
+              state.drag?.code === c && state.drag.moved ? 'dragging' : '',
+            ].join(' ');
+            return `<div class="panel tile ${tone(q.changePercent)} ${cls}" data-code="${c}" data-group="market">
+        <div class="nm">${q.name}</div>
+        <div class="p num">${q.currentPrice.toFixed(2)}</div>
+        <div class="pc num ${tone(q.changePercent)}">${pct(q.changePercent)}</div>
+        ${spark(c)}
+      </div>`;
+          })
+          .join('');
+      }
+
+      // ---------- 曲线区：今年收益 / 选中标的分时 ----------
+      const SESSIONS = {
+        // [开盘分钟, 午休开始, 午休结束, 收盘分钟]（交易所当地时间）
+        cn: {
+          segs: [
+            [570, 690],
+            [780, 900],
+          ],
+          labels: ['09:30', '11:30/13:00', '15:00'],
+        },
+        hk: {
+          segs: [
+            [570, 720],
+            [780, 960],
+          ],
+          labels: ['09:30', '12:00/13:00', '16:00'],
+        },
+        us: { segs: [[570, 960]], labels: ['09:30', '12:45', '16:00'] },
+      };
+      const sessionOf = (code) =>
+        code.startsWith('hk')
+          ? SESSIONS.hk
+          : code.startsWith('us')
+            ? SESSIONS.us
+            : SESSIONS.cn;
+      function sessionFrac(session, hhmm) {
+        const [h, m] = hhmm.split(':').map(Number);
+        const t = h * 60 + m;
+        const total = session.segs.reduce((n, [a, b]) => n + b - a, 0);
+        let acc = 0;
+        for (const [a, b] of session.segs) {
+          if (t <= b) return Math.max(0, acc + Math.max(0, t - a)) / total;
+          acc += b - a;
+        }
+        return 1;
+      }
+
+      function nameOf(code) {
+        const p = state.stats?.positions.find((x) => x.asset.code === code);
+        return (
+          state.quotes[code]?.name ??
+          p?.asset.name.replace(/\s+/g, '') ??
+          state.intraday?.name ??
+          code
+        );
+      }
+
+      function renderChart() {
+        const sel = state.selected;
+        $('tabs').innerHTML =
+          `<span class="tab ${sel ? '' : 'on'}" data-tab="ytd">今年收益</span>` +
+          (sel
+            ? `<span class="tab on" data-tab="close">${nameOf(sel)} · 分时<span class="x">✕</span></span>`
+            : '');
+        if (sel) renderIntraday();
+        else renderCurve();
+      }
+
+      function setChart({
+        svg = '',
+        axis = '',
+        ylabs = '',
+        val = '',
+        empty = '',
+      }) {
+        $('curve').innerHTML = svg;
+        $('axis').innerHTML = axis;
+        $('ylabs').innerHTML = ylabs;
+        $('chartVal').innerHTML = val;
+        $('empty').hidden = !empty;
+        $('empty').textContent = empty;
+      }
+
+      function renderCurve() {
+        const ytd = state.stats?.yearlyStats?.periodReturnPercent;
+        const val = `<span class="${tone(ytd)}">${pct(ytd)}</span>`;
+        const pts = state.series.filter((d) => d.ytd_return_percent != null);
+        if (pts.length < 2) {
+          setChart({ val, empty: '收益曲线加载中…' });
+          return;
+        }
+        const W = 1000,
+          H = 146;
+        const ys = pts.map((d) => d.ytd_return_percent);
+        const lo = Math.min(0, ...ys),
+          hi = Math.max(0, ...ys),
+          pad = (hi - lo) * 0.08 || 1;
+        const x = (i) => (i / (pts.length - 1)) * W;
+        const y = (v) => H - ((v - lo + pad) / (hi - lo + 2 * pad)) * H;
+        const line = pts
+          .map(
+            (d, i) =>
+              `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(d.ytd_return_percent).toFixed(1)}`
+          )
+          .join('');
+        const last = ys[ys.length - 1],
+          c = last >= 0 ? 'var(--up)' : 'var(--down)';
+        const months = [];
+        pts.forEach((d, i) => {
+          const m = d.date.slice(5, 7);
+          if (!months.length || months[months.length - 1].m !== m)
+            months.push({ m, i });
+        });
+        setChart({
+          val,
+          svg: `<defs><linearGradient id="fill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="${c}" stop-opacity="${last >= 0 ? 0.3 : 0}"/>
+          <stop offset="1" stop-color="${c}" stop-opacity="${last >= 0 ? 0 : 0.3}"/></linearGradient></defs>
+        <line x1="0" x2="${W}" y1="${y(0)}" y2="${y(0)}" stroke="rgba(255,255,255,0.18)" stroke-dasharray="4 6" vector-effect="non-scaling-stroke"/>
+        <path d="${line}L${W},${y(0)}L0,${y(0)}Z" fill="url(#fill)"/>
+        <path d="${line}" fill="none" stroke="${c}" stroke-width="2" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>`,
+          axis: months
+            .slice(1)
+            .map(
+              (o) =>
+                `<span style="left:${((o.i / (pts.length - 1)) * 100).toFixed(2)}%">${+o.m}月</span>`
+            )
+            .join(''),
+        });
+        $('curve').setAttribute('viewBox', `0 0 ${W} ${H}`);
+      }
+
+      function renderIntraday() {
+        const d = state.intraday;
+        if (!d || d.code !== state.selected) {
+          setChart({ empty: '分时加载中…' });
+          return;
+        }
+        const pts = d.points,
+          prev = d.prevClose;
+        const chg = d.changePercent;
+        const val =
+          d.currentPrice != null
+            ? `<span class="${tone(chg)}">${d.currentPrice.toFixed(2)}<small>${pct(chg)}</small></span>`
+            : '';
+        if (!pts.length || !prev) {
+          setChart({ val, empty: '暂无分时数据' });
+          return;
+        }
+
+        const session = sessionOf(d.code);
+        const W = 1000,
+          H = 146,
+          VOL_H = 26,
+          PH = H - VOL_H - 6;
+        const dev =
+          Math.max(...pts.map((p) => Math.abs(p.price - prev)), prev * 0.002) *
+          1.1;
+        const y = (v) => PH / 2 - ((v - prev) / dev) * (PH / 2);
+        const x = (p) => sessionFrac(session, p.time) * W;
+        const line = pts
+          .map(
+            (p, i) =>
+              `${i ? 'L' : 'M'}${x(p).toFixed(1)},${y(p.price).toFixed(1)}`
+          )
+          .join('');
+        const lastX = x(pts[pts.length - 1]);
+        const c =
+          pts[pts.length - 1].price >= prev ? 'var(--up)' : 'var(--down)';
+
+        // 成交量柱：累计量差分得到每分钟量
+        const vols = pts.map((p, i) =>
+          Math.max(
+            0,
+            p.cumulativeVolume - (i ? pts[i - 1].cumulativeVolume : 0)
+          )
+        );
+        const vmax = Math.max(...vols) || 1;
+        const bw = Math.max(
+          1,
+          (W /
+            { cn: 240, hk: 330, us: 390 }[
+              session === SESSIONS.hk
+                ? 'hk'
+                : session === SESSIONS.us
+                  ? 'us'
+                  : 'cn'
+            ]) *
+            0.6
+        );
+        const bars = pts
+          .map((p, i) => {
+            const h = (vols[i] / vmax) * VOL_H;
+            const up = i === 0 ? p.price >= prev : p.price >= pts[i - 1].price;
+            return `<rect x="${(x(p) - bw / 2).toFixed(1)}" y="${(H - h).toFixed(1)}" width="${bw.toFixed(2)}" height="${h.toFixed(1)}" fill="${up ? 'rgba(255,91,79,0.45)' : 'rgba(47,208,138,0.45)'}"/>`;
+          })
+          .join('');
+
+        const hiP = prev + dev,
+          loP = prev - dev;
+        const ylabs = [
+          [12, hiP],
+          [PH / 2, prev],
+          [PH, loP],
+        ]
+          .map(
+            ([yy, v]) =>
+              `<span class="ylab num" style="bottom:${(30 + 146 - yy - 7).toFixed(0)}px">${v.toFixed(2)}　${pct(((v - prev) / prev) * 100)}</span>`
+          )
+          .join('');
+
+        setChart({
+          val,
+          svg: `<defs><linearGradient id="ifill" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0" stop-color="${c}" stop-opacity="0.28"/><stop offset="1" stop-color="${c}" stop-opacity="0.02"/></linearGradient></defs>
+        <line x1="0" x2="${W}" y1="${y(prev)}" y2="${y(prev)}" stroke="rgba(255,255,255,0.25)" stroke-dasharray="4 6" vector-effect="non-scaling-stroke"/>
+        <path d="${line}L${lastX.toFixed(1)},${y(prev)}L${x(pts[0]).toFixed(1)},${y(prev)}Z" fill="url(#ifill)"/>
+        <path d="${line}" fill="none" stroke="${c}" stroke-width="1.8" vector-effect="non-scaling-stroke" stroke-linejoin="round"/>
+        ${bars}`,
+          axis: `<span class="l" style="left:0">${session.labels[0]}</span><span style="left:${session === SESSIONS.us ? 50 : (sessionFrac(session, session.labels[1].split('/')[0]) * 100).toFixed(1)}%">${session.labels[1]}</span><span class="r" style="left:100%">${session.labels[2]}${d.date ? `　${d.date.slice(5)}` : ''}</span>`,
+          ylabs,
+        });
+        $('curve').setAttribute('viewBox', `0 0 ${W} ${H}`);
+      }
+
+      function renderAll() {
+        renderEye();
+        renderSummary();
+        renderHoldings();
+        renderMarket();
+        renderChart();
+      }
+
+      // ---------- 交互：点击选中、拖动排序、隐藏金额 ----------
+      async function loadIntraday() {
+        const code = state.selected;
+        if (!code) return;
+        try {
+          const d = await api(
+            `/market/intraday?code=${encodeURIComponent(code)}`
+          );
+          if (state.selected === code) {
+            state.intraday = d;
+            renderChart();
+          }
+        } catch (e) {
+          setStatus(`分时获取失败（${e.message}）`, true);
+        }
+      }
+
+      function select(code) {
+        state.selected = state.selected === code ? null : code;
+        state.intraday = null;
+        renderAll();
+        loadIntraday();
+      }
+
+      $('bgBtn').addEventListener('click', openPicker);
+
+      $('eye').addEventListener('click', () => {
+        state.prefs.hideAmounts = !state.prefs.hideAmounts;
+        renderAll();
+        savePrefs();
+      });
+
+      $('tabs').addEventListener('click', (e) => {
+        if (e.target.closest('[data-tab]') && state.selected)
+          select(state.selected);
+      });
+
+      document.addEventListener('pointerdown', (e) => {
+        const item = e.target.closest('[data-code]');
+        if (!item || e.button !== 0) return;
+        state.drag = {
+          code: item.dataset.code,
+          group: item.dataset.group,
+          x: e.clientX,
+          y: e.clientY,
+          moved: false,
+        };
+      });
+
+      document.addEventListener('pointermove', (e) => {
+        const d = state.drag;
+        if (!d) return;
+        if (!d.moved) {
+          if (Math.hypot(e.clientX - d.x, e.clientY - d.y) < 6) return;
+          d.moved = true;
+          document.body.classList.add('drag');
+        }
+        const target = document
+          .elementFromPoint(e.clientX, e.clientY)
+          ?.closest(`[data-group="${d.group}"]`);
+        if (!target || target.dataset.code === d.code) return;
+        const list = d.group === 'holdings' ? holdingCodes() : marketCodes();
+        const from = list.indexOf(d.code);
+        list.splice(from, 1);
+        const r = target.getBoundingClientRect();
+        // 持仓是上下排列看上下半，大盘是左右排列看左右半
+        const after =
+          d.group === 'holdings'
+            ? e.clientY > r.top + r.height / 2
+            : e.clientX > r.left + r.width / 2;
+        list.splice(
+          list.indexOf(target.dataset.code) + (after ? 1 : 0),
+          0,
+          d.code
+        );
+        if (d.group === 'holdings') {
+          state.prefs.holdingsOrder = list;
+          renderHoldings();
+        } else {
+          state.prefs.marketOrder = list;
+          renderMarket();
+        }
+      });
+
+      document.addEventListener('pointerup', () => {
+        const d = state.drag;
+        if (!d) return;
+        state.drag = null;
+        document.body.classList.remove('drag');
+        if (d.moved) {
+          renderHoldings();
+          renderMarket();
+          savePrefs();
+        } else select(d.code);
+      });
+
+      // ---------- 数据刷新 ----------
+      async function loadWatch() {
+        const wl = await api('/preferences/watchlist');
+        if (wl.exists) {
+          const order = (i) => (i.row ?? 0) * 1000 + (i.col ?? 0);
+          state.watch = wl.selectedIndices
+            .filter((i) => i.visible && i.categoryId === 'market')
+            .sort((a, b) => order(a) - order(b))
+            .map((i) => i.code);
+        }
+      }
+
+      async function slow() {
+        try {
+          await loadWatch();
+          const h = await api(
+            `/portfolio/${state.portfolioId}/history-context?year=${new Date().getFullYear()}`
+          );
+          state.series = h.data?.portfolio?.series ?? [];
+        } catch (e) {
+          /* 曲线失败不影响其它部分 */
+        }
+        const start = new Date(Date.now() - 45 * 864e5)
+          .toISOString()
+          .slice(0, 10);
+        await Promise.all(
+          state.watch.map(async (c) => {
+            try {
+              state.klines[c] = await api(
+                `/market/kline?code=${c}&period=daily&startDate=${start}`
+              );
+            } catch (e) {
+              /* 缺走势线不影响卡片 */
+            }
+          })
+        );
+        if (!state.drag) renderAll();
+      }
+
+      async function fast() {
+        try {
+          const [stats, quotes] = await Promise.all([
+            api(`/portfolio/${state.portfolioId}/stats`),
+            state.watch.length
+              ? api(`/market/quote?codes=${state.watch.join(',')}`)
+              : [],
+          ]);
+          // 设置可能在别处（另一屏/浏览器）改过；本地有未发出的修改时不覆盖
+          if (!saveTimer && !state.drag) await loadPrefs();
+          state.stats = stats;
+          for (const q of quotes) state.quotes[q.code] = q;
+          if (!state.drag) renderAll();
+          setStatus(
+            `更新于 ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}`
+          );
+        } catch (e) {
+          // 失败时保留上次内容，只提示
+          setStatus(
+            `行情获取失败（${e.message}），${FAST_MS / 1000}s 后重试`,
+            true
+          );
+        }
+        loadIntraday();
+      }
+
+      async function loadPrefs() {
+        const prefs = await api('/preferences/desktop');
+        if (!prefs.exists) return;
+        const background = prefs.background ?? 'mountain';
+        if (background !== state.prefs.background) {
+          state.prefs.background = background;
+          drawBackground();
+        }
+        state.prefs = {
+          hideAmounts: prefs.hideAmounts,
+          holdingsOrder: prefs.holdingsOrder,
+          marketOrder: prefs.marketOrder,
+          background,
+        };
+      }
+
+      async function init() {
+        try {
+          state.portfolioId = (await api('/portfolio')).find(
+            (p) => p.name === PORTFOLIO
+          )?.id;
+          await loadPrefs();
+          await loadWatch();
+        } catch (e) {
+          setStatus(`连接 UHT 失败（${e.message}），30s 后重试`, true);
+          setTimeout(init, FAST_MS);
+          return;
+        }
+        renderEye();
+        await fast();
+        await slow();
+        setInterval(fast, FAST_MS);
+        setInterval(slow, SLOW_MS);
+      }
+
+      function tick() {
+        const n = new Date();
+        $('time').textContent = n.toLocaleTimeString('zh-CN', {
+          hour12: false,
+          hour: '2-digit',
+          minute: '2-digit',
+        });
+        $('date').textContent = n.toLocaleDateString('zh-CN', {
+          month: 'long',
+          day: 'numeric',
+          weekday: 'long',
+        });
+      }
+
+      function fit() {
+        const s = Math.min(innerWidth / 1440, innerHeight / 900);
+        $('canvas').style.transform = `translate(-50%, -50%) scale(${s})`;
+        drawBackground();
+      }
+
+      fit();
+      tick();
+      addEventListener('resize', fit);
+      setInterval(tick, 1000);
+      init();
+    </script>
+  </body>
+</html>

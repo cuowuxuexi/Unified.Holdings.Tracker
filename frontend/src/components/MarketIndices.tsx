@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Card,
   Typography,
@@ -49,6 +49,7 @@ import { CSS } from '@dnd-kit/utilities';
 import type { SelectedIndexItem, IndexCategory, Quote } from '../store/types';
 import { formatPercent } from '../shared/utils/formatters';
 import useMessageApi from '../hooks/useMessageApi';
+import IntradayModal from './IntradayModal';
 import {
   appendIndexToCategory,
   cardSortableId,
@@ -334,6 +335,9 @@ const MarketIndices: React.FC = () => {
   );
 
   // Local state
+  const [intradayTarget, setIntradayTarget] = useState<Quote | null>(null);
+  // 拖动松手时指针下的卡会收到 click，拖动期间及松手当帧不弹分时
+  const suppressCardClickRef = useRef(false);
   const [isSettingsModalVisible, setIsSettingsModalVisible] = useState(false);
   const [isAddCategoryModalVisible, setIsAddCategoryModalVisible] =
     useState(false);
@@ -690,11 +694,15 @@ const MarketIndices: React.FC = () => {
     setGridPreview(null);
     setDraggingCode(null);
     setDraggingFromRow(null);
+    setTimeout(() => {
+      suppressCardClickRef.current = false;
+    }, 0);
   };
 
   const handleGridDragStart = (event: DragStartEvent) => {
     const code = parseCardId(String(event.active.id));
     if (!code) return;
+    suppressCardClickRef.current = true;
     const categoryItems = compactCategoryRows(activeCategoryIndices);
     setGridPreview(categoryItems);
     setDraggingCode(code);
@@ -829,10 +837,15 @@ const MarketIndices: React.FC = () => {
         flexDirection: 'column',
         justifyContent: 'center',
         transition: 'box-shadow 0.2s',
-        cursor: overlay ? 'grabbing' : 'grab',
+        cursor: overlay ? 'grabbing' : 'pointer',
       }}
       styles={{
         body: { padding: '8px 10px 8px 0', height: '100%' },
+      }}
+      onClick={() => {
+        if (!overlay && !suppressCardClickRef.current) {
+          setIntradayTarget(index);
+        }
       }}
       onMouseEnter={(e) => {
         if (overlay) return;
@@ -1045,6 +1058,12 @@ const MarketIndices: React.FC = () => {
           </DragOverlay>
         </DndContext>
       )}
+
+      <IntradayModal
+        code={intradayTarget?.code ?? null}
+        name={intradayTarget?.name}
+        onClose={() => setIntradayTarget(null)}
+      />
 
       {/* 设置模态框 - 管理当前分类下的指数 */}
       <Modal

@@ -946,4 +946,95 @@ export async function fetchKline(
   return [];
 }
 
+// 分时数据缓存配置
+const INTRADAY_CACHE_PREFIX = 'intraday:';
+const INTRADAY_CACHE_TTL = 20 * 1000; // 20秒缓存
+const US_INTRADAY_INDICES: Record<string, string> = {
+  usDJI: 'us.DJI',
+  usIXIC: 'us.IXIC',
+  usINX: 'us.INX',
+  usSPX: 'us.INX',
+};
+
+export interface IntradayPoint {
+  time: string; // HH:MM（交易所当地时间）
+  price: number;
+  cumulativeVolume: number; // 当日累计成交量
+}
+
+export interface IntradayData {
+  code: string;
+  date: string | null; // YYYY-MM-DD，交易所当地日期
+  points: IntradayPoint[];
+}
+
+/**
+ * 从腾讯 API 获取当日分时数据（每分钟一个点）
+ * A 股/港股走 /minute/query，美股走 /UsMinute/query（三大指数需映射为 us.DJI 形式）
+ * @param code - 股票代码，例如 sh600519, hk00700, usPDD, usDJI
+ */
+export async function fetchIntraday(code: string): Promise<IntradayData> {
+  const cacheKey = `${INTRADAY_CACHE_PREFIX}${code}`;
+  const cached = cacheService.get<IntradayData>(cacheKey);
+  if (cached) return cached;
+
+  const isUS = code.startsWith('us');
+  const processedCode = US_INTRADAY_INDICES[code] ?? code;
+  const apiPath = isUS ? '/UsMinute/query' : '/minute/query';
+  const empty: IntradayData = { code, date: null, points: [] };
+
+  for (const baseUrl of TENCENT_KLINE_BASE_URLS) {
+    try {
+      const response = await axios.get(`${baseUrl}${apiPath}`, {
+        params: { code: processedCode },
+        headers: {
+          Referer: 'http://finance.qq.com',
+          'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        },
+        timeout: 8000,
+      });
+      const container = response.data?.data?.[processedCode]?.data;
+      if (response.data?.code !== 0 || !Array.isArray(container?.data)) {
+        console.warn(
+          `[fetchIntraday] Unexpected response for ${code} from ${baseUrl}`
+        );
+        continue;
+      }
+
+      // 每行形如 "0930 1354.98 1537 208260426.00"：时间 价格 累计成交量 [累计成交额]
+      const points = (container.data as string[])
+        .map((line): IntradayPoint | null => {
+          const [hhmm, price, volume] = line.trim().split(/\s+/);
+          if (!/^\d{4}$/.test(hhmm ?? '')) return null;
+          const parsedPrice = parseFloat(price);
+          if (!(parsedPrice > 0)) return null;
+          return {
+            time: `${hhmm.slice(0, 2)}:${hhmm.slice(2)}`,
+            price: parsedPrice,
+            cumulativeVolume: parseFloat(volume) || 0,
+          };
+        })
+        .filter((p): p is IntradayPoint => p !== null);
+
+      const rawDate = String(container.date ?? '');
+      const result: IntradayData = {
+        code,
+        date: /^\d{8}$/.test(rawDate)
+          ? `${rawDate.slice(0, 4)}-${rawDate.slice(4, 6)}-${rawDate.slice(6)}`
+          : null,
+        points,
+      };
+      cacheService.set(cacheKey, result, INTRADAY_CACHE_TTL);
+      return result;
+    } catch (error) {
+      console.error(
+        `[fetchIntraday] Error fetching intraday for ${code} from ${baseUrl}:`,
+        axios.isAxiosError(error) ? error.message : error
+      );
+    }
+  }
+  return empty;
+}
+
 export const fetchMarketQuotes = fetchQuotes;

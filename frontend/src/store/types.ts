@@ -21,6 +21,23 @@ export interface Quote {
   monthlyChangePercent?: number | null;
 }
 
+// 当日分时（/api/market/intraday），time 为交易所当地时间 HH:MM
+export interface IntradayPoint {
+  time: string;
+  price: number;
+  cumulativeVolume: number;
+}
+
+export interface IntradayData {
+  code: string;
+  name: string | null;
+  date: string | null;
+  prevClose: number | null;
+  currentPrice: number | null;
+  changePercent: number | null;
+  points: IntradayPoint[];
+}
+
 export interface KlinePoint {
   date: string;
   open: number;

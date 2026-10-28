@@ -2,6 +2,8 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { prisma } from '../lib/prisma';
 
 const WATCHLIST_KEY = 'watchlist';
+const DESKTOP_KEY = 'desktop';
+const MAX_ORDER_LENGTH = 200;
 
 export type WatchlistIndexItem = {
   code: string;
@@ -34,6 +36,16 @@ export type WatchlistPayload = {
   indexCategories: WatchlistCategory[];
   marketConfigs: WatchlistMarketConfig[];
 };
+
+// 桌面看板（/desktop.html）的显示偏好；顺序独立于 UHT 栏目，不影响主界面
+export type DesktopPayload = {
+  hideAmounts: boolean;
+  holdingsOrder: string[];
+  marketOrder: string[];
+  background: string; // 背景主题 id，由 desktop.html 定义
+};
+
+const DEFAULT_DESKTOP_BACKGROUND = 'mountain';
 
 type AppPreferenceRow = {
   key: string;
@@ -135,23 +147,48 @@ export const parseWatchlistPayload = (
   };
 };
 
+const isCodeList = (value: unknown): value is string[] =>
+  Array.isArray(value) &&
+  value.length <= MAX_ORDER_LENGTH &&
+  value.every((item) => typeof item === 'string' && item.trim() !== '');
+
+export const parseDesktopPayload = (value: unknown): DesktopPayload | null => {
+  if (!isRecord(value)) return null;
+  const { hideAmounts, holdingsOrder, marketOrder, background } = value;
+  if (
+    typeof hideAmounts !== 'boolean' ||
+    !isCodeList(holdingsOrder) ||
+    !isCodeList(marketOrder) ||
+    (background !== undefined &&
+      (typeof background !== 'string' || !/^[a-z0-9-]{1,32}$/.test(background)))
+  ) {
+    return null;
+  }
+  return {
+    hideAmounts,
+    holdingsOrder,
+    marketOrder,
+    background: background ?? DEFAULT_DESKTOP_BACKGROUND,
+  };
+};
+
 const toIso = (value: Date | string): string =>
   value instanceof Date ? value.toISOString() : new Date(value).toISOString();
 
-const readWatchlist = async (): Promise<{
-  payload: WatchlistPayload;
-  updatedAt: string;
-} | null> => {
+const readPreference = async <T>(
+  key: string,
+  parse: (value: unknown) => T | null
+): Promise<{ payload: T; updatedAt: string } | null> => {
   const rows = await prisma.$queryRaw<AppPreferenceRow[]>`
     SELECT "key", "value", "updatedAt"
     FROM "AppPreference"
-    WHERE "key" = ${WATCHLIST_KEY}
+    WHERE "key" = ${key}
   `;
   const row = rows[0];
   if (!row) return null;
 
   try {
-    const payload = parseWatchlistPayload(JSON.parse(row.value));
+    const payload = parse(JSON.parse(row.value));
     if (!payload) return null;
     return { payload, updatedAt: toIso(row.updatedAt) };
   } catch {
@@ -159,20 +196,26 @@ const readWatchlist = async (): Promise<{
   }
 };
 
-const writeWatchlist = async (
-  payload: WatchlistPayload
-): Promise<{ payload: WatchlistPayload; updatedAt: string }> => {
+const writePreference = async <T>(
+  key: string,
+  payload: T
+): Promise<{ payload: T; updatedAt: string }> => {
   const now = new Date().toISOString();
   const value = JSON.stringify(payload);
   await prisma.$executeRaw`
     INSERT INTO "AppPreference" ("key", "value", "updatedAt")
-    VALUES (${WATCHLIST_KEY}, ${value}, ${now})
+    VALUES (${key}, ${value}, ${now})
     ON CONFLICT("key") DO UPDATE SET
       "value" = excluded."value",
       "updatedAt" = excluded."updatedAt"
   `;
   return { payload, updatedAt: now };
 };
+
+const readWatchlist = () =>
+  readPreference(WATCHLIST_KEY, parseWatchlistPayload);
+const writeWatchlist = (payload: WatchlistPayload) =>
+  writePreference(WATCHLIST_KEY, payload);
 
 const router = Router();
 
@@ -210,6 +253,35 @@ router.put(
       ...stored.payload,
       updatedAt: stored.updatedAt,
     });
+  })
+);
+
+router.get(
+  '/desktop',
+  asyncHandler(async (_req: Request, res: Response) => {
+    const stored = await readPreference(DESKTOP_KEY, parseDesktopPayload);
+    if (!stored) {
+      res.json({ exists: false });
+      return;
+    }
+    res.json({ exists: true, ...stored.payload, updatedAt: stored.updatedAt });
+  })
+);
+
+router.put(
+  '/desktop',
+  asyncHandler(async (req: Request, res: Response) => {
+    const payload = parseDesktopPayload(req.body);
+    if (!payload) {
+      res.status(400).json({
+        message:
+          'desktop payload is invalid: hideAmounts (boolean), holdingsOrder and marketOrder (code arrays) are required',
+      });
+      return;
+    }
+
+    const stored = await writePreference(DESKTOP_KEY, payload);
+    res.json({ exists: true, ...stored.payload, updatedAt: stored.updatedAt });
   })
 );
 

@@ -904,6 +904,57 @@ export const openApiDocument: UhtOpenApiDocument = {
         },
       },
     },
+    '/market/intraday': {
+      get: {
+        tags: ['Market'],
+        summary: '获取当日分时数据',
+        description:
+          '每分钟一个点（交易所当地时间），附昨收作为基准线；美股为最近一个交易日。',
+        parameters: [
+          {
+            name: 'code',
+            in: 'query',
+            required: true,
+            schema: { type: 'string' },
+            example: 'sh600519',
+          },
+        ],
+        responses: {
+          '200': {
+            description: '成功返回分时数据；上游失败时 points 为空数组',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    code: { type: 'string' },
+                    name: { type: 'string', nullable: true },
+                    date: { type: 'string', format: 'date', nullable: true },
+                    prevClose: { type: 'number', nullable: true },
+                    currentPrice: { type: 'number', nullable: true },
+                    changePercent: { type: 'number', nullable: true },
+                    points: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          time: { type: 'string', example: '09:30' },
+                          price: { type: 'number' },
+                          cumulativeVolume: { type: 'number' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          '400': {
+            description: '缺少或非法的 code',
+          },
+        },
+      },
+    },
     '/source-health': {
       get: {
         tags: ['Source'],

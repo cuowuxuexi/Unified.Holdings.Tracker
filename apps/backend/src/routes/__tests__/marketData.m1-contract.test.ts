@@ -1,11 +1,16 @@
 import express from 'express';
 import request from 'supertest';
 import marketDataRouter from '../marketData';
-import { fetchQuotes, fetchKline } from '../../services/tencentApi';
+import {
+  fetchQuotes,
+  fetchKline,
+  fetchIntraday,
+} from '../../services/tencentApi';
 
 jest.mock('../../services/tencentApi', () => ({
   fetchQuotes: jest.fn(),
   fetchKline: jest.fn(),
+  fetchIntraday: jest.fn(),
 }));
 
 function createTestApp() {
@@ -125,5 +130,51 @@ describe('market data M1 contract', () => {
     expect(invalidCount.status).toBe(400);
     expect(invalidCount.body.errors[0].code).toBe('invalid_count');
     expect(fetchKline).not.toHaveBeenCalled();
+  });
+
+  it('returns intraday points with prevClose from the quote', async () => {
+    (fetchIntraday as jest.Mock).mockResolvedValue({
+      code: 'hk00700',
+      date: '2026-10-28',
+      points: [{ time: '09:30', price: 384, cumulativeVolume: 510600 }],
+    });
+    (fetchQuotes as jest.Mock).mockResolvedValue([
+      {
+        code: 'hk00700',
+        name: '腾讯控股',
+        currentPrice: 388.6,
+        prevClosePrice: 385.2,
+        changePercent: 0.88,
+        changeAmount: 3.4,
+      },
+    ]);
+
+    const response = await request(createTestApp()).get(
+      '/api/market/intraday?code=HK00700'
+    );
+
+    expect(response.status).toBe(200);
+    expect(fetchIntraday).toHaveBeenCalledWith('hk00700');
+    expect(response.body).toMatchObject({
+      code: 'hk00700',
+      name: '腾讯控股',
+      date: '2026-10-28',
+      prevClose: 385.2,
+      currentPrice: 388.6,
+    });
+    expect(response.body.points).toHaveLength(1);
+  });
+
+  it('rejects intraday requests with missing or invalid code', async () => {
+    const missing = await request(createTestApp()).get('/api/market/intraday');
+    expect(missing.status).toBe(400);
+    expect(missing.body.errors[0].code).toBe('missing_code');
+
+    const invalid = await request(createTestApp()).get(
+      '/api/market/intraday?code=bad'
+    );
+    expect(invalid.status).toBe(400);
+    expect(invalid.body.errors[0].code).toBe('invalid_code');
+    expect(fetchIntraday).not.toHaveBeenCalled();
   });
 });

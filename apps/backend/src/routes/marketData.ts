@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from 'express';
-import { fetchQuotes, fetchKline } from '../services/tencentApi';
+import { fetchQuotes, fetchKline, fetchIntraday } from '../services/tencentApi';
 import { Quote, KlinePoint } from '../types';
 
 const router = Router();
@@ -413,6 +413,49 @@ router.get(
         buildDiagnosticWarnings(missing, [])
       )
     );
+  })
+);
+
+// GET /api/market/intraday?code=sh600519
+// 当日分时 + 昨收（用作基准线），桌面看板点选标的时使用
+router.get(
+  '/intraday',
+  asyncHandler(async (req: Request, res: Response): Promise<void> => {
+    const rawCode = queryString(req.query.code);
+    if (!rawCode) {
+      sendValidationError(
+        res,
+        false,
+        'Missing required query parameter: code',
+        [{ code: 'missing_code', message: 'Query parameter code is required.' }]
+      );
+      return;
+    }
+
+    const parsedCode = normalizeMarketCode(rawCode);
+    if (!parsedCode.ok) {
+      sendValidationError(res, false, 'Invalid market code format', [
+        {
+          code: 'invalid_code',
+          message: 'The requested market code failed format validation.',
+          details: { invalid: [parsedCode.invalid] },
+        },
+      ]);
+      return;
+    }
+
+    const [intraday, quotes] = await Promise.all([
+      fetchIntraday(parsedCode.code),
+      fetchQuotes([parsedCode.code]),
+    ]);
+    const quote = quotes.find((item) => item.code === parsedCode.code);
+    res.json({
+      ...intraday,
+      name: quote?.name ?? null,
+      prevClose: quote?.prevClosePrice ?? null,
+      currentPrice: quote?.currentPrice ?? null,
+      changePercent: quote?.changePercent ?? null,
+    });
   })
 );
 
