@@ -476,6 +476,14 @@
       }
 
       /* 背景选择面板 */
+      /* 双击空白处只看壁纸；状态不存偏好，每块屏各管各的 */
+      #canvas {
+        transition: opacity 0.4s;
+      }
+      body.bare #canvas {
+        opacity: 0;
+        pointer-events: none;
+      }
       #picker {
         position: absolute;
         inset: 0;
@@ -1048,8 +1056,26 @@
         glow(g, W * 0.92, H * 0.95, H * 0.65, 'rgba(0,190,170,0.10)', W, H);
       }
 
+      // 图片背景：按 cover 铺满，加载完成前先画素色
+      const beiming = new Image();
+      beiming.src = 'bg-beiming.jpg';
+      beiming.onload = () => {
+        drawBackground();
+        if (!$('picker').hidden) openPicker();
+      };
+      function drawBeiming(g, W, H) {
+        if (!beiming.complete || !beiming.naturalWidth)
+          return drawPlain(g, W, H);
+        const s = Math.max(W / beiming.naturalWidth, H / beiming.naturalHeight);
+        const w = beiming.naturalWidth * s;
+        const h = beiming.naturalHeight * s;
+        g.drawImage(beiming, (W - w) / 2, (H - h) / 2, w, h);
+        vignette(g, W, H, 0.25);
+      }
+
       const THEMES = [
         { id: 'mountain', name: '夜色远山', draw: drawMountain },
+        { id: 'beiming', name: '北冥有鱼', draw: drawBeiming },
         { id: 'aurora', name: '极光', draw: drawAurora },
         { id: 'galaxy', name: '星河', draw: drawGalaxy },
         { id: 'dusk', name: '暮色', draw: drawDusk },
@@ -1504,6 +1530,14 @@
       }
 
       $('bgBtn').addEventListener('click', openPicker);
+
+      document.addEventListener('dblclick', (e) => {
+        if (document.body.classList.contains('bare')) {
+          document.body.classList.remove('bare');
+        } else if (!e.target.closest('.panel, .eye')) {
+          document.body.classList.add('bare');
+        }
+      });
 
       $('eye').addEventListener('click', () => {
         state.prefs.hideAmounts = !state.prefs.hideAmounts;
